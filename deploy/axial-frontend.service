@@ -1,0 +1,15 @@
+[Unit]
+Description=Axial — Frontend (Next.js)
+After=network.target
+
+[Service]
+Type=simple
+User=axial
+WorkingDirectory=/opt/axial-intelligence/frontend
+# Le build a déjà été fait avec NEXT_PUBLIC_API_URL (cf. DEPLOY.md) — ici on ne fait que servir.
+ExecStart=/usr/bin/npm run start -- -p 3005
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

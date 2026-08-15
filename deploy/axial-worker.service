@@ -1,0 +1,15 @@
+[Unit]
+Description=Axial — Veille worker (agents de veille programmés)
+After=network.target axial-backend.service
+
+[Service]
+Type=simple
+User=axial
+WorkingDirectory=/opt/axial-intelligence
+Environment=PYTHONPATH=/opt/axial-intelligence
+ExecStart=/usr/bin/doppler run --config prd -- /opt/axial-intelligence/.venv/bin/python -m worker.main
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

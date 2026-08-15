@@ -1,0 +1,18 @@
+[Unit]
+Description=Axial — Qdrant vector store
+After=network.target
+
+[Service]
+Type=simple
+User=axial
+WorkingDirectory=/opt/axial-intelligence
+Environment=QDRANT__SERVICE__HTTP_PORT=6355
+Environment=QDRANT__SERVICE__GRPC_PORT=6356
+Environment=QDRANT__STORAGE__STORAGE_PATH=/opt/axial-intelligence/data/qdrant-server
+Environment=QDRANT__TELEMETRY_DISABLED=true
+ExecStart=/opt/axial-intelligence/bin/qdrant
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

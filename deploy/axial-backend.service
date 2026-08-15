@@ -1,0 +1,16 @@
+[Unit]
+Description=Axial — Backend API (FastAPI/uvicorn)
+After=network.target axial-qdrant.service
+
+[Service]
+Type=simple
+User=axial
+WorkingDirectory=/opt/axial-intelligence
+Environment=PYTHONPATH=/opt/axial-intelligence
+# Secrets via Doppler (config prd). `doppler configure` doit être fait dans ce dossier au préalable.
+ExecStart=/usr/bin/doppler run --config prd -- /opt/axial-intelligence/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8090
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

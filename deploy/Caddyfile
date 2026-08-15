@@ -1,0 +1,20 @@
+# --- Axial (nouvelle app) — à AJOUTER à ton Caddyfile existant ---
+# L'ancienne app garde son propre bloc. HTTPS auto (Let's Encrypt) par Caddy.
+#
+# Front Next.js sur :3005, backend FastAPI sur :8090.
+# /api/* → backend (préfixe /api retiré : /api/auth/login → backend /auth/login).
+# tout le reste → front.
+
+app.axial-ia.com {
+	encode zstd gzip
+
+	# API : /api/* → backend (strip du préfixe)
+	handle_path /api/* {
+		reverse_proxy 127.0.0.1:8090
+	}
+
+	# Front : tout le reste → Next.js
+	handle {
+		reverse_proxy 127.0.0.1:3005
+	}
+}

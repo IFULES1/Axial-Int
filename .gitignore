@@ -1,0 +1,42 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Node / Next.js
+node_modules/
+.next/
+frontend/.next/
+
+# Binaires natifs (re-téléchargés sur la cible selon l'OS)
+bin/qdrant
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+# Data / artifacts
+*.log
+/data/
+*.bundle
+*.bak
+*.bak.*
+
+# Base de connaissance : ignorer les documents (lourds/licence), garder la structure
+data/knowledge_base/**
+!data/knowledge_base/
+!data/knowledge_base/**/
+!data/knowledge_base/README.md
+!data/knowledge_base/manifest.csv
+!data/knowledge_base/**/.gitkeep
+data/qdrant/

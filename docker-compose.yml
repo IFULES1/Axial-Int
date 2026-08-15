@@ -1,0 +1,36 @@
+# Minimal local infrastructure for development.
+# The app itself runs via `make run` (or its own image in prod). Only backing
+# services are containerized here. Nothing is exposed beyond localhost.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: axial
+      POSTGRES_PASSWORD: axial
+      POSTGRES_DB: axial
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U axial"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    ports:
+      - "127.0.0.1:6333:6333"
+    volumes:
+      - qdrantdata:/qdrant/storage
+
+  # PII sidecar is added in P6; declared here (commented) for reference.
+  # presidio:
+  #   build: ./sidecars/presidio
+  #   ports:
+  #     - "127.0.0.1:8010:8010"
+
+volumes:
+  pgdata:
+  qdrantdata:
