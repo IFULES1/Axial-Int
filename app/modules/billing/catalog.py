@@ -1,7 +1,8 @@
 """Credit costs and plan catalog (product spec V1).
 
 Costs are canonical per analysis type; legacy aliases map onto them so old
-clients keep working. Plans mirror the 5-tier pricing grid.
+clients keep working. Plans: Free Beta (0€), Pro (50€), Premium (90€),
+Enterprise (custom). Pay-as-you-go packs live in stripe_gateway.CREDIT_PACKS.
 """
 from __future__ import annotations
 
@@ -37,10 +38,10 @@ PLANS: list[dict] = [
     {"key": "free_beta", "name": "Free Beta", "price_eur": 0, "period": "month",
      "monthly_credits": 20, "seats": 1,
      "features": ["Découverte", "export PDF"]},
-    {"key": "solo_founder", "name": "Pro", "price_eur": 50, "period": "month",
+    {"key": "pro", "name": "Pro", "price_eur": 50, "period": "month",
      "monthly_credits": 120, "seats": 1,
      "features": ["Workspace", "2 agents", "templates (fundraising, ICP, GTM, mapping)"]},
-    {"key": "startup_pro", "name": "Premium", "price_eur": 90, "period": "month",
+    {"key": "premium", "name": "Premium", "price_eur": 90, "period": "month",
      "monthly_credits": 250, "seats": 2,
      "features": ["Tout Pro", "jusqu'à 10 agents personnalisés", "mémoire avancée"]},
     {"key": "enterprise", "name": "Enterprise", "price_eur": None, "period": "custom",

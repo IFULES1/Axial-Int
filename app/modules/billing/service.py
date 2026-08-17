@@ -1,8 +1,15 @@
 """Billing service: balance lifecycle, atomic credit consumption, grants.
 
-New users are lazily initialised with the Free Beta grant (120 credits / 14 days).
+New users are lazily initialised with the Free Beta grant (20 credits / 14 days).
 Consumption is atomic: the balance row is locked FOR UPDATE so concurrent
-analyses can't double-spend. Order: trial (expiring) → free → purchased.
+analyses can't double-spend. Order: trial (expiring) → free (monthly plan) →
+purchased (PAYG, never expire).
+
+Credit buckets:
+  * trial_credits     — Free Beta welcome grant, expires after FREE_BETA_DAYS.
+  * free_credits      — monthly subscription allowance; RESET (not added) on each
+                        Stripe invoice so plan credits renew monthly and don't stack.
+  * purchased_credits — pay-as-you-go packs; never expire, accumulate.
 """
 from __future__ import annotations
 
@@ -16,7 +23,7 @@ from app.errors import AppError
 from app.modules.billing.catalog import cost_for
 from app.modules.billing.models import CreditBalance
 
-FREE_BETA_CREDITS = 120
+FREE_BETA_CREDITS = 20
 FREE_BETA_DAYS = 14
 
 
@@ -108,9 +115,24 @@ def consume_credits(db: Session, user_id: str, action: str,
 
 
 def grant_purchased(db: Session, user_id: str, amount: int) -> CreditBalance:
-    """Add purchased credits (e.g. from a Stripe webhook). Never expire."""
+    """Add PAYG pack credits (from a Stripe checkout). Never expire, accumulate."""
     balance = get_or_create_balance(db, user_id)
     balance.purchased_credits += amount
+    db.commit()
+    db.refresh(balance)
+    return balance
+
+
+def grant_subscription(db: Session, user_id: str, monthly_credits: int) -> CreditBalance:
+    """Set the monthly plan allowance (from a Stripe invoice.paid).
+
+    SETS free_credits to the plan amount rather than adding, so subscription
+    credits renew each month and don't stack — matching the product promise
+    ("les crédits inclus se renouvellent chaque mois et ne s'accumulent pas").
+    PAYG (purchased) credits are untouched.
+    """
+    balance = get_or_create_balance(db, user_id)
+    balance.free_credits = monthly_credits
     db.commit()
     db.refresh(balance)
     return balance

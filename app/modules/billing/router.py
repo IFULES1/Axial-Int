@@ -77,6 +77,12 @@ async def webhook(request: Request, db: Session = Depends(get_db)) -> dict:
     signature = request.headers.get("stripe-signature", "")
     grant = stripe_gateway.parse_webhook(payload, signature)
     if grant:
-        service.grant_purchased(db, grant["user_id"], grant["credits"])
-        return {"granted": grant["credits"], "user_id": grant["user_id"]}
+        if grant.get("kind") == "subscription":
+            # Monthly allowance: reset (renew), don't accumulate.
+            service.grant_subscription(db, grant["user_id"], grant["credits"])
+        else:
+            # PAYG pack: accumulate, never expire.
+            service.grant_purchased(db, grant["user_id"], grant["credits"])
+        return {"granted": grant["credits"], "user_id": grant["user_id"],
+                "kind": grant.get("kind", "pack")}
     return {"ignored": True}

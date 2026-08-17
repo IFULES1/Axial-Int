@@ -19,8 +19,16 @@ def test_cost_canonical_and_aliases():
 
 def test_plans_present():
     keys = {p["key"] for p in PLANS}
-    assert keys == {"free_beta", "solo_founder", "startup_pro", "enterprise"}
+    assert keys == {"free_beta", "pro", "premium", "enterprise"}
     assert cost_for("run_agent_veille") == 5
+
+
+def test_free_beta_grant_matches_catalog():
+    """New-user grant must match the Free Beta plan allowance (product decision)."""
+    from app.modules.billing.service import FREE_BETA_CREDITS
+
+    free_beta = next(p for p in PLANS if p["key"] == "free_beta")
+    assert FREE_BETA_CREDITS == free_beta["monthly_credits"] == 20
 
 
 def test_pdf_is_generated():

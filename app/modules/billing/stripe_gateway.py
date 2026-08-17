@@ -16,7 +16,7 @@ logger = logging.getLogger("axial.billing.stripe")
 # One-time credit packs (credits, price in cents).
 CREDIT_PACKS: dict[str, dict] = {
     "starter": {"credits": 50, "amount_cents": 2000, "label": "Starter — 50 crédits"},
-    "pro": {"credits": 100, "amount_cents": 4000, "label": "Pro — 100 crédits"},
+    "boost": {"credits": 100, "amount_cents": 4000, "label": "Boost — 100 crédits"},
     "scale": {"credits": 200, "amount_cents": 8000, "label": "Scale — 200 crédits"},
 }
 
@@ -106,16 +106,19 @@ def parse_webhook(payload: bytes, signature: str) -> dict | None:
     etype = event["type"]
     obj = event["data"]["object"]
 
-    # One-time credit packs → grant on checkout completion.
+    # One-time PAYG packs → grant on checkout completion (accumulate).
     if etype == "checkout.session.completed":
         # Subscriptions are credited via invoice.paid (fires for the 1st payment AND
         # every renewal), so skip subscription-mode checkouts to avoid double-granting.
         if obj.get("mode") == "subscription":
             return None
         meta = obj.get("metadata") or {}
-        return {"user_id": meta["user_id"], "credits": int(meta.get("credits", 0))} if meta.get("user_id") else None
+        if not meta.get("user_id"):
+            return None
+        return {"user_id": meta["user_id"], "credits": int(meta.get("credits", 0)),
+                "kind": "pack"}
 
-    # Subscriptions (first payment + monthly renewals) → grant the plan's credits.
+    # Subscriptions (first payment + monthly renewals) → reset the plan allowance.
     if etype == "invoice.paid":
         sub_id = obj.get("subscription")
         if not sub_id:
@@ -125,6 +128,9 @@ def parse_webhook(payload: bytes, signature: str) -> dict | None:
         except Exception:
             logger.warning("invoice.paid: subscription %s introuvable", sub_id, exc_info=True)
             return None
-        return {"user_id": meta["user_id"], "credits": int(meta.get("credits", 0))} if meta.get("user_id") else None
+        if not meta.get("user_id"):
+            return None
+        return {"user_id": meta["user_id"], "credits": int(meta.get("credits", 0)),
+                "kind": "subscription"}
 
     return None

@@ -6,7 +6,7 @@ pouvoir les **exporter en PDF**, avec l'identité visuelle Axial.
 
 ## Filigrane (watermark) — exigence
 - **Image de marque Axial** (fond dégradé bleu/violet + logo AXIAL « AI at the axis of Time »
-  + triangles filaires + mention `© AXIAL, 2025. Tous droits réservés. www.axial-ia.com`).
+  + triangles filaires + mention `© AXIAL, 2025. Tous droits réservés. www.axial-ia.fr`).
 - Appliqué en **filigrane pleine page** sur chaque page du PDF exporté.
 - **Grammage transparent** : opacité faible (viser ~8–15 %) pour rester lisible sous
   le texte du rapport, sans gêner la lecture.

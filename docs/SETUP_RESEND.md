@@ -10,7 +10,7 @@ Bonne nouvelle : **Resend expose un endpoint SMTP**, donc il se branche sur notr
 
 ### 2. Choisir l'expéditeur (2 options)
 - **Test rapide** : utiliser le domaine bac à sable `onboarding@resend.dev` (aucune config DNS, mais n'envoie qu'à ta propre adresse vérifiée).
-- **Production** : ajouter **ton domaine** (`axial-ia.com`) dans Resend → il te donne des enregistrements **DNS** (SPF, DKIM, éventuellement DMARC) à poser chez ton registrar/hébergeur DNS. Une fois vérifié, tu peux envoyer depuis `veille@axial-ia.com`.
+- **Production** : ajouter **ton domaine** (`axial-ia.fr`) dans Resend → il te donne des enregistrements **DNS** (SPF, DKIM, éventuellement DMARC) à poser chez ton registrar/hébergeur DNS. Une fois vérifié, tu peux envoyer depuis `veille@axial-ia.fr`.
 
 ### 3. Créer une clé API
 - Dashboard Resend → **API Keys** → *Create* → copier la clé (commence par `re_…`).
@@ -18,7 +18,7 @@ Bonne nouvelle : **Resend expose un endpoint SMTP**, donc il se branche sur notr
 ### 4. Poser les secrets dans Doppler
 Resend SMTP : hôte `smtp.resend.com`, port `587`, utilisateur littéral `resend`, mot de passe = la clé API.
 ```bash
-doppler secrets set SMTP_HOST="smtp.resend.com" SMTP_PORT="587" SMTP_USER="resend" SMTP_FROM="veille@axial-ia.com"
+doppler secrets set SMTP_HOST="smtp.resend.com" SMTP_PORT="587" SMTP_USER="resend" SMTP_FROM="veille@axial-ia.fr"
 # le mot de passe (= clé API) : à faire toi-même
 doppler secrets set SMTP_PASSWORD
 # (colle la clé re_... quand il la demande)

@@ -20,8 +20,25 @@ class Base(DeclarativeBase):
 
 _settings = get_settings()
 
+
+def _normalize_db_url(url: str) -> str:
+    """Force the psycopg v3 driver for Postgres URLs.
+
+    Supabase hands out `postgresql://…` (and some tools `postgres://…`), which
+    SQLAlchemy maps to psycopg2 by default — but we ship psycopg v3. Rewriting the
+    scheme keeps SQLite URLs (dev) untouched.
+    """
+    if url.startswith("postgresql+"):
+        return url
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url[len("postgresql://"):]
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url[len("postgres://"):]
+    return url
+
+
 engine = create_engine(
-    _settings.database_url,
+    _normalize_db_url(_settings.database_url),
     pool_pre_ping=True,
     future=True,
 )

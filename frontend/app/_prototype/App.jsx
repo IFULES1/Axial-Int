@@ -496,7 +496,7 @@ const STRINGS = {
 
     'reports.quota.title': 'Crédits insuffisants',
     'reports.quota.body': 'Ce rapport demande plus de crédits que ce qu\'il vous reste ce mois-ci. Deux options.',
-    'reports.quota.upgrade': 'Passer à Strateg',
+    'reports.quota.upgrade': 'Passer à Pro',
     'reports.quota.topup': 'Recharger ponctuellement',
     'reports.quota.usage': 'Consommation du mois',
 
@@ -540,7 +540,7 @@ const STRINGS = {
     'credits.breakdown': 'Répartition',
     'credits.plan': 'Plan',
     'credits.plan.beta': 'Beta · Gratuit',
-    'credits.plan.next': 'Strateg — 49 €/mois',
+    'credits.plan.next': 'Pro — 50 €/mois',
 
     // settings
     'settings.title': 'Paramètres',
@@ -572,7 +572,7 @@ const STRINGS = {
     // landing (public)
     'landing.nav.product': 'Produit',
     'landing.nav.how': 'Comment ça marche',
-    'landing.nav.trust': 'Sources',
+    'landing.nav.trust': 'Confiance',
     'landing.nav.pricing': 'Tarifs',
     'landing.nav.signin': 'Se connecter',
     'landing.nav.start': 'Commencer',
@@ -695,7 +695,7 @@ const STRINGS = {
 
     'reports.quota.title': 'Out of credits',
     'reports.quota.body': 'This report needs more credits than you have left this month. Two paths.',
-    'reports.quota.upgrade': 'Move to Strateg',
+    'reports.quota.upgrade': 'Move to Pro',
     'reports.quota.topup': 'One-time top-up',
     'reports.quota.usage': 'This month',
 
@@ -736,7 +736,7 @@ const STRINGS = {
     'credits.breakdown': 'Breakdown',
     'credits.plan': 'Plan',
     'credits.plan.beta': 'Beta · Free',
-    'credits.plan.next': 'Strateg — €49/mo',
+    'credits.plan.next': 'Pro — €50/mo',
 
     'settings.title': 'Settings',
     'settings.personal': 'Personal',
@@ -766,7 +766,7 @@ const STRINGS = {
     // landing (public)
     'landing.nav.product': 'Product',
     'landing.nav.how': 'How it works',
-    'landing.nav.trust': 'Sources',
+    'landing.nav.trust': 'Trust',
     'landing.nav.pricing': 'Pricing',
     'landing.nav.signin': 'Sign in',
     'landing.nav.start': 'Get started',
@@ -1070,6 +1070,25 @@ function LandingLangPill() {
 
 function LandingPage({ onCTAStart, onCTASignIn }) {
   const t = window.useT();
+  const isFR = (window.AXIAL_LANG || 'fr') === 'fr';
+  const pricingPlans = [
+    { name: 'Free Beta', price: '0 €', per: isFR ? '/mois' : '/mo',
+      credits: isFR ? '20 crédits / mois' : '20 credits / mo',
+      features: isFR ? ['Découverte', 'Export PDF', '1 siège'] : ['Discovery', 'PDF export', '1 seat'],
+      tag: null, cta: 'start' },
+    { name: 'Pro', price: '50 €', per: isFR ? '/mois' : '/mo',
+      credits: isFR ? '120 crédits / mois' : '120 credits / mo',
+      features: isFR ? ['Workspace', '2 agents de veille', 'Templates (fundraising, ICP, GTM)'] : ['Workspace', '2 monitoring agents', 'Templates (fundraising, ICP, GTM)'],
+      tag: isFR ? 'POPULAIRE' : 'POPULAR', cta: 'start' },
+    { name: 'Premium', price: '90 €', per: isFR ? '/mois' : '/mo',
+      credits: isFR ? '250 crédits / mois · 2 sièges' : '250 credits / mo · 2 seats',
+      features: isFR ? ['Tout Pro', "Jusqu'à 10 agents", 'Mémoire avancée'] : ['Everything in Pro', 'Up to 10 agents', 'Advanced memory'],
+      tag: null, cta: 'start' },
+    { name: 'Enterprise', price: isFR ? 'Sur devis' : 'Custom', per: '',
+      credits: isFR ? 'Multi-startups, équipe' : 'Multi-startup, team',
+      features: isFR ? ['Signaux portefeuille', 'Accès équipe', 'Support dédié'] : ['Portfolio signals', 'Team access', 'Dedicated support'],
+      tag: null, cta: 'contact' },
+  ];
   return (
     <div className="page">
       <div className="bg-radial" />
@@ -1154,6 +1173,67 @@ function LandingPage({ onCTAStart, onCTASignIn }) {
             </li>
           ))}
         </ol>
+      </section>
+
+      <section id="trust" style={{ maxWidth: 1180, margin: '80px auto 40px', padding: '0 32px' }}>
+        <div style={{ textAlign: 'center', marginBottom: 48 }}>
+          <div className="eyebrow" style={{ marginBottom: 14 }}>{isFR ? 'CONFIANCE' : 'TRUST'}</div>
+          <h2 style={{ fontSize: 38, margin: 0, letterSpacing: '-0.02em', fontWeight: 700, lineHeight: 1.15 }}>
+            {isFR ? 'Vos données restent les vôtres.' : 'Your data stays yours.'}
+          </h2>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 18 }}>
+          {[
+            { icon: 'key', t: isFR ? 'Cloisonnement par compte' : 'Scoped to your account',
+              b: isFR ? 'Votre mémoire et vos documents ne sont jamais partagés ni indexés pour d’autres utilisateurs.' : 'Your memory and documents are never shared or indexed for other users.' },
+            { icon: 'database', t: isFR ? 'Jamais d’entraînement' : 'Never used for training',
+              b: isFR ? 'Vos données ne servent jamais à entraîner un modèle, ni pour Axial ni pour un tiers.' : 'Your data is never used to train a model, for Axial or any third party.' },
+            { icon: 'cpu', t: isFR ? 'Hébergement européen' : 'European hosting',
+              b: isFR ? 'Base et authentification Supabase en région UE, sur infrastructure dédiée.' : 'Supabase database and auth in an EU region, on dedicated infrastructure.' },
+            { icon: 'zap', t: isFR ? 'Sources traçables' : 'Traceable sources',
+              b: isFR ? 'Chaque analyse cite ses sources : rien n’est affirmé sans référence vérifiable.' : 'Every analysis cites its sources — nothing is asserted without a verifiable reference.' },
+          ].map((c) => (
+            <article key={c.t} className="card" style={{ padding: 24 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: 'rgba(121,118,247,0.10)', border: '1px solid var(--border)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--v-soft)', marginBottom: 14 }}>
+                <Icon name={c.icon} size={18} />
+              </div>
+              <h3 style={{ fontSize: 15, fontWeight: 700, margin: '0 0 6px' }}>{c.t}</h3>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--fg-2)', lineHeight: 1.55 }}>{c.b}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section id="pricing" style={{ maxWidth: 1180, margin: '40px auto 40px', padding: '0 32px' }}>
+        <div style={{ textAlign: 'center', marginBottom: 48 }}>
+          <div className="eyebrow" style={{ marginBottom: 14 }}>{isFR ? 'TARIFS' : 'PRICING'}</div>
+          <h2 style={{ fontSize: 38, margin: 0, letterSpacing: '-0.02em', fontWeight: 700, lineHeight: 1.15 }}>
+            {isFR ? 'Abonnement mensuel, ou crédits à la carte.' : 'Monthly plans, or pay-as-you-go credits.'}
+          </h2>
+          <p style={{ color: 'var(--fg-2)', fontSize: 15, maxWidth: 560, margin: '14px auto 0', lineHeight: 1.55 }}>
+            {isFR
+              ? 'Les crédits du plan se renouvellent chaque mois. Besoin ponctuel ? Packs de 50, 100 ou 200 crédits (20/40/80 €) qui ne périment pas.'
+              : 'Plan credits renew every month. Need a top-up? One-off packs of 50, 100 or 200 credits (€20/40/80) that never expire.'}
+          </p>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 18 }}>
+          {pricingPlans.map((p) => (
+            <article key={p.name} className="card" style={{ padding: 24, position: 'relative', display: 'flex', flexDirection: 'column', ...(p.tag ? { borderColor: 'var(--v-soft)' } : {}) }}>
+              {p.tag && <div className="mono" style={{ position: 'absolute', top: 16, right: 16, fontSize: 9.5, color: 'var(--v-soft)', letterSpacing: '0.12em', fontWeight: 700 }}>{p.tag}</div>}
+              <h3 style={{ fontSize: 16, fontWeight: 700, margin: '0 0 10px' }}>{p.name}</h3>
+              <div style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.02em', marginBottom: 2 }}>
+                {p.price}<span style={{ fontSize: 13, color: 'var(--fg-3)', fontWeight: 500 }}>{p.per}</span>
+              </div>
+              <div className="mono" style={{ fontSize: 11.5, color: 'var(--v-soft)', marginBottom: 14 }}>{p.credits}</div>
+              <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 18px', fontSize: 12.5, color: 'var(--fg-2)', lineHeight: 1.7, flex: 1 }}>
+                {p.features.map((f, j) => <li key={j}><Icon name="check" size={12} /> {f}</li>)}
+              </ul>
+              {p.cta === 'contact'
+                ? <a className="btn btn-secondary btn-block" style={{ textAlign: 'center' }} href="mailto:sales@axial-ia.fr">{isFR ? 'Nous contacter' : 'Contact us'}</a>
+                : <button className={p.tag ? 'btn btn-primary btn-block' : 'btn btn-secondary btn-block'} onClick={onCTAStart}>{isFR ? 'Commencer' : 'Get started'}</button>}
+            </article>
+          ))}
+        </div>
       </section>
 
       <section style={{ textAlign: 'center', padding: '80px 32px 100px', maxWidth: 720, margin: '0 auto' }}>
@@ -2390,51 +2470,33 @@ function ReportsQuota({ onClose }) {
       </div>
       <div className="quota-card">
         <div className="quota-usage">
-          <h3>{t('reports.quota.usage')}</h3>
-          <div className="big">2 481<small> / 2 500 {lang === 'fr' ? 'crédits' : 'credits'}</small></div>
-          <div style={{ fontSize: 12.5, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)' }}>
-            {lang === 'fr' ? '19 crédits restants · renouvellement le 1er du mois' : '19 credits left · renews on the 1st'}
-          </div>
-          <div className="breakdown">
-            <div className="quota-bar-row">
-              <span className="lbl">{lang === 'fr' ? 'Rapports' : 'Reports'}</span>
-              <div className="quota-bar"><div className="quota-bar-fill" style={{ width: '78%' }}></div></div>
-              <span className="num">1 932</span>
-            </div>
-            <div className="quota-bar-row">
-              <span className="lbl">{lang === 'fr' ? 'Conversations' : 'Conversations'}</span>
-              <div className="quota-bar"><div className="quota-bar-fill" style={{ width: '14%' }}></div></div>
-              <span className="num">348</span>
-            </div>
-            <div className="quota-bar-row">
-              <span className="lbl">{lang === 'fr' ? 'Agents' : 'Agents'}</span>
-              <div className="quota-bar"><div className="quota-bar-fill" style={{ width: '8%' }}></div></div>
-              <span className="num">201</span>
-            </div>
-          </div>
+          <h3>{t('reports.quota.title')}</h3>
+          <p style={{ fontSize: 13.5, color: 'var(--fg-2)', lineHeight: 1.6, margin: '6px 0 0' }}>
+            {t('reports.quota.body')}
+          </p>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div className="quota-option featured">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <h3>Strateg</h3>
+              <h3>Pro</h3>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--v-soft)', letterSpacing: '0.10em', textTransform: 'uppercase', fontWeight: 700 }}>{lang === 'fr' ? 'Recommandé' : 'Recommended'}</span>
             </div>
-            <div className="price">49 €<small>/{lang === 'fr' ? 'mois' : 'mo'}</small></div>
+            <div className="price">50 €<small>/{lang === 'fr' ? 'mois' : 'mo'}</small></div>
             <ul>
-              <li><Icon name="check" size={13} className="check" />15 000 {lang === 'fr' ? 'crédits' : 'credits'} / {lang === 'fr' ? 'mois' : 'mo'}</li>
-              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? 'Agents persistants' : 'Persistent agents'}</li>
-              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? 'Export PDF + Word' : 'PDF + Word export'}</li>
-              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? 'Mémoire prioritaire' : 'Priority memory'}</li>
+              <li><Icon name="check" size={13} className="check" />120 {lang === 'fr' ? 'crédits' : 'credits'} / {lang === 'fr' ? 'mois' : 'mo'}</li>
+              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? '2 agents de veille' : '2 monitoring agents'}</li>
+              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? 'Templates (fundraising, ICP, GTM)' : 'Templates (fundraising, ICP, GTM)'}</li>
+              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? 'Export PDF' : 'PDF export'}</li>
             </ul>
             <button className="btn btn-primary" style={{ marginTop: 4 }}>{t('reports.quota.upgrade')}</button>
           </div>
 
           <div className="quota-option">
             <h3>{lang === 'fr' ? 'Recharge ponctuelle' : 'One-time top-up'}</h3>
-            <div className="price">9 €<small>{lang === 'fr' ? ' · 500 crédits' : ' · 500 credits'}</small></div>
+            <div className="price">20 €<small>{lang === 'fr' ? ' · 50 crédits' : ' · 50 credits'}</small></div>
             <p style={{ fontSize: 12.5, color: 'var(--fg-2)', margin: 0, lineHeight: 1.5 }}>
-              {lang === 'fr' ? 'Crédits consommables sur le mois en cours uniquement. Pas de report.' : 'Credits usable this month only. No carry-over.'}
+              {lang === 'fr' ? 'Packs ponctuels (50, 100 ou 200 crédits) qui ne périment pas.' : 'One-off packs (50, 100 or 200 credits) that never expire.'}
             </p>
             <button className="btn btn-secondary" style={{ marginTop: 4 }}>{t('reports.quota.topup')}</button>
           </div>
@@ -3195,7 +3257,7 @@ function CreditsSurface() {
               ? <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => subscribe(p.key)} disabled={busy === 'plan-' + p.key}>
                   {busy === 'plan-' + p.key ? '…' : (lang === 'fr' ? "S'abonner" : 'Subscribe')}
                 </button>
-              : <a className="btn btn-secondary" style={{ width: '100%', textAlign: 'center' }} href="mailto:sales@axial-ia.com">{lang === 'fr' ? 'Nous contacter' : 'Contact us'}</a>}
+              : <a className="btn btn-secondary" style={{ width: '100%', textAlign: 'center' }} href="mailto:sales@axial-ia.fr">{lang === 'fr' ? 'Nous contacter' : 'Contact us'}</a>}
           </div>
         ))}
       </div>
@@ -4176,108 +4238,124 @@ function DocsMemory({ isFR }) {
 function DocsCredits({ isFR }) {
   const plans = isFR ? [
     {
-      name: 'Solo',
+      name: 'Free Beta',
       price: '0\u00a0\u20ac',
-      sub: 'pour explorer',
-      credits: '500 / mois',
+      sub: 'pour d\u00e9couvrir',
+      credits: '20 / mois',
       features: [
-        'Conversations illimit\u00e9es',
-        '1 rapport / mois',
-        'M\u00e9moire jusqu\u2019\u00e0 25 faits',
-        '1 agent inclus',
+        'D\u00e9couverte',
+        'Export PDF',
+        '1 si\u00e8ge',
       ],
       tag: null,
     },
     {
-      name: 'Founder',
-      price: '49\u00a0\u20ac',
+      name: 'Pro',
+      price: '50\u00a0\u20ac',
       sub: 'par mois',
-      credits: '5 000 / mois',
+      credits: '120 / mois',
       features: [
-        'Conversations illimit\u00e9es',
-        '10 rapports / mois',
-        'M\u00e9moire illimit\u00e9e',
-        '5 agents inclus',
-        'Partage par lien',
+        'Workspace',
+        '2 agents',
+        'Templates (fundraising, ICP, GTM, mapping)',
+        '1 si\u00e8ge',
       ],
       tag: 'POPULAIRE',
     },
     {
-      name: 'Team',
-      price: '199\u00a0\u20ac',
-      sub: 'par si\u00e8ge & par mois',
-      credits: '25 000 / mois mutualis\u00e9s',
+      name: 'Premium',
+      price: '90\u00a0\u20ac',
+      sub: 'par mois',
+      credits: '250 / mois',
       features: [
-        'Tout Founder',
-        'Espaces de travail partag\u00e9s',
-        'Agents personnalis\u00e9s illimit\u00e9s',
-        'Audit log',
-        'Support prioritaire',
+        'Tout Pro',
+        "Jusqu'\u00e0 10 agents personnalis\u00e9s",
+        'M\u00e9moire avanc\u00e9e',
+        '2 si\u00e8ges',
+      ],
+      tag: null,
+    },
+    {
+      name: 'Enterprise',
+      price: 'Sur devis',
+      sub: '\u00e9quipe & multi-startups',
+      credits: 'Cr\u00e9dits sur mesure',
+      features: [
+        'Workspace multi-startups',
+        'Signaux portefeuille',
+        'Acc\u00e8s \u00e9quipe',
       ],
       tag: null,
     },
   ] : [
     {
-      name: 'Solo',
+      name: 'Free Beta',
       price: '\u20ac0',
       sub: 'to explore',
-      credits: '500 / month',
+      credits: '20 / month',
       features: [
-        'Unlimited conversations',
-        '1 report / month',
-        'Memory up to 25 facts',
-        '1 agent included',
+        'Discovery',
+        'PDF export',
+        '1 seat',
       ],
       tag: null,
     },
     {
-      name: 'Founder',
-      price: '\u20ac49',
+      name: 'Pro',
+      price: '\u20ac50',
       sub: 'per month',
-      credits: '5,000 / month',
+      credits: '120 / month',
       features: [
-        'Unlimited conversations',
-        '10 reports / month',
-        'Unlimited memory',
-        '5 agents included',
-        'Link sharing',
+        'Workspace',
+        '2 agents',
+        'Templates (fundraising, ICP, GTM, mapping)',
+        '1 seat',
       ],
       tag: 'POPULAR',
     },
     {
-      name: 'Team',
-      price: '\u20ac199',
-      sub: 'per seat / month',
-      credits: '25,000 / month pooled',
+      name: 'Premium',
+      price: '\u20ac90',
+      sub: 'per month',
+      credits: '250 / month',
       features: [
-        'Everything in Founder',
-        'Shared workspaces',
-        'Unlimited custom agents',
-        'Audit log',
-        'Priority support',
+        'Everything in Pro',
+        'Up to 10 custom agents',
+        'Advanced memory',
+        '2 seats',
+      ],
+      tag: null,
+    },
+    {
+      name: 'Enterprise',
+      price: 'Custom',
+      sub: 'team & multi-startup',
+      credits: 'Custom credits',
+      features: [
+        'Multi-startup workspace',
+        'Portfolio signals',
+        'Team access',
       ],
       tag: null,
     },
   ];
 
   const costs = isFR ? [
-    { action: 'Question simple en conversation', cost: '~5 cr\u00e9dits' },
-    { action: 'Question avec recherche de sources', cost: '~25 cr\u00e9dits' },
-    { action: 'Rapport profondeur Scan (5\u201310 sources)', cost: '~150 cr\u00e9dits' },
-    { action: 'Rapport profondeur Standard (15\u201325 sources)', cost: '~400 cr\u00e9dits' },
-    { action: 'Rapport profondeur Deep (40+ sources)', cost: '~900 cr\u00e9dits' },
-    { action: 'Session d\u2019agent (forfait)', cost: '~600 cr\u00e9dits' },
+    { action: 'Message \u00e0 un agent (conversation)', cost: '2 cr\u00e9dits' },
+    { action: 'Run d\u2019un agent de veille (RSS + web + LLM)', cost: '5 cr\u00e9dits' },
+    { action: 'Analyse concurrentielle / risques / veille techno', cost: '25 cr\u00e9dits' },
+    { action: 'Synth\u00e8se ex\u00e9cutive', cost: '25 cr\u00e9dits' },
+    { action: '\u00c9tude de march\u00e9 (rapport complet)', cost: '40 cr\u00e9dits' },
     { action: 'Mise \u00e0 jour de m\u00e9moire', cost: '0 cr\u00e9dit' },
-    { action: 'Lecture d\u2019un rapport partag\u00e9', cost: '0 cr\u00e9dit' },
+    { action: 'Lecture d\u2019un rapport', cost: '0 cr\u00e9dit' },
   ] : [
-    { action: 'Simple question in conversation', cost: '~5 credits' },
-    { action: 'Question with source retrieval', cost: '~25 credits' },
-    { action: 'Report \u2014 Scan depth (5\u201310 sources)', cost: '~150 credits' },
-    { action: 'Report \u2014 Standard depth (15\u201325 sources)', cost: '~400 credits' },
-    { action: 'Report \u2014 Deep depth (40+ sources)', cost: '~900 credits' },
-    { action: 'Agent session (flat)', cost: '~600 credits' },
+    { action: 'Message to an agent (conversation)', cost: '2 credits' },
+    { action: 'Monitoring-agent run (RSS + web + LLM)', cost: '5 credits' },
+    { action: 'Competitive / risk / tech-watch analysis', cost: '25 credits' },
+    { action: 'Executive summary', cost: '25 credits' },
+    { action: 'Market study (full report)', cost: '40 credits' },
     { action: 'Memory update', cost: '0 credits' },
-    { action: 'Reading a shared report', cost: '0 credits' },
+    { action: 'Reading a report', cost: '0 credits' },
   ];
 
   return (
@@ -4323,7 +4401,9 @@ function DocsCredits({ isFR }) {
               ))}
             </ul>
             <button className={p.tag ? 'btn btn-primary btn-block' : 'btn btn-secondary btn-block'}>
-              {p.tag ? (isFR ? 'Choisir Founder' : 'Choose Founder') : (isFR ? 'Choisir' : 'Choose')}
+              {p.price === 'Sur devis' || p.price === 'Custom'
+                ? (isFR ? 'Nous contacter' : 'Contact us')
+                : (isFR ? `Choisir ${p.name}` : `Choose ${p.name}`)}
             </button>
           </article>
         ))}
