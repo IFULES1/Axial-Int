@@ -6,10 +6,10 @@
 ## Noté le 18/08/2026
 
 ### Parcours & données
-- [ ] **Purger toutes les données mockées** de l'app — l'utilisateur doit faire son parcours de A à Z avec ses vraies informations uniquement.
+- [x] **Purger toutes les données mockées** *(fait 18/08 : MOCK_USER/MOCK_CONVERSATIONS supprimés, fallback neutre, suggestions personnalisées depuis le vrai profil)*
 - [ ] **Onboarding ↔ Mémoire alignés** : demander à l'onboarding exactement les mêmes informations que celles de l'onglet Mémoire (constat : les infos saisies à l'onboarding ne se retrouvent pas ensuite dans la mémoire) + **chargement de documents dès l'onboarding**.
-- [ ] **Inverser les étapes 3 et 4** de l'onboarding (carte avant la première question).
-- [ ] **Ne pas lancer d'analyse automatiquement** après l'onboarding.
+- [x] **Inverser les étapes 3 et 4** *(fait 18/08 : Contexte → Démo → Activation (carte) → Première analyse ; profil sauvegardé dès l'étape 2)*
+- [x] **Ne pas lancer d'analyse automatiquement** *(fait 18/08 : la question suggérée pré-remplit le composer, l'utilisateur envoie lui-même)*
 
 ### Crédits & facturation
 - [ ] Onglet **Crédits** : afficher le **plan actuel** de l'utilisateur + la **date du prochain prélèvement**.
@@ -20,8 +20,11 @@
 - [ ] **Réagencer la page Documentation** pour la rendre lisible.
 
 ### Notifications & paramètres
-- [ ] **Notifications par email** à mettre en place ; **supprimer** les types « mentions » et « commentaires ».
-- [ ] Paramètres > Espace de travail : **retirer « Membres »** pour le moment (reviendra avec la mise en place des sièges).
+- [ ] **Notifications par email** à mettre en place *(la partie « supprimer mentions/commentaires » est faite le 18/08 ; reste le backend d'envoi réel)*.
+- [x] Paramètres > Espace de travail : **retirer « Membres »** *(fait 18/08)*
+
+### Légal (ouvert le 18/08)
+- [ ] **Compléter les mentions légales** (`frontend/app/legal/mentions/page.tsx`) : forme juridique, capital, adresse du siège, SIREN/RCS, directeur de la publication — puis faire valider CGU + confidentialité par un juriste.
 
 ## Déjà en file (sessions précédentes)
 - [ ] Refresh token frontend (401 silencieux après ~1h) — gardé pour la fin sur décision du 17/08.

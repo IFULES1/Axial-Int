@@ -11,76 +11,6 @@ const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 /* data.js */
 /* data.js — mock state for the prototype */
 
-const MOCK_USER = {
-  name: 'Maya Lefebvre',
-  email: 'maya@hapster.io',
-  initials: 'ML',
-  company: 'Hapster',
-  sector: 'SaaS B2B',
-  stage: 'Seed',
-  challenge: 'Comprendre mon marché et mes concurrents',
-  geo: 'France · Europe',
-};
-
-const MOCK_CONVERSATIONS = [
-  {
-    id: 'c-1',
-    title: 'Analyse GTM Europe Q2',
-    lastUpdated: '3 jours',
-    messages: [
-      { role: 'user', content: "Quels sont les 3 leviers GTM les plus efficaces pour un SaaS B2B Seed qui se lance en France et au DACH ?" },
-      {
-        role: 'ai',
-        content: [
-          "Pour un SaaS B2B au stade Seed visant France + DACH, trois leviers ressortent comme statistiquement plus efficaces que la moyenne en 2025\u201326",
-          { cite: 1 },
-          ".\n\n",
-          "1. Inbound technique sur niches verticales — payback médian 9 mois sur le segment SMB-mid-market",
-          { cite: 2 },
-          ". Privilégier la documentation, les guides comparatifs et le SEO produit plutôt que le brand content généraliste.\n\n",
-          "2. Founder-led outbound LinkedIn — taux de réponse 3,4× supérieur aux séquences automatisées sur le persona « Head of Ops » dans le DACH",
-          { cite: 3 },
-          ".\n\n",
-          "3. Partenariats canal sur l'écosystème intégrateur — encore sous-exploité par les startups françaises sur le marché allemand. Cycle plus long mais ACV 1,8× supérieur.\n\nÀ ce stade, je recommande de concentrer 70 % du budget GTM sur un seul levier pendant les 6 prochains mois plutôt que de tester les trois en parallèle."
-        ],
-        sources: [
-          { id: 1, title: "OpenView 2025 SaaS Benchmarks", excerpt: "Bottoms-up SaaS sales motions outperform sales-led GTM in early-stage by 22% on payback period when targeting verticals with clear technical buyer personas.", link: "https://openviewpartners.com/2025-saas-benchmarks", source: "OpenView · Industry report · Apr 2025" },
-          { id: 2, title: "Bessemer State of the Cloud 2025", excerpt: "Median CAC payback for inbound-driven Seed-stage B2B SaaS is 9 months in EU markets vs. 14 months for sales-led counterparts.", link: "https://www.bvp.com/atlas/state-of-the-cloud-2025", source: "Bessemer Venture Partners · 2025" },
-          { id: 3, title: "Lemlist DACH Outbound Report Q4 2024", excerpt: "Founder-led LinkedIn outreach to operations leaders in German-speaking markets sees a 3.4x lift in reply rate vs. SDR-sent sequences when paired with personalized first lines.", link: "https://lemlist.com/dach-outbound-2024", source: "Lemlist · Outbound benchmarks · Q4 2024" }
-        ]
-      }
-    ]
-  },
-  {
-    id: 'c-2',
-    title: 'Risques réglementaires IA France',
-    lastUpdated: '1 jour',
-    messages: [
-      { role: 'user', content: "Quels sont les risques réglementaires majeurs pour un SaaS qui intègre des modèles GenAI sur le marché français ?" },
-      {
-        role: 'ai',
-        content: [
-          "Trois axes réglementaires à instruire en priorité",
-          { cite: 1 },
-          ".\n\n",
-          "1. EU AI Act — les obligations « système IA à risque limité » entrent en vigueur progressivement entre août 2025 et août 2026",
-          { cite: 2 },
-          ". Pour un SaaS B2B, l'enjeu principal est la transparence sur les contenus générés et l'information de l'utilisateur final.\n\n",
-          "2. Cadre CNIL — la doctrine française sur l'entraînement de modèles avec des données personnelles s'est durcie en 2024 (recommandations du 8 avril 2024)",
-          { cite: 3 },
-          ". Vérifier la base légale et la documentation de votre fournisseur GenAI.\n\n",
-          "3. Responsabilité contractuelle — vos clients enterprise vous demanderont quasi-systématiquement des garanties sur les hallucinations et les fuites de prompt en 2026.\n\nÀ ce stade, formaliser un AI policy document avant de signer un premier client mid-market me paraît un investissement à fort levier."
-        ],
-        sources: [
-          { id: 1, title: "Régulation IA en France — Panorama 2026", excerpt: "Synthèse des cadres applicables aux SaaS intégrant des modèles génératifs sur le territoire français et européen, version d'avril 2026.", link: "https://www.cnil.fr/fr/intelligence-artificielle/panorama-2026", source: "CNIL · Avril 2026" },
-          { id: 2, title: "EU AI Act — Calendrier d'entrée en vigueur", excerpt: "Les obligations applicables aux systèmes d'IA à risque limité s'imposent par paliers entre août 2025 et août 2026, avec une obligation de marquage des contenus générés.", link: "https://artificialintelligenceact.eu/timeline", source: "Commission européenne · Calendrier officiel" },
-          { id: 3, title: "Recommandations CNIL — Entraînement de modèles", excerpt: "Sept fiches pratiques pour qualifier la base légale et documenter la conformité d'un dispositif d'entraînement avec données personnelles.", link: "https://www.cnil.fr/fr/ia-fiches-pratiques", source: "CNIL · 8 avril 2024" }
-        ]
-      }
-    ]
-  }
-];
-
 const SUGGESTED_PROMPTS = [
   "Mes 3 concurrents directs sur le SaaS RH en France",
   "Combien lever en Série A pour un SaaS Seed à 1,2M ARR",
@@ -88,7 +18,7 @@ const SUGGESTED_PROMPTS = [
   "Comment positionner un produit IA face à un incumbent",
 ];
 
-window.AXIAL_DATA = { MOCK_USER, MOCK_CONVERSATIONS, SUGGESTED_PROMPTS };
+window.AXIAL_DATA = { SUGGESTED_PROMPTS };
 
 
 
@@ -1677,7 +1607,7 @@ function OnbStep3({ ctx, onLaunch, onBack }) {
   }, [ctx]);
 
   return (
-    <OnbShell step={3} onBack={onBack}
+    <OnbShell step={4}
       title="Prêt. Voici votre première analyse."
       sub="Lancez votre première analyse maintenant.">
       <article className="first-action-card">
@@ -1729,7 +1659,7 @@ function OnbStep3({ ctx, onLaunch, onBack }) {
 
 /* ----- Shared shell ----- */
 function OnbShell({ step, title, sub, children, onNext, onBack, canNext = true }) {
-  const labels = ['Contexte', 'Démo', 'Première analyse', 'Activation'];
+  const labels = ['Contexte', 'Démo', 'Activation', 'Première analyse'];
   return (
     <div className="page onb-shell">
       <div className="bg-radial" />
@@ -1784,7 +1714,7 @@ function OnbStep4({ onBack }) {
   };
 
   return (
-    <OnbShell step={4} onBack={onBack}
+    <OnbShell step={3} onBack={onBack}
       title="Activez votre essai."
       sub="20 crédits offerts pendant 14 jours — aucun débit aujourd'hui.">
       <article className="first-action-card">
@@ -2005,7 +1935,15 @@ function ConvListPanel({ conversations, activeId, onPick, onNew }) {
    Empty state — no conversation selected
    ============================================================ */
 function EmptyConvState({ onSend, suggestedPrompts }) {
-  const [draft, setDraft] = useConvState('');
+  // La question suggérée de l'onboarding pré-remplit le composer (jamais
+  // envoyée automatiquement — l'utilisateur garde la main).
+  const [draft, setDraft] = useConvState(() => {
+    try {
+      const seed = localStorage.getItem('axial_seed_q');
+      if (seed) { localStorage.removeItem('axial_seed_q'); return seed; }
+    } catch (e) {}
+    return '';
+  });
 
   return (
     <div className="thread-region">
@@ -3478,7 +3416,7 @@ function SettingsSurface() {
   const lang = window.AXIAL_LANG || 'fr';
   const [theme, setTheme] = window.useTheme();
   const [tab, setTab] = useStateM('account');
-  const [notif, setNotif] = useStateM({ findings: true, weekly: true, mention: true, marketing: false });
+  const [notif, setNotif] = useStateM({ findings: true, weekly: true, marketing: false });
 
   const tabs = [
     { group: t('settings.personal'), items: [
@@ -3487,7 +3425,6 @@ function SettingsSurface() {
       { id: 'appearance', label: t('settings.appearance'), icon: 'palette' },
     ]},
     { group: t('settings.workspace'), items: [
-      { id: 'members', label: t('settings.members'), icon: 'users' },
       { id: 'models', label: t('settings.models'), icon: 'cpu' },
       { id: 'connections', label: t('settings.connections'), icon: 'plug' },
       { id: 'billing', label: t('settings.billing'), icon: 'zap' },
@@ -3554,7 +3491,6 @@ function SettingsSurface() {
               {[
                 ['findings', lang === 'fr' ? 'Trouvailles d\'agents' : 'Agent findings', lang === 'fr' ? 'Email immédiat dès qu\'un agent publie une trouvaille à confiance haute.' : 'Immediate email when an agent publishes a high-confidence finding.'],
                 ['weekly', lang === 'fr' ? 'Récap hebdomadaire' : 'Weekly recap', lang === 'fr' ? 'Lundi matin. Résumé des conversations, rapports et trouvailles.' : 'Monday morning. Summary of conversations, reports, findings.'],
-                ['mention', lang === 'fr' ? 'Mentions et commentaires' : 'Mentions and comments', lang === 'fr' ? 'Quand un collaborateur vous mentionne sur un rapport partagé.' : 'When a teammate mentions you on a shared report.'],
                 ['marketing', lang === 'fr' ? 'Nouvelles fonctionnalités' : 'New features', lang === 'fr' ? 'Annonces produit Axial. Une fois par mois maximum.' : 'Axial product announcements. Once a month max.'],
               ].map(([k, label, desc]) => (
                 <div key={k} className="settings-row">
@@ -3589,37 +3525,6 @@ function SettingsSurface() {
             </>
           )}
 
-          {tab === 'members' && (
-            <>
-              <h2>{t('settings.members')}</h2>
-              <p>{lang === 'fr' ? 'Membres de votre espace de travail.' : 'Members of your workspace.'}</p>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                <input type="email" placeholder={lang === 'fr' ? 'email@entreprise.com' : 'email@company.com'} style={{ ...inputStyle, flex: 1 }} />
-                <select className="role-select"><option>{t('share.role.editor')}</option><option>{t('share.role.viewer')}</option></select>
-                <button className="btn btn-primary">{t('common.invite')}</button>
-              </div>
-              <div>
-                {window.AXIAL_SURFACES.SETTINGS_MEMBERS.map((m) => (
-                  <div key={m.email} className="member-row">
-                    <div className="member-info">
-                      <div className="member-avatar">{m.avatar}</div>
-                      <div>
-                        <div className="member-name">{m.name}</div>
-                        <div className="member-email">{m.email}</div>
-                      </div>
-                    </div>
-                    <select className="role-select" defaultValue={m.role} disabled={m.role === 'owner'}>
-                      <option value="owner">{lang === 'fr' ? 'Propriétaire' : 'Owner'}</option>
-                      <option value="admin">{lang === 'fr' ? 'Admin' : 'Admin'}</option>
-                      <option value="editor">{t('share.role.editor')}</option>
-                      <option value="viewer">{t('share.role.viewer')}</option>
-                    </select>
-                    <button className="icon-btn"><Icon name="x" size={14} /></button>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
 
           {tab === 'models' && (
             <>
@@ -5134,7 +5039,7 @@ function App() {
     }
     if (onb === 'done') {
       try { localStorage.removeItem('axial_onb_card_pending'); } catch (e) {}
-      go('app');
+      go('onb3');  // carte posée → dernière étape : la première analyse
       return;
     }
     let cardPending = false;
@@ -5142,25 +5047,29 @@ function App() {
     if (cardPending) { go('onb4'); return; }
     axMe().then((u) => go(u.onboarding_complete ? 'app' : 'onb1')).catch(() => axClearToken());
   }, []);
+  const [suggested, setSuggested] = useState(window.AXIAL_DATA.SUGGESTED_PROMPTS);
   useEffect(() => {
     if (route === 'app') {
+      // Suggestions construites depuis le VRAI profil (nom, défi, stade) —
+      // les génériques ne servent que de repli tant que le profil est vide.
+      axGetProfile().then((pr) => {
+        if (!pr || !(pr.company_name || pr.sector)) return;
+        const who = pr.company_name || `ma startup ${pr.sector || ''}`.trim();
+        const stage = pr.funding_stage || 'Seed';
+        const qs = [
+          `Quels sont les concurrents directs de ${who} et comment se différencier ?`,
+          `Quel levier GTM ${who} devrait-elle prioriser en ${stage} ?`,
+          `Comment ${who} doit-elle préparer sa prochaine levée : montant, timing, fonds à cibler ?`,
+          pr.main_challenge ? `Par où attaquer : « ${pr.main_challenge} » ?` : `Quels risques ${who} doit-elle anticiper cette année ?`,
+        ];
+        setSuggested(qs);
+      }).catch(() => {});
       axBalance().then((b) => setAxBal(b.available)).catch(() => {});
       axMe().then((u) => {
         const nm = u.full_name || u.email;
         const initials = nm.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join('');
-        setAxUser({ ...window.AXIAL_DATA.MOCK_USER, name: nm, email: u.email, initials });
+        setAxUser({ name: nm, email: u.email, initials });
       }).catch(() => {});
-    }
-  }, [route]);
-  // Première question mise de côté à l'étape 3 (avant la redirection Stripe) :
-  // la lancer une seule fois en arrivant dans l'app.
-  useEffect(() => {
-    if (route !== 'app') return;
-    let seed = null;
-    try { seed = localStorage.getItem('axial_seed_q'); } catch (e) {}
-    if (seed) {
-      try { localStorage.removeItem('axial_seed_q'); } catch (e) {}
-      handleSendNew(seed);
     }
   }, [route]);
   const [reportsState, setReportsState] = useState('empty'); // empty | generating | editor | quota
@@ -5262,36 +5171,39 @@ function App() {
     />;
   }
   if (route === 'onb2') {
-    return <OnbStep2 ctx={onbCtx} onBack={() => go('onb1')} onNext={() => go('onb3')} />;
+    return <OnbStep2 ctx={onbCtx} onBack={() => go('onb1')} onNext={async () => {
+      // Le profil est sauvegardé AVANT l'étape carte (redirection Stripe),
+      // pour que la mémoire soit complète quoi qu'il arrive ensuite.
+      try {
+        await axSaveProfile({
+          company_name: onbCtx.companyName || null,
+          website: onbCtx.website || null,
+          positioning: onbCtx.positioning || null,
+          sector: onbCtx.sector || null,
+          funding_stage: onbCtx.stage || null,
+          main_challenge: onbCtx.challenge || null,
+          target_market: onbCtx.geo || null,
+        });
+      } catch (e) { /* non bloquant */ }
+      go('onb4');
+    }} />;
   }
   if (route === 'onb3') {
     return <OnbStep3
       ctx={onbCtx}
-      onBack={() => go('onb2')}
-      onLaunch={async (seedQ) => {
-        try {
-          await axSaveProfile({
-            company_name: onbCtx.companyName || null,
-            website: onbCtx.website || null,
-            positioning: onbCtx.positioning || null,
-            sector: onbCtx.sector || null,
-            funding_stage: onbCtx.stage || null,
-            main_challenge: onbCtx.challenge || null,
-            target_market: onbCtx.geo || null,
-          });
-        } catch (e) { /* non-blocking: still continue onboarding */ }
-        // La question est lancée APRÈS l'étape carte (redirection Stripe) —
-        // on la met de côté pour la retrouver au retour.
+      onLaunch={(seedQ) => {
+        // Jamais de lancement automatique : la question suggérée PRÉ-REMPLIT
+        // le composer, l'utilisateur décide d'envoyer.
         try {
           if (seedQ) localStorage.setItem('axial_seed_q', seedQ);
           else localStorage.removeItem('axial_seed_q');
         } catch (e) {}
-        go('onb4');
+        go('app');
       }}
     />;
   }
   if (route === 'onb4') {
-    return <OnbStep4 onBack={() => go('onb3')} />;
+    return <OnbStep4 onBack={() => go('onb2')} />;
   }
 
   if (route === 'recipient') {
@@ -5331,7 +5243,7 @@ function App() {
   return (
     <>
       <AppShell
-        user={axUser || window.AXIAL_DATA.MOCK_USER}
+        user={axUser || { name: '', email: '', initials: '·' }}
         conversations={conversations}
         activeId={activeId}
         onPickConv={(id) => { setSubRoute('conversations'); setActiveId(id); }}
@@ -5353,7 +5265,7 @@ function App() {
             onSendInActive={handleSendInActive}
             onSendNew={handleSendNew}
             onNewChat={() => { setActiveId(null); }}
-            suggestedPrompts={window.AXIAL_DATA.SUGGESTED_PROMPTS}
+            suggestedPrompts={suggested}
             streamingSpeed={tweaks.streamingSpeed}
             showCitePanelFor={showCitePanelFor}
             setShowCitePanelFor={setShowCitePanelFor}
