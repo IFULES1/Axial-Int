@@ -1258,6 +1258,11 @@ function LandingPage({ onCTAStart, onCTASignIn }) {
         <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 11 }}>
           {t('landing.footer.note')}
         </span>
+        <span style={{ display: 'inline-flex', gap: 14, fontSize: 11 }}>
+          <a href="/legal/cgu" style={{ color: 'var(--fg-3)' }}>CGU</a>
+          <a href="/legal/confidentialite" style={{ color: 'var(--fg-3)' }}>Confidentialité</a>
+          <a href="/legal/mentions" style={{ color: 'var(--fg-3)' }}>Mentions légales</a>
+        </span>
       </footer>
     </div>
   );
@@ -1400,7 +1405,7 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
 
         <p className="auth-foot">
           {mode === 'signup' ? (
-            <>En créant un compte, vous acceptez nos <a href="#" style={{ color: 'var(--v-soft)' }}>Conditions</a> et notre <a href="#" style={{ color: 'var(--v-soft)' }}>Politique de confidentialité</a>.</>
+            <>En créant un compte, vous acceptez nos <a href="/legal/cgu" target="_blank" rel="noopener" style={{ color: 'var(--v-soft)' }}>Conditions</a> et notre <a href="/legal/confidentialite" target="_blank" rel="noopener" style={{ color: 'var(--v-soft)' }}>Politique de confidentialité</a>.</>
           ) : (
             <>Pas encore de compte ? <a href="#" style={{ color: 'var(--v-soft)' }}
               onClick={(e) => { e.preventDefault(); setMode('signup'); }}>Créer un compte</a></>
