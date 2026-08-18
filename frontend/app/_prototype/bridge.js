@@ -84,13 +84,22 @@ export async function axCheckout(pack) {
     body: { pack, success_url: base + "/?paid=1", cancel_url: base + "/" },
   });
 }
-/** Start a recurring monthly subscription checkout; returns { checkout_url }. */
-export async function axSubscribe(plan) {
+/** Start a recurring monthly subscription checkout; returns { checkout_url }.
+ * trial=true (onboarding step 4): card collected now, first debit after 14 days. */
+export async function axSubscribe(plan, trial = false) {
   const base = (typeof window !== "undefined" && window.location) ? window.location.origin : "";
   return axFetch("/billing/subscribe", {
     method: "POST",
-    body: { plan, success_url: base + "/?subscribed=1", cancel_url: base + "/" },
+    body: {
+      plan, trial,
+      success_url: base + (trial ? "/?onb=done" : "/?subscribed=1"),
+      cancel_url: base + (trial ? "/?onb=cancel" : "/"),
+    },
   });
+}
+/** Onboarding: extract {company_name, positioning, sector, website} from a site. */
+export async function axPrefill(url) {
+  return axFetch("/memory/prefill", { method: "POST", body: { url } });
 }
 
 // --- chat / analysis (Workspace) ---

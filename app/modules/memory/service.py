@@ -10,6 +10,7 @@ from app.modules.memory.models import CompanyProfile
 # Fields rendered into the injected context, with human labels.
 _CONTEXT_FIELDS: list[tuple[str, str]] = [
     ("company_name", "Entreprise"),
+    ("website", "Site web"),
     ("sector", "Secteur"),
     ("positioning", "Positionnement"),
     ("founding_year", "Année de création"),
@@ -80,3 +81,84 @@ def build_context(db: Session, user_id: str) -> str:
     if not lines:
         return ""
     return "## Contexte entreprise (mémoire)\n" + "\n".join(lines)
+
+
+# --- Onboarding prefill: read the company website, extract profile fields ---
+
+_PREFILL_SYSTEM = (
+    "Tu extrais des informations factuelles depuis le site web d'une startup. "
+    "Réponds UNIQUEMENT avec un objet JSON, sans texte autour."
+)
+
+_PREFILL_PROMPT = """Voici le texte de la page d'accueil du site {url} :
+
+---
+{page_text}
+---
+
+Extrais en JSON (valeurs en français, null si introuvable) :
+{{"company_name": "nom officiel de l'entreprise",
+  "positioning": "ce que fait l'entreprise, pour qui, en 1 phrase précise (pas un slogan)",
+  "sector": "secteur d'activité court, ex: SaaS RH, Fintech, Deeptech quantique"}}"""
+
+
+def _fetch_website_text(url: str) -> str:
+    """Fetch the homepage and return readable text (tags stripped, truncated)."""
+    import re
+
+    import httpx
+
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    resp = httpx.get(url, follow_redirects=True, timeout=10.0,
+                     headers={"User-Agent": "Mozilla/5.0 (compatible; AxialBot/1.0)"})
+    resp.raise_for_status()
+    html = resp.text
+    html = re.sub(r"(?is)<(script|style|noscript|svg)[^>]*>.*?</\1>", " ", html)
+    text = re.sub(r"(?s)<[^>]+>", " ", html)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:6000]
+
+
+def prefill_from_website(url: str) -> dict:
+    """Best-effort {company_name, positioning, sector} extracted from a website.
+
+    Raises AppError with a user-readable message when the site is unreachable
+    or the extraction fails — the frontend falls back to manual input.
+    """
+    import json as _json
+
+    from app.errors import AppError
+    from app.shared import llm_client
+
+    try:
+        page_text = _fetch_website_text(url)
+    except Exception as e:
+        raise AppError("Site injoignable — remplis les champs à la main.", 422,
+                       code="prefill_fetch_failed") from e
+    if len(page_text) < 80:
+        raise AppError("Page trop pauvre pour être analysée — remplis les champs à la main.",
+                       422, code="prefill_empty_page")
+
+    try:
+        result = llm_client.generate(
+            system=_PREFILL_SYSTEM,
+            prompt=_PREFILL_PROMPT.format(url=url, page_text=page_text),
+            tier="chat", max_tokens=400,
+        )
+        raw = result.text.strip()
+        # Tolerate ```json fences or stray prose around the object.
+        start, end = raw.find("{"), raw.rfind("}")
+        data = _json.loads(raw[start:end + 1])
+    except AppError:
+        raise
+    except Exception as e:
+        raise AppError("Extraction impossible — remplis les champs à la main.", 422,
+                       code="prefill_extract_failed") from e
+
+    return {
+        "company_name": (data.get("company_name") or None),
+        "positioning": (data.get("positioning") or None),
+        "sector": (data.get("sector") or None),
+        "website": url if url.startswith("http") else "https://" + url,
+    }

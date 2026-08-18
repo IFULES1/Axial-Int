@@ -39,13 +39,15 @@ def test_new_user_gets_free_beta(db):
 def test_finalize_charges_and_archives_on_success(db):
     uid = str(uuid.uuid4())
     billing.get_or_create_balance(db, uid)
+    # The Free Beta grant (20) doesn't cover an etude_marche (40) — top up first.
+    billing.grant_purchased(db, uid, 50)
     result = AnalysisResult(analysis_type="etude_marche", title="T", content="Corps",
                             degraded=False)
     info = analysis.finalize(db, uid, "etude_marche", result, is_admin=False)
     assert info["charged"] == 40                      # etude_marche cost
     assert info["report_id"] is not None
     bal = billing.get_or_create_balance(db, uid)
-    assert billing.available_credits(bal) == billing.FREE_BETA_CREDITS - 40
+    assert billing.available_credits(bal) == billing.FREE_BETA_CREDITS + 50 - 40
 
 
 def test_degraded_is_free_and_not_archived(db):

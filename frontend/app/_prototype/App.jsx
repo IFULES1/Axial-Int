@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axChat, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axCreateReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axChat, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axCreateReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -1435,14 +1435,58 @@ const GEOS = ['France', 'Europe', 'États-Unis', 'Monde'];
 /* ----- Step 1 ----- */
 function OnbStep1({ value, onChange, onNext }) {
   const v = value || {};
-  const ready = v.sector && v.stage && v.challenge && v.geo;
+  const ready = v.companyName && v.sector && v.stage && v.challenge && v.geo;
+  const [prefilling, setPrefilling] = React.useState(false);
+  const [prefillMsg, setPrefillMsg] = React.useState('');
+
+  const doPrefill = async () => {
+    if (!v.website || prefilling) return;
+    setPrefilling(true); setPrefillMsg('');
+    try {
+      const d = await axPrefill(v.website);
+      onChange({
+        ...v,
+        companyName: d.company_name || v.companyName,
+        positioning: d.positioning || v.positioning,
+        website: d.website || v.website,
+        // Le secteur extrait est libre (ex. "SaaS RH") — on le garde tel quel
+        // s'il n'y a pas déjà un chip sélectionné.
+        sector: v.sector || d.sector || '',
+      });
+      setPrefillMsg('Pré-rempli depuis votre site — vérifiez et corrigez si besoin.');
+    } catch (e) {
+      setPrefillMsg((e && e.message) || 'Site injoignable — remplissez à la main.');
+    }
+    setPrefilling(false);
+  };
 
   return (
     <OnbShell step={1}
-      title="Parlez-nous de votre contexte."
-      sub="Axial calibre ses réponses sur votre situation. Quatre questions, trente secondes."
+      title="Parlez-nous de votre startup."
+      sub="Axial calibre ses réponses sur votre entreprise — pas seulement votre secteur."
       onNext={onNext} canNext={!!ready}>
       <div className="onb-form">
+        <Field label="VOTRE ENTREPRISE">
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input className="input" style={{ flex: '2 1 180px' }} value={v.companyName || ''}
+                placeholder="Nom de l'entreprise *"
+                onChange={(e) => onChange({ ...v, companyName: e.target.value })} />
+              <input className="input" style={{ flex: '2 1 180px' }} value={v.website || ''}
+                placeholder="Site web (ex. axial-ia.fr)"
+                onChange={(e) => onChange({ ...v, website: e.target.value })}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); doPrefill(); } }} />
+              <button type="button" className="btn btn-secondary" onClick={doPrefill}
+                disabled={!v.website || prefilling} style={{ flex: '0 0 auto' }}>
+                {prefilling ? 'Lecture du site…' : 'Pré-remplir depuis mon site'}
+              </button>
+            </div>
+            <input className="input" value={v.positioning || ''}
+              placeholder="Positionnement en une phrase — ex. « QKD pour sécuriser les communications de drones »"
+              onChange={(e) => onChange({ ...v, positioning: e.target.value })} />
+            {prefillMsg && <p className="caption" style={{ margin: 0, color: 'var(--v-soft)' }}>{prefillMsg}</p>}
+          </div>
+        </Field>
         <Field label="VOTRE SECTEUR">
           <ChipsRow value={v.sector} options={SECTORS} onChange={(o) => onChange({ ...v, sector: o })} />
         </Field>
@@ -1460,6 +1504,8 @@ function OnbStep1({ value, onChange, onNext }) {
       <div className="onb-preview-card">
         <div className="label" style={{ marginBottom: 10 }}>CE QU'AXIAL RETIENDRA</div>
         <div className="onb-preview-row">
+          <span className="onb-preview-tag"><span className="dim">entreprise:</span> {v.companyName || '—'}</span>
+          <span className="onb-preview-tag"><span className="dim">positionnement:</span> {(v.positioning || '—').slice(0, 60)}</span>
           <span className="onb-preview-tag"><span className="dim">sector:</span> {v.sector || '—'}</span>
           <span className="onb-preview-tag"><span className="dim">stage:</span> {v.stage || '—'}</span>
           <span className="onb-preview-tag"><span className="dim">challenge:</span> {v.challenge || '—'}</span>
@@ -1505,17 +1551,13 @@ function ChipsRow({ options, value, onChange }) {
 function OnbStep2({ ctx, onNext, onBack }) {
   return (
     <OnbShell step={2}
-      title={`Voici à quoi ressemblera une analyse pour ${ctx.sector || 'votre secteur'}.`}
+      title={`Voici à quoi ressemblera une analyse pour ${ctx.companyName || ctx.sector || 'votre startup'}.`}
       sub="Deux questions instruites en moins de trente secondes. Vous pourrez les rejouer après l'onboarding."
       onNext={onNext} onBack={onBack} canNext>
       <div className="value-cards">
         <DemoCard
-          q={`Quels sont les 3 leviers GTM les plus efficaces pour un ${ctx.sector || 'SaaS B2B'} en ${ctx.stage || 'Seed'} ?`}
-          bullets={[
-            "Inbound technique sur niches verticales — payback médian 9 mois",
-            "Founder-led outbound LinkedIn — taux de réponse ×3,4 sur le DACH",
-            "Partenariats canal — ACV 1,8× supérieur, cycle plus long",
-          ]}
+          q={demo1(ctx).q}
+          bullets={demo1(ctx).bullets}
           srcs={3} time="~12 s" />
         <DemoCard
           q="Quels risques réglementaires si j'intègre des modèles GenAI ?"
@@ -1536,6 +1578,52 @@ function OnbStep2({ ctx, onNext, onBack }) {
       </div>
     </OnbShell>
   );
+}
+
+/* Carte 1 de la démo : personnalisée avec le NOM de l'entreprise + le DÉFI choisi,
+   pour montrer dès l'onboarding qu'Axial parle de VOTRE startup (pas d'un secteur). */
+function demo1(ctx) {
+  const who = ctx.companyName || `votre ${ctx.sector || 'startup'}`;
+  const stage = ctx.stage || 'Seed';
+  const c = ctx.challenge || '';
+  if (c.includes('levée')) {
+    return {
+      q: `Comment ${who} devrait-elle préparer sa prochaine levée en ${stage} ?`,
+      bullets: [
+        'Métriques attendues par les fonds à ce stade — benchmarks 2026',
+        'Fenêtre de tir et fonds actifs sur votre segment',
+        'Narratif : positionner la traction avant le produit',
+      ],
+    };
+  }
+  if (c.includes('marché')) {
+    return {
+      q: `Quels concurrents directs ${who} doit-elle surveiller en ${ctx.geo || 'France'} ?`,
+      bullets: [
+        'Cartographie des acteurs établis vs entrants récents',
+        'Levées et lancements des 12 derniers mois sur le segment',
+        'Angles de différenciation encore inoccupés',
+      ],
+    };
+  }
+  if (c.includes('régle')) {
+    return {
+      q: `Quels risques réglementaires ${who} doit-elle anticiper en 2026 ?`,
+      bullets: [
+        'Cadres applicables à votre activité — échéances 2026',
+        'Obligations déjà en vigueur vs à venir',
+        'Coût de mise en conformité vs risque de sanction',
+      ],
+    };
+  }
+  return {
+    q: `Quels sont les leviers GTM les plus pertinents pour ${who} en ${stage} ?`,
+    bullets: [
+      'Inbound technique sur niches verticales — payback médian 9 mois',
+      'Founder-led outbound LinkedIn — taux de réponse ×3,4 sur le DACH',
+      'Partenariats canal — ACV 1,8× supérieur, cycle plus long',
+    ],
+  };
 }
 
 function DemoCard({ q, bullets, srcs, time }) {
@@ -1572,18 +1660,21 @@ function DemoCard({ q, bullets, srcs, time }) {
 /* ----- Step 3 — First action ----- */
 function OnbStep3({ ctx, onLaunch, onBack }) {
   const seedQ = useOnbMemo(() => {
+    // Question construite avec le NOM + le DÉFI + le contexte — jamais générique.
+    const who = ctx.companyName || `ma startup ${ctx.sector || ''}`.trim();
+    const pos = ctx.positioning ? ` (${ctx.positioning})` : '';
     const c = ctx.challenge || '';
-    if (c.includes('marché')) return `Mes 3 concurrents directs sur le ${ctx.sector || 'SaaS'} en ${ctx.geo || 'France'}`;
-    if (c.includes('GTM')) return `Le levier GTM #1 pour un ${ctx.sector || 'SaaS'} en ${ctx.stage || 'Seed'}`;
-    if (c.includes('levée')) return `Combien lever en Série A pour un ${ctx.sector || 'SaaS'} ${ctx.stage || 'Seed'} à 1,2 M€ ARR`;
-    if (c.includes('régle')) return "Risques réglementaires majeurs sur mon marché en 2026";
-    return "Le risque #1 à instruire dans mon plan ce trimestre";
+    if (c.includes('marché')) return `Quels sont les concurrents directs de ${who}${pos} en ${ctx.geo || 'France'}, et comment se différencier ?`;
+    if (c.includes('GTM')) return `Quel levier GTM ${who}${pos} devrait-elle prioriser en ${ctx.stage || 'Seed'} ?`;
+    if (c.includes('levée')) return `Comment ${who}${pos} doit-elle préparer sa prochaine levée en ${ctx.stage || 'Seed'} : montant, timing, fonds à cibler ?`;
+    if (c.includes('régle')) return `Quels risques réglementaires ${who}${pos} doit-elle anticiper en 2026 ?`;
+    return `Quel est le risque #1 que ${who}${pos} doit instruire ce trimestre ?`;
   }, [ctx]);
 
   return (
     <OnbShell step={3} onBack={onBack}
       title="Prêt. Voici votre première analyse."
-      sub="Lancez-la maintenant — Axial vous accompagne pour les trois suivantes.">
+      sub="Lancez votre première analyse maintenant.">
       <article className="first-action-card">
         <div className="first-action-head">
           <span className="chip" style={{ background: 'rgba(121,118,247,0.10)' }}>
@@ -1633,7 +1724,7 @@ function OnbStep3({ ctx, onLaunch, onBack }) {
 
 /* ----- Shared shell ----- */
 function OnbShell({ step, title, sub, children, onNext, onBack, canNext = true }) {
-  const labels = ['Contexte', 'Démo', 'Première analyse'];
+  const labels = ['Contexte', 'Démo', 'Première analyse', 'Activation'];
   return (
     <div className="page onb-shell">
       <div className="bg-radial" />
@@ -1641,9 +1732,9 @@ function OnbShell({ step, title, sub, children, onNext, onBack, canNext = true }
       <div className="onb-progress-bar">
         <Lockup sub="Intelligence" />
         <div className="onb-progress-track">
-          <div className="onb-progress-fill" style={{ width: `${(step / 3) * 100}%` }} />
+          <div className="onb-progress-fill" style={{ width: `${(step / 4) * 100}%` }} />
         </div>
-        <span className="onb-progress-label">ÉTAPE {step} / 3 · {labels[step - 1]}</span>
+        <span className="onb-progress-label">ÉTAPE {step} / 4 · {labels[step - 1]}</span>
       </div>
 
       <main className="onb-stage">
@@ -1668,9 +1759,61 @@ function OnbShell({ step, title, sub, children, onNext, onBack, canNext = true }
   );
 }
 
+/* ----- Step 4 — Activation (carte via Stripe, essai 14 jours) ----- */
+function OnbStep4({ onBack }) {
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+
+  const start = async () => {
+    if (busy) return;
+    setBusy(true); setErr('');
+    try {
+      try { localStorage.setItem('axial_onb_card_pending', '1'); } catch (e) {}
+      const r = await axSubscribe('pro', true);
+      if (r && r.checkout_url) { window.location.href = r.checkout_url; return; }
+      throw new Error('no url');
+    } catch (e) {
+      setErr("Paiement momentanément indisponible. Réessayez dans un instant.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <OnbShell step={4} onBack={onBack}
+      title="Activez votre essai."
+      sub="20 crédits offerts pendant 14 jours — aucun débit aujourd'hui.">
+      <article className="first-action-card">
+        <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {[
+            ['check', "20 crédits offerts, utilisables dès maintenant"],
+            ['check', "0 € débité aujourd'hui — votre carte sert uniquement à activer l'essai"],
+            ['check', "Au bout de 14 jours, l'abonnement Pro démarre : 50 €/mois, 120 crédits"],
+            ['check', "Email de rappel avant le premier débit · annulation en 1 clic, à tout moment"],
+          ].map(([ic, txt], i) => (
+            <li key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.5 }}>
+              <span style={{ color: 'var(--success)', marginTop: 2 }}><Icon name={ic} size={14} /></span>
+              <span>{txt}</span>
+            </li>
+          ))}
+        </ul>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="btn btn-primary btn-lg" onClick={start} disabled={busy}>
+            {busy ? 'Redirection vers Stripe…' : 'Ajouter ma carte et commencer'} <Icon name="arrow-right" size={14} />
+          </button>
+          <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+            <Icon name="key" size={12} /> Paiement sécurisé par Stripe — Axial ne voit jamais votre carte.
+          </span>
+        </div>
+        {err && <p style={{ color: 'var(--error, #e5484d)', fontSize: 13, marginTop: 14, marginBottom: 0 }}>{err}</p>}
+      </article>
+    </OnbShell>
+  );
+}
+
 window.OnbStep1 = OnbStep1;
 window.OnbStep2 = OnbStep2;
 window.OnbStep3 = OnbStep3;
+window.OnbStep4 = OnbStep4;
 
 
 
@@ -3119,6 +3262,7 @@ function MemorySurface() {
   const lang = window.AXIAL_LANG || 'fr';
   const FIELDS = [
     { k: 'company_name', l: lang === 'fr' ? 'Entreprise' : 'Company' },
+    { k: 'website', l: lang === 'fr' ? 'Site web' : 'Website' },
     { k: 'sector', l: lang === 'fr' ? 'Secteur' : 'Sector' },
     { k: 'positioning', l: lang === 'fr' ? 'Positionnement' : 'Positioning' },
     { k: 'founding_year', l: lang === 'fr' ? 'Année de création' : 'Founding year', num: true },
@@ -4886,7 +5030,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
    Plus modal: wizard
 */
 
-const TOP_ROUTES = ['landing','auth','onb1','onb2','onb3','app','recipient'];
+const TOP_ROUTES = ['landing','auth','onb1','onb2','onb3','onb4','app','recipient'];
 
 function App() {
   const t = window.useT();
@@ -4931,12 +5075,27 @@ function App() {
   const [axBal, setAxBal] = useState(null);
   const [axUser, setAxUser] = useState(null);
   // Session persistence: if a valid token exists on load, resume into the app.
+  // Handles the return from the onboarding Stripe checkout (?onb=done|cancel):
+  // the card step is MANDATORY — until it's completed, resume lands on onb4.
   useEffect(() => {
     let tok = null;
     try { tok = localStorage.getItem('axial_token'); } catch (e) {}
-    if (tok) {
-      axMe().then((u) => go(u.onboarding_complete ? 'app' : 'onb1')).catch(() => axClearToken());
+    if (!tok) return;
+    const params = new URLSearchParams(window.location.search);
+    const onb = params.get('onb');
+    if (onb) {
+      // Clean the query string so refreshes don't replay the transition.
+      try { window.history.replaceState({}, '', window.location.pathname + window.location.hash); } catch (e) {}
     }
+    if (onb === 'done') {
+      try { localStorage.removeItem('axial_onb_card_pending'); } catch (e) {}
+      go('app');
+      return;
+    }
+    let cardPending = false;
+    try { cardPending = localStorage.getItem('axial_onb_card_pending') === '1'; } catch (e) {}
+    if (cardPending) { go('onb4'); return; }
+    axMe().then((u) => go(u.onboarding_complete ? 'app' : 'onb1')).catch(() => axClearToken());
   }, []);
   useEffect(() => {
     if (route === 'app') {
@@ -4946,6 +5105,17 @@ function App() {
         const initials = nm.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join('');
         setAxUser({ ...window.AXIAL_DATA.MOCK_USER, name: nm, email: u.email, initials });
       }).catch(() => {});
+    }
+  }, [route]);
+  // Première question mise de côté à l'étape 3 (avant la redirection Stripe) :
+  // la lancer une seule fois en arrivant dans l'app.
+  useEffect(() => {
+    if (route !== 'app') return;
+    let seed = null;
+    try { seed = localStorage.getItem('axial_seed_q'); } catch (e) {}
+    if (seed) {
+      try { localStorage.removeItem('axial_seed_q'); } catch (e) {}
+      handleSendNew(seed);
     }
   }, [route]);
   const [reportsState, setReportsState] = useState('empty'); // empty | generating | editor | quota
@@ -5056,16 +5226,27 @@ function App() {
       onLaunch={async (seedQ) => {
         try {
           await axSaveProfile({
+            company_name: onbCtx.companyName || null,
+            website: onbCtx.website || null,
+            positioning: onbCtx.positioning || null,
             sector: onbCtx.sector || null,
             funding_stage: onbCtx.stage || null,
             main_challenge: onbCtx.challenge || null,
             target_market: onbCtx.geo || null,
           });
-        } catch (e) { /* non-blocking: still enter the app */ }
-        if (seedQ) handleSendNew(seedQ);
-        go('app');
+        } catch (e) { /* non-blocking: still continue onboarding */ }
+        // La question est lancée APRÈS l'étape carte (redirection Stripe) —
+        // on la met de côté pour la retrouver au retour.
+        try {
+          if (seedQ) localStorage.setItem('axial_seed_q', seedQ);
+          else localStorage.removeItem('axial_seed_q');
+        } catch (e) {}
+        go('onb4');
       }}
     />;
+  }
+  if (route === 'onb4') {
+    return <OnbStep4 onBack={() => go('onb3')} />;
   }
 
   if (route === 'recipient') {

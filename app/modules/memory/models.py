@@ -25,6 +25,7 @@ class CompanyProfile(Base):
 
     user_id: Mapped[uuid.UUID] = mapped_column(SAUuid, primary_key=True)
     company_name: Mapped[str | None] = mapped_column(String(200))
+    website: Mapped[str | None] = mapped_column(String(300))
     positioning: Mapped[str | None] = mapped_column(Text)
     sector: Mapped[str | None] = mapped_column(String(200))
     founding_year: Mapped[int | None] = mapped_column(Integer)

@@ -56,15 +56,27 @@ def create_checkout_session(user_id: str, pack: str, success_url: str,
 
 
 def create_subscription_session(user_id: str, plan_key: str, success_url: str,
-                                cancel_url: str) -> str:
+                                cancel_url: str, trial_days: int = 0) -> str:
     """Recurring monthly subscription checkout via inline recurring price_data —
-    no Stripe Product/Price needs to be created by hand."""
+    no Stripe Product/Price needs to be created by hand.
+
+    With trial_days > 0 (onboarding step 4): the card is collected now, 0€ is
+    charged, and the first debit happens automatically at trial end. Stripe
+    sends the legally required pre-debit reminder email.
+    """
     from app.modules.billing.catalog import PLANS
 
     plan = next((p for p in PLANS if p["key"] == plan_key), None)
     if not plan or not plan.get("price_eur"):
         raise AppError("Plan inconnu ou non facturable.", 400, code="unknown_plan")
     stripe = _stripe()
+    subscription_data: dict = {
+        # Metadata on the SUBSCRIPTION too, so invoice.paid (renewals) can read it.
+        "metadata": {"user_id": user_id, "plan": plan_key,
+                     "credits": str(plan["monthly_credits"] or 0)},
+    }
+    if trial_days > 0:
+        subscription_data["trial_period_days"] = trial_days
     session = stripe.checkout.Session.create(
         mode="subscription",
         success_url=success_url,
@@ -78,9 +90,7 @@ def create_subscription_session(user_id: str, plan_key: str, success_url: str,
                 "product_data": {"name": f"Axial {plan['name']}"},
             },
         }],
-        # Metadata on the SUBSCRIPTION too, so invoice.paid (renewals) can read it.
-        subscription_data={"metadata": {"user_id": user_id, "plan": plan_key,
-                                        "credits": str(plan["monthly_credits"] or 0)}},
+        subscription_data=subscription_data,
         metadata={"user_id": user_id, "plan": plan_key,
                   "credits": str(plan["monthly_credits"] or 0)},
     )
@@ -120,6 +130,10 @@ def parse_webhook(payload: bytes, signature: str) -> dict | None:
 
     # Subscriptions (first payment + monthly renewals) → reset the plan allowance.
     if etype == "invoice.paid":
+        # A trial start issues a 0€ invoice: no money moved, no credits granted.
+        # Plan credits arrive with the first REAL debit at trial end.
+        if not obj.get("amount_paid"):
+            return None
         sub_id = obj.get("subscription")
         if not sub_id:
             return None

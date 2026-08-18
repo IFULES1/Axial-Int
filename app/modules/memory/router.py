@@ -15,6 +15,7 @@ router = APIRouter(prefix="/memory", tags=["memory"])
 
 class ProfileIn(BaseModel):
     company_name: str | None = None
+    website: str | None = None
     positioning: str | None = None
     sector: str | None = None
     founding_year: int | None = None
@@ -56,6 +57,16 @@ def upsert_profile(payload: ProfileIn, user: AuthUser = Depends(get_current_user
 def onboarding_status(user: AuthUser = Depends(get_current_user),
                       db: Session = Depends(get_db)) -> dict:
     return {"complete": service.onboarding_complete(db, user.id)}
+
+
+class PrefillIn(BaseModel):
+    url: str
+
+
+@router.post("/prefill")
+def prefill(payload: PrefillIn, _: AuthUser = Depends(get_current_user)) -> dict:
+    """Onboarding helper: extract company_name/positioning/sector from a website."""
+    return service.prefill_from_website(payload.url.strip())
 
 
 @router.delete("/profile", status_code=204, response_class=Response)

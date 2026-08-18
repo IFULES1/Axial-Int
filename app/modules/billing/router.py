@@ -32,6 +32,8 @@ class SubscribeIn(BaseModel):
     plan: str
     success_url: str
     cancel_url: str
+    # Onboarding step 4: card now, first debit after the trial (True → 14 days).
+    trial: bool = False
 
 
 @router.get("/plans")
@@ -66,7 +68,8 @@ def checkout(payload: CheckoutIn, user: AuthUser = Depends(get_current_user)) ->
 @router.post("/subscribe")
 def subscribe(payload: SubscribeIn, user: AuthUser = Depends(get_current_user)) -> dict:
     url = stripe_gateway.create_subscription_session(
-        user.id, payload.plan, payload.success_url, payload.cancel_url
+        user.id, payload.plan, payload.success_url, payload.cancel_url,
+        trial_days=14 if payload.trial else 0,
     )
     return {"checkout_url": url}
 
