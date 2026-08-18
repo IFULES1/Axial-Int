@@ -2078,7 +2078,9 @@ function UserMsg({ text }) {
   );
 }
 
-const AGENT_LABELS = { market_scanner: 'Market Scanner · PESTEL', competitor_radar: 'Competitor Radar · Porter', conseiller: 'Axial Conseil' };
+// Badge affiché seulement pour les agents spécialisés — la conversation libre
+// (clé "conseiller") reste une discussion simple, sans badge.
+const AGENT_LABELS = { market_scanner: 'Market Scanner · PESTEL', competitor_radar: 'Competitor Radar · Porter' };
 
 function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast }) {
   // Pending state: a real backend answer is on its way (search + RAG + LLM can
@@ -2223,7 +2225,7 @@ function Composer({ value, onChange, onSend }) {
         <div style={{ display: 'inline-flex', gap: 4, padding: 3, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--bg-2, rgba(255,255,255,0.03))' }}>
           {AGENT_MODES.map((m) => (
             <button key={m.key} type="button" onClick={() => pickMode(m.key)}
-              title={m.key === 'auto' ? "Axial choisit l'agent selon votre question" : `Forcer l'agent ${m.label}`}
+              title={m.key === 'auto' ? 'Discussion libre avec Axial, sans cadre imposé' : `Utiliser l'agent ${m.label}`}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 5,
                 padding: '4px 10px', borderRadius: 999, border: 'none', cursor: 'pointer',
@@ -2237,8 +2239,8 @@ function Composer({ value, onChange, onSend }) {
         </div>
         <span style={{ color: 'var(--fg-3)', fontSize: 11.5 }}>
           {mode === 'auto'
-            ? "Axial route votre question vers l'agent le plus pertinent."
-            : 'Cet agent répondra à toutes vos questions.'}
+            ? 'Discussion libre — réponse rapide ou approfondie selon votre question.'
+            : 'Cet agent spécialisé répondra à toutes vos questions.'}
         </span>
       </div>
     </div>

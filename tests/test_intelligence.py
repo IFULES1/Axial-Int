@@ -41,19 +41,20 @@ def test_generic_query_falls_to_conseil():
     assert note is None
 
 
-def test_auto_mode_switches_to_the_right_specialist():
-    # Le bug du test produit : « mes concurrents directs ? » doit aller à
-    # Competitor Radar (bascule réelle), pas à Market Scanner avec une excuse.
-    agent, note = personas.route("Quels sont mes concurrents directs ?",
-                                 requested=personas.AUTO)
-    assert agent == "competitor_radar"
-    assert note is None
-
-
 def test_explicit_choice_is_respected():
     agent, _ = personas.route("Quels sont mes concurrents directs ?",
                               requested="conseiller")
     assert agent == "conseiller"
+
+
+def test_free_chat_tier_heuristic():
+    # Conversation libre : Gemini (chat) pour le court, Sonnet (report) pour le long.
+    from app.modules.intelligence.service import _wants_long_answer
+
+    assert _wants_long_answer("bonjour, ça va ?") is False
+    assert _wants_long_answer("Fais-moi une analyse détaillée de mon marché") is True
+    assert _wants_long_answer("Compare Payfit et Lucca sur le pricing") is True
+    assert _wants_long_answer("x" * 250) is True  # les questions longues → réponse de fond
 
 
 def test_intelligence_routes_mounted():

@@ -167,11 +167,32 @@ def _assemble_sources(query: str, web_results, doc_passages, top_k: int = 8):
 AGENT_MESSAGE_ACTION = "agent_message"
 
 
+_LONG_ANSWER_SIGNALS = (
+    "analyse", "détail", "approfondi", "compare", "comparaison", "stratégie",
+    "plan ", "rapport", "étude", "cartographie", "explique", "structure",
+    "recommandation", "roadmap", "benchmark",
+)
+
+
+def _wants_long_answer(query: str) -> bool:
+    """Conversation libre : Sonnet (tier report) pour les demandes de fond,
+    Gemini (tier chat) pour les échanges courts."""
+    q = query.lower()
+    return len(q) > 220 or any(s in q for s in _LONG_ANSWER_SIGNALS)
+
+
 def post_message(db: Session, user_id: str, conversation_id: str, content: str,
                  agent_override: str | None = None, *, is_admin: bool = False) -> Message:
     conv = _own_conversation(db, user_id, conversation_id)
     requested = agent_override or conv.default_agent
-    agent_key, redirect_note = personas.route(content, requested=requested)
+    # Conversation libre : AUCUN routing d'agent — discussion directe avec le LLM
+    # (Gemini réponses courtes / Sonnet réponses longues). Les personas spécialisées
+    # ne s'appliquent que sur choix explicite de l'utilisateur.
+    free_chat = requested == personas.AUTO
+    if free_chat:
+        agent_key, redirect_note = personas.AXIAL_CONSEIL.key, None
+    else:
+        agent_key, redirect_note = personas.route(content, requested=requested)
     persona = personas.get_persona(agent_key) or personas.get_persona(personas.DEFAULT_AGENT)
 
     # Affordability check before spending the API call (admins bypass).
@@ -220,9 +241,11 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
         answer = ("⚠️ Aucun moteur de génération n'est disponible pour le moment. "
                   "Réessaie plus tard.")
     else:
+        # Conversation libre = discussion naturelle (pas de bloc « AXIAL Recommande »
+        # imposé) ; agents spécialisés = persona complète avec cadre d'analyse.
+        system = persona.system_prompt if free_chat else persona.full_system_prompt()
         # Rendre la mémoire PERCEPTIBLE : quand un contexte entreprise existe,
         # la réponse doit s'y ancrer explicitement (jamais un acteur générique).
-        system = persona.full_system_prompt()
         if company_context:
             system += (
                 "\n\nUn bloc « Contexte entreprise (mémoire) » est fourni dans le "
@@ -232,10 +255,12 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
                 "et adapte chaque recommandation à SA situation (positionnement, "
                 "stade, défi) plutôt qu'à un acteur générique du secteur."
             )
+        # Conversation libre : Gemini (chat) pour le court, Sonnet (report) pour le
+        # long. Agents spécialisés : tier chat (comportement historique).
+        tier = "report" if (free_chat and _wants_long_answer(content)) else "chat"
         try:
-            # Chat tier → Gemini (cheap/fast). AXIAL Recommande via the persona prompt.
-            result = llm_client.generate(system=system,
-                                         prompt=prompt, tier="chat", max_tokens=2500)
+            result = llm_client.generate(system=system, prompt=prompt, tier=tier,
+                                         max_tokens=4000 if tier == "report" else 2500)
             answer = result.text
         except Exception as e:
             logger.warning("Agent generation failed: %s", e)
