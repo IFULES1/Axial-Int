@@ -34,9 +34,26 @@ def test_axial_recommande_in_system_prompt():
         assert "AXIAL Recommande" in p.full_system_prompt()
 
 
-def test_default_when_no_signal():
-    agent, _ = personas.route("bonjour")
-    assert agent == personas.DEFAULT_AGENT
+def test_generic_query_falls_to_conseil():
+    # Conversation libre : une question sans signal spécialisé va au généraliste.
+    agent, note = personas.route("bonjour, aide-moi à structurer mon pitch")
+    assert agent == "conseiller"
+    assert note is None
+
+
+def test_auto_mode_switches_to_the_right_specialist():
+    # Le bug du test produit : « mes concurrents directs ? » doit aller à
+    # Competitor Radar (bascule réelle), pas à Market Scanner avec une excuse.
+    agent, note = personas.route("Quels sont mes concurrents directs ?",
+                                 requested=personas.AUTO)
+    assert agent == "competitor_radar"
+    assert note is None
+
+
+def test_explicit_choice_is_respected():
+    agent, _ = personas.route("Quels sont mes concurrents directs ?",
+                              requested="conseiller")
+    assert agent == "conseiller"
 
 
 def test_intelligence_routes_mounted():

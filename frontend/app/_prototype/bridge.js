@@ -134,11 +134,15 @@ export async function axNewConversation() {
   return ensureConversation(true);
 }
 
-/** Send a chat message; returns the assistant reply { content, agent, citations }. */
+/** Send a chat message; returns the assistant reply { content, agent, citations }.
+ * The workspace mode selector persists the chosen agent in localStorage:
+ * "auto" (conversation libre, routing par intention) or an explicit persona key. */
 export async function axChat(text) {
   const cid = await ensureConversation();
+  let agent = "auto";
+  try { agent = localStorage.getItem("axial_agent_mode") || "auto"; } catch (e) {}
   return axFetch(`/intelligence/conversations/${cid}/messages`, {
-    method: "POST", body: { content: text },
+    method: "POST", body: { content: text, agent },
   });
 }
 

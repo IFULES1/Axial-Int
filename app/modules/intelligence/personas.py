@@ -84,12 +84,32 @@ COMPETITOR_RADAR = AgentPersona(
     ),
 )
 
+AXIAL_CONSEIL = AgentPersona(
+    key="conseiller",
+    name="Axial Conseil",
+    framework="Conversation libre",
+    system_prompt=(
+        "Tu es Axial Conseil, le copilote stratégique généraliste d'un fondateur de "
+        "startup. Tu réponds à toute question stratégique ou opérationnelle — GTM, "
+        "levée de fonds, produit, organisation, pricing — de façon sourcée, "
+        "structurée et actionnable. Quand la question relève clairement d'une "
+        "analyse macro-marché (PESTEL) ou concurrentielle (Porter), tu peux le "
+        "signaler, mais tu réponds toujours au mieux toi-même."
+    ),
+    scope_keywords=[],
+)
+
 _REGISTRY: dict[str, AgentPersona] = {
     MARKET_SCANNER.key: MARKET_SCANNER,
     COMPETITOR_RADAR.key: COMPETITOR_RADAR,
+    AXIAL_CONSEIL.key: AXIAL_CONSEIL,
 }
 
 DEFAULT_AGENT = MARKET_SCANNER.key
+
+# Mode "conversation libre" : le sélecteur du Workspace envoie cette valeur pour
+# laisser Axial router lui-même vers le bon agent selon l'intention.
+AUTO = "auto"
 
 
 def get_persona(key: str) -> AgentPersona | None:
@@ -108,20 +128,24 @@ def _score(query: str, persona: AgentPersona) -> int:
 def route(query: str, requested: str | None = None) -> tuple[str, str | None]:
     """Pick the best agent for a query.
 
-    Returns (agent_key, redirect_note). If `requested` is given but the query
-    scores clearly higher for the other agent, we keep the requested agent but
-    return a redirect note (non-overlap mechanism, non-destructive).
+    Returns (agent_key, redirect_note).
+    * `requested` = AUTO or None → real intent routing: the best-scoring
+      specialist answers; a generic question falls to Axial Conseil. Never a
+      redirect note — the switch IS the feature.
+    * `requested` = explicit persona → the user's choice is respected; if the
+      query clearly belongs to the other specialist we keep the choice but
+      return a hint (non-overlap mechanism, non-destructive).
     """
     scores = {p.key: _score(query, p) for p in _REGISTRY.values()}
     best = max(scores, key=scores.get)
 
-    if requested and requested in _REGISTRY:
+    if requested and requested != AUTO and requested in _REGISTRY:
         other = _REGISTRY[requested].redirect_to
         if other and scores.get(other, 0) >= 2 and scores[other] > scores[requested]:
             return requested, _REGISTRY[requested].redirect_hint
         return requested, None
 
-    # No explicit agent: use the best match, default when tied at zero.
+    # Conversation libre : router selon l'intention, généraliste par défaut.
     if scores[best] == 0:
-        return DEFAULT_AGENT, None
+        return AXIAL_CONSEIL.key, None
     return best, None

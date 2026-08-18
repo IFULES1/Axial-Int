@@ -220,9 +220,21 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
         answer = ("⚠️ Aucun moteur de génération n'est disponible pour le moment. "
                   "Réessaie plus tard.")
     else:
+        # Rendre la mémoire PERCEPTIBLE : quand un contexte entreprise existe,
+        # la réponse doit s'y ancrer explicitement (jamais un acteur générique).
+        system = persona.full_system_prompt()
+        if company_context:
+            system += (
+                "\n\nUn bloc « Contexte entreprise (mémoire) » est fourni dans le "
+                "message. Ancre EXPLICITEMENT ta réponse dedans : ouvre par une "
+                "phrase du type « Dans votre contexte — [nom de l'entreprise], "
+                "[élément pertinent du profil]… », désigne l'entreprise par son nom, "
+                "et adapte chaque recommandation à SA situation (positionnement, "
+                "stade, défi) plutôt qu'à un acteur générique du secteur."
+            )
         try:
             # Chat tier → Gemini (cheap/fast). AXIAL Recommande via the persona prompt.
-            result = llm_client.generate(system=persona.full_system_prompt(),
+            result = llm_client.generate(system=system,
                                          prompt=prompt, tier="chat", max_tokens=2500)
             answer = result.text
         except Exception as e:
