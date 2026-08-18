@@ -2103,12 +2103,28 @@ const AGENT_MODES = [
 
 function Composer({ value, onChange, onSend }) {
   const ref = useConvRef(null);
+  const fileRef = useConvRef(null);
+  const [uploading, setUploading] = React.useState(false);
+  const [uploadMsg, setUploadMsg] = React.useState(null); // { ok, text }
   const [mode, setMode] = React.useState(() => {
     try { return localStorage.getItem('axial_agent_mode') || 'auto'; } catch (e) { return 'auto'; }
   });
   const pickMode = (k) => {
     setMode(k);
     try { localStorage.setItem('axial_agent_mode', k); } catch (e) {}
+  };
+  const onPickFile = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f || uploading) return;
+    setUploading(true); setUploadMsg(null);
+    try {
+      const d = await axUploadDocument(f);
+      setUploadMsg({ ok: true, text: `« ${d.filename} » ajouté — il nourrira les prochaines réponses.` });
+    } catch (ex) {
+      setUploadMsg({ ok: false, text: (ex && ex.message) || 'Échec de l’import.' });
+    }
+    setUploading(false);
   };
   useConvEffect(() => {
     const el = ref.current; if (!el) return;
@@ -2123,6 +2139,14 @@ function Composer({ value, onChange, onSend }) {
   return (
     <div className="composer-shell">
       <div className="composer">
+        <input ref={fileRef} type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.md"
+          style={{ display: 'none' }} onChange={onPickFile} />
+        <button className="icon-btn" onClick={() => fileRef.current && fileRef.current.click()}
+          disabled={uploading} aria-label="Importer un document"
+          title="Importer un document (PDF, DOCX, XLSX, CSV, TXT — utilisé dans les analyses)"
+          style={{ alignSelf: 'flex-end', marginBottom: 6, flexShrink: 0 }}>
+          <Icon name={uploading ? 'clock' : 'plus'} size={15} />
+        </button>
         <textarea
           ref={ref}
           rows={1}
@@ -2136,6 +2160,11 @@ function Composer({ value, onChange, onSend }) {
           <Icon name="arrow-up" size={16} />
         </button>
       </div>
+      {uploadMsg && (
+        <div style={{ fontSize: 12.5, marginTop: 6, color: uploadMsg.ok ? 'var(--success)' : 'var(--error, #e5484d)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Icon name={uploadMsg.ok ? 'check' : 'alert'} size={12} /> {uploadMsg.text}
+        </div>
+      )}
       <div className="composer-tip" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <div style={{ display: 'inline-flex', gap: 4, padding: 3, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--bg-2, rgba(255,255,255,0.03))' }}>
           {AGENT_MODES.map((m) => (
