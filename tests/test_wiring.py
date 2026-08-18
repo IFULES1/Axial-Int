@@ -23,6 +23,7 @@ def db():
     import app.modules.reports.models  # noqa: F401
     Base.metadata.create_all(engine, tables=[
         Base.metadata.tables["credit_balances"],
+        Base.metadata.tables["credit_events"],
         Base.metadata.tables["reports"],
     ])
     with Session(engine) as s:

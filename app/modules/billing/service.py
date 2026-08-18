@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.errors import AppError
 from app.modules.billing.catalog import cost_for
-from app.modules.billing.models import CreditBalance
+from app.modules.billing.models import CreditBalance, CreditEvent, UserSubscription
 
 FREE_BETA_CREDITS = 20
 FREE_BETA_DAYS = 14
@@ -29,6 +29,11 @@ FREE_BETA_DAYS = 14
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
+
+
+def _log_event(db: Session, user_id: str, delta: int, action: str) -> None:
+    """Append a ledger row (committed with the caller's transaction)."""
+    db.add(CreditEvent(user_id=uuid.UUID(user_id), delta=delta, action=action))
 
 
 def _as_aware(value: dt.datetime | None) -> dt.datetime | None:
@@ -58,6 +63,7 @@ def get_or_create_balance(db: Session, user_id: str) -> CreditBalance:
             trial_expires_at=_now() + dt.timedelta(days=FREE_BETA_DAYS),
         )
         db.add(balance)
+        _log_event(db, user_id, FREE_BETA_CREDITS, "essai_bienvenue")
         db.commit()
         db.refresh(balance)
     return balance
@@ -109,6 +115,7 @@ def consume_credits(db: Session, user_id: str, action: str,
         balance.purchased_credits -= take
         remaining -= take
 
+    _log_event(db, user_id, -cost, action)
     db.commit()
     db.refresh(balance)
     return {"charged": cost, "action": action, "remaining": available_credits(balance)}
@@ -118,6 +125,7 @@ def grant_purchased(db: Session, user_id: str, amount: int) -> CreditBalance:
     """Add PAYG pack credits (from a Stripe checkout). Never expire, accumulate."""
     balance = get_or_create_balance(db, user_id)
     balance.purchased_credits += amount
+    _log_event(db, user_id, amount, "pack_credits")
     db.commit()
     db.refresh(balance)
     return balance
@@ -133,6 +141,35 @@ def grant_subscription(db: Session, user_id: str, monthly_credits: int) -> Credi
     """
     balance = get_or_create_balance(db, user_id)
     balance.free_credits = monthly_credits
+    _log_event(db, user_id, monthly_credits, "abonnement_mensuel")
     db.commit()
     db.refresh(balance)
     return balance
+
+
+# --- Abonnement (miroir applicatif de Stripe) --------------------------------
+
+def upsert_subscription(db: Session, user_id: str, **fields) -> UserSubscription:
+    uid = uuid.UUID(user_id)
+    sub = db.get(UserSubscription, uid)
+    if sub is None:
+        sub = UserSubscription(user_id=uid)
+        db.add(sub)
+    for k, v in fields.items():
+        if v is not None:
+            setattr(sub, k, v)
+    db.commit()
+    db.refresh(sub)
+    return sub
+
+
+def get_subscription(db: Session, user_id: str) -> UserSubscription | None:
+    return db.get(UserSubscription, uuid.UUID(user_id))
+
+
+def list_events(db: Session, user_id: str, limit: int = 50) -> list[CreditEvent]:
+    stmt = (select(CreditEvent)
+            .where(CreditEvent.user_id == uuid.UUID(user_id))
+            .order_by(CreditEvent.created_at.desc())
+            .limit(limit))
+    return list(db.scalars(stmt))

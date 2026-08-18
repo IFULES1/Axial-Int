@@ -12,8 +12,8 @@
 - [x] **Ne pas lancer d'analyse automatiquement** *(fait 18/08 : la question suggérée pré-remplit le composer, l'utilisateur envoie lui-même)*
 
 ### Crédits & facturation
-- [ ] Onglet **Crédits** : afficher le **plan actuel** de l'utilisateur + la **date du prochain prélèvement**.
-- [ ] **Paramètres** : historique de **consommation de crédits** + historique de **facturation relié à Stripe** (récupération directe des factures).
+- [x] Onglet **Crédits** : plan actuel + date du prochain prélèvement *(fait 18/08 : carte « Mon abonnement » + bouton Gérer via portail Stripe)*.
+- [x] **Paramètres** : historiques conso + factures Stripe *(fait 18/08 : journal `credit_events` + factures avec PDF, onglet Facturation réel)*.
 
 ### Navigation & UI
 - [ ] Vérifier que **tous les boutons retour** mènent au bon endroit.
@@ -29,6 +29,6 @@
 ## Déjà en file (sessions précédentes)
 - [ ] Refresh token frontend (401 silencieux après ~1h) — gardé pour la fin sur décision du 17/08.
 - [ ] Cleanage front : estimations rapports fictives (`estCredits`), typo « marcé », dark mode Rapports, wordings agents/documents.
-- [ ] Blocage serveur de l'étape carte (tracker l'état d'abonnement en base).
+- [x] Blocage serveur de l'étape carte *(fait 18/08 : table `user_subscriptions` + gate à la reprise de session basé sur l'état Stripe réel, avec backfill)*.
 - [ ] Robustesse + légal : durcissement VPS, RGPD/CGU, monitoring.
 - [ ] Data/veille : tag Inoreader « concurrents [secteur] », filtrage bruit RSS.

@@ -101,6 +101,23 @@ export async function axSubscribe(plan, trial = false) {
 export async function axPrefill(url) {
   return axFetch("/memory/prefill", { method: "POST", body: { url } });
 }
+/** Current subscription mirror (plan, status, next debit date). */
+export async function axSubscription() {
+  return axFetch("/billing/subscription");
+}
+/** Credit ledger (grants + debits, newest first). */
+export async function axCreditHistory() {
+  return axFetch("/billing/history");
+}
+/** Stripe invoices with direct download links. */
+export async function axInvoices() {
+  return axFetch("/billing/invoices");
+}
+/** Stripe customer portal (manage card, cancel, invoices). */
+export async function axPortal() {
+  const base = (typeof window !== "undefined" && window.location) ? window.location.origin : "";
+  return axFetch("/billing/portal", { method: "POST", body: { return_url: base + "/" } });
+}
 
 // --- chat / analysis (Workspace) ---
 let _convId = null;

@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axChat, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axCreateReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axChat, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axCreateReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -3327,13 +3327,26 @@ function CreditsSurface() {
   const [plans, setPlans] = React.useState([]);
   const [busy, setBusy] = React.useState('');
   const [err, setErr] = React.useState('');
+  const [sub, setSub] = React.useState(null);
   React.useEffect(() => {
     axBalance().then(setBal).catch(() => {});
+    axSubscription().then(setSub).catch(() => {});
     axPlans().then((d) => {
       setPacks(Object.entries(d.packs || {}).map(([k, p]) => ({ key: k, ...p })));
       setPlans(d.plans || []);
     }).catch(() => {});
   }, []);
+  const openPortal = async () => {
+    try { const r = await axPortal(); if (r.portal_url) window.location.href = r.portal_url; }
+    catch (e) { setErr((e && e.message) || 'Portail indisponible.'); }
+  };
+  const SUB_STATUS = {
+    trialing: lang === 'fr' ? 'Essai en cours' : 'Trial',
+    active: lang === 'fr' ? 'Actif' : 'Active',
+    past_due: lang === 'fr' ? 'Paiement en retard' : 'Past due',
+    canceled: lang === 'fr' ? 'Annulé' : 'Canceled',
+  };
+  const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
   const go = async (fn, id) => {
     setBusy(id); setErr('');
     try {
@@ -3363,6 +3376,31 @@ function CreditsSurface() {
         <div className="credits-stat"><div className="lbl">{lang === 'fr' ? 'Achetés' : 'Purchased'}</div><div className="val">{bal ? (bal.purchased_credits || 0).toLocaleString(lang) : '—'}</div></div>
         <div className="credits-stat"><div className="lbl">{lang === 'fr' ? 'Essai' : 'Trial'}</div><div className="val">{bal ? (bal.trial_credits || 0).toLocaleString(lang) : '—'}</div></div>
       </div>
+
+      {sub && sub.active && (
+        <div className="plan-card" style={{ maxWidth: 760, marginBottom: 26, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--v-soft)', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 6 }}>
+              {lang === 'fr' ? 'Mon abonnement' : 'My subscription'}
+            </div>
+            <div style={{ fontSize: 17, fontWeight: 700 }}>
+              {sub.plan_name || sub.plan} · {sub.price_eur} €/{lang === 'fr' ? 'mois' : 'mo'}
+              <span style={{ marginLeft: 10, fontSize: 11.5, fontFamily: 'var(--font-mono)', color: sub.status === 'past_due' ? 'var(--error, #e5484d)' : 'var(--success)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                {SUB_STATUS[sub.status] || sub.status}
+              </span>
+            </div>
+            <p style={{ fontSize: 12.5, color: 'var(--fg-2)', margin: '6px 0 0' }}>
+              {sub.monthly_credits} {lang === 'fr' ? 'crédits/mois' : 'credits/mo'}
+              {sub.current_period_end && (sub.cancel_at_period_end
+                ? (lang === 'fr' ? ` · prend fin le ${fmtDate(sub.current_period_end)}` : ` · ends on ${fmtDate(sub.current_period_end)}`)
+                : (lang === 'fr' ? ` · prochain prélèvement le ${fmtDate(sub.current_period_end)}` : ` · next debit on ${fmtDate(sub.current_period_end)}`))}
+            </p>
+          </div>
+          <button className="btn btn-secondary" onClick={openPortal}>
+            {lang === 'fr' ? "Gérer l'abonnement" : 'Manage subscription'}
+          </button>
+        </div>
+      )}
 
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 12 }}>
         {lang === 'fr' ? 'Abonnements (mensuel)' : 'Subscriptions (monthly)'}
@@ -3564,27 +3602,88 @@ function SettingsSurface() {
             </>
           )}
 
-          {tab === 'billing' && (
-            <>
-              <h2>{t('settings.billing')}</h2>
-              <p>{lang === 'fr' ? 'Facturation et plan.' : 'Billing and plan.'}</p>
-              <div className="settings-row">
-                <div><h3>{lang === 'fr' ? 'Plan actuel' : 'Current plan'}</h3><p>{t('credits.plan.beta')} · {lang === 'fr' ? '5 000 crédits / mois' : '5,000 credits / mo'}</p></div>
-                <div className="control"><button className="btn btn-primary">{t('common.upgrade')}</button></div>
-              </div>
-              <div className="settings-row">
-                <div><h3>{lang === 'fr' ? 'Moyen de paiement' : 'Payment method'}</h3><p>{lang === 'fr' ? 'Aucun. Ajouté à la sortie de beta.' : 'None. Added when leaving beta.'}</p></div>
-                <div className="control"><button className="btn btn-secondary">{lang === 'fr' ? 'Ajouter' : 'Add'}</button></div>
-              </div>
-              <div className="settings-row">
-                <div><h3>{lang === 'fr' ? 'Factures' : 'Invoices'}</h3><p>{lang === 'fr' ? 'Aucune facture en beta.' : 'No invoices in beta.'}</p></div>
-                <div className="control"><span style={{ fontSize: 13, color: 'var(--fg-3)' }}>—</span></div>
-              </div>
-            </>
-          )}
+          {tab === 'billing' && <BillingSettings lang={lang} t={t} />}
         </div>
       </div>
     </div>
+  );
+}
+
+function BillingSettings({ lang, t }) {
+  const [sub, setSub] = React.useState(null);
+  const [invoices, setInvoices] = React.useState(null);
+  const [events, setEvents] = React.useState(null);
+  React.useEffect(() => {
+    axSubscription().then(setSub).catch(() => setSub({ active: false }));
+    axInvoices().then(setInvoices).catch(() => setInvoices([]));
+    axCreditHistory().then(setEvents).catch(() => setEvents([]));
+  }, []);
+  const fmtD = (iso) => new Date(iso).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const ACTION_LABELS = {
+    essai_bienvenue: lang === 'fr' ? 'Crédits de bienvenue' : 'Welcome credits',
+    pack_credits: lang === 'fr' ? 'Achat de pack' : 'Pack purchase',
+    abonnement_mensuel: lang === 'fr' ? 'Renouvellement du plan' : 'Plan renewal',
+    agent_message: lang === 'fr' ? 'Message agent' : 'Agent message',
+    run_agent_veille: lang === 'fr' ? 'Run de veille' : 'Monitoring run',
+    etude_marche: lang === 'fr' ? 'Étude de marché' : 'Market study',
+    synthese_executive: lang === 'fr' ? 'Synthèse exécutive' : 'Executive summary',
+    analyse_concurrentielle: lang === 'fr' ? 'Analyse concurrentielle' : 'Competitive analysis',
+    veille_technologique: lang === 'fr' ? 'Veille technologique' : 'Tech watch',
+    analyse_risques: lang === 'fr' ? 'Analyse de risques' : 'Risk analysis',
+  };
+  return (
+    <>
+      <h2>{t('settings.billing')}</h2>
+      <p>{lang === 'fr' ? 'Abonnement, factures et consommation de crédits.' : 'Subscription, invoices and credit usage.'}</p>
+
+      <div className="settings-row">
+        <div>
+          <h3>{lang === 'fr' ? 'Plan actuel' : 'Current plan'}</h3>
+          <p>{sub === null ? '…'
+            : sub.active
+              ? `${sub.plan_name || sub.plan} · ${sub.price_eur} €/${lang === 'fr' ? 'mois' : 'mo'}${sub.current_period_end ? (lang === 'fr' ? ` · prochain prélèvement le ${fmtD(sub.current_period_end)}` : ` · next debit ${fmtD(sub.current_period_end)}`) : ''}`
+              : (lang === 'fr' ? 'Aucun abonnement actif.' : 'No active subscription.')}</p>
+        </div>
+        {sub && sub.active && (
+          <div className="control">
+            <button className="btn btn-secondary" onClick={async () => {
+              try { const r = await axPortal(); if (r.portal_url) window.location.href = r.portal_url; } catch (e) {}
+            }}>{lang === 'fr' ? 'Gérer' : 'Manage'}</button>
+          </div>
+        )}
+      </div>
+
+      <div className="settings-row" style={{ display: 'block' }}>
+        <h3 style={{ marginBottom: 8 }}>{lang === 'fr' ? 'Factures' : 'Invoices'}</h3>
+        {invoices === null && <p>…</p>}
+        {invoices && invoices.length === 0 && <p>{lang === 'fr' ? 'Aucune facture pour le moment.' : 'No invoice yet.'}</p>}
+        {invoices && invoices.filter((i) => i.amount_eur > 0 || i.status === 'paid').map((inv) => (
+          <div key={inv.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+            <span>{fmtD(inv.date)} · {inv.amount_eur.toFixed(2)} € · <span style={{ color: inv.status === 'paid' ? 'var(--success)' : 'var(--fg-3)' }}>{inv.status === 'paid' ? (lang === 'fr' ? 'payée' : 'paid') : inv.status}</span></span>
+            {(inv.pdf || inv.url) && (
+              <a className="btn btn-ghost" href={inv.pdf || inv.url} target="_blank" rel="noopener" style={{ fontSize: 12 }}>
+                <Icon name="download" size={12} /> PDF
+              </a>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="settings-row" style={{ display: 'block' }}>
+        <h3 style={{ marginBottom: 8 }}>{lang === 'fr' ? 'Consommation de crédits' : 'Credit usage'}</h3>
+        {events === null && <p>…</p>}
+        {events && events.length === 0 && <p>{lang === 'fr' ? 'Aucun mouvement pour le moment.' : 'No movement yet.'}</p>}
+        {events && events.slice(0, 30).map((e, i) => (
+          <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+            <span style={{ color: 'var(--fg-2)' }}>{ACTION_LABELS[e.action] || e.action}</span>
+            <span style={{ display: 'inline-flex', gap: 14 }}>
+              <span className="mono" style={{ color: e.delta >= 0 ? 'var(--success)' : 'var(--fg)', fontWeight: 600 }}>{e.delta >= 0 ? '+' : ''}{e.delta}</span>
+              <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 11.5 }}>{fmtD(e.created_at)}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -5045,7 +5144,15 @@ function App() {
     let cardPending = false;
     try { cardPending = localStorage.getItem('axial_onb_card_pending') === '1'; } catch (e) {}
     if (cardPending) { go('onb4'); return; }
-    axMe().then((u) => go(u.onboarding_complete ? 'app' : 'onb1')).catch(() => axClearToken());
+    // Gate serveur : l'app exige un abonnement (essai ou actif). Un compte au
+    // profil complet mais sans abonnement retourne à l'étape carte.
+    axMe().then(async (u) => {
+      if (!u.onboarding_complete) { go('onb1'); return; }
+      try {
+        const s = await axSubscription();
+        go(s && s.active ? 'app' : 'onb4');
+      } catch (e) { go('app'); /* API indisponible : ne pas bloquer l'accès */ }
+    }).catch(() => axClearToken());
   }, []);
   const [suggested, setSuggested] = useState(window.AXIAL_DATA.SUGGESTED_PROMPTS);
   useEffect(() => {
