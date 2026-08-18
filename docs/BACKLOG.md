@@ -32,3 +32,10 @@
 - [x] Blocage serveur de l'étape carte *(fait 18/08 : table `user_subscriptions` + gate à la reprise de session basé sur l'état Stripe réel, avec backfill)*.
 - [ ] Robustesse + légal : durcissement VPS, RGPD/CGU, monitoring.
 - [ ] Data/veille : tag Inoreader « concurrents [secteur] », filtrage bruit RSS.
+
+## Noté le 18/08/2026 (après-midi)
+- [x] **Prompt engineering** *(fait 18/08 : réponse = NON, la V4 n'était PAS reprise — port complet de `business_prompts.py` V4 dans `analysis/prompts.py` + socle commun et personas assouplis « cadre = grille de lecture, pas une contrainte »)*.
+- [x] **Sources consultables** *(fait 18/08 : citations [N] cliquables → panneau latéral avec titre, provenance, extrait, URL pour le web)*.
+- [x] **Rendu du texte dans le chat** *(fait 18/08 : MarkdownView appliqué aux messages — gras, titres, listes, avec streaming conservé)*.
+- [x] **Historique des conversations persistant** *(fait 18/08 : conversations rechargées à la connexion, messages chargés à l'ouverture, envois liés aux vrais ids backend)*.
+- [ ] **Vitesse des réponses** *(quick wins faits 18/08 : RAG + recherche web parallélisés, zéro recherche sur les messages triviaux en conversation libre. Levier suivant = streaming des réponses LLM — chantier à part)*.

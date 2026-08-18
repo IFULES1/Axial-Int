@@ -124,7 +124,8 @@ def _assemble_sources(query: str, web_results, doc_passages, top_k: int = 8):
             "text": f"{r.title}\n{r.snippet}",
             "tag": f"(web : {r.domain})" if r.domain else "(web)",
             "body": r.snippet or r.title,
-            "cite": {"title": r.title, "url": r.url, "domain": r.domain, "source": "web"},
+            "cite": {"title": r.title, "url": r.url, "domain": r.domain, "source": "web",
+                     "excerpt": (r.snippet or "")[:350]},
             "key": f"web::{r.domain}::{r.title.strip().lower()}",
         })
     for p in doc_passages:
@@ -139,7 +140,7 @@ def _assemble_sources(query: str, web_results, doc_passages, top_k: int = 8):
             "body": p.text,
             "cite": {"title": title,
                      "source": "interne" if p.source == "kb" else "document",
-                     "reference": ref},
+                     "reference": ref, "excerpt": (p.text or "")[:350]},
             "key": f"doc::{title}",
         })
     if not pool:
@@ -215,12 +216,26 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
     from app.shared import search as web_search
 
     company_context = memory.build_context(db, user_id)
-    _, doc_passages = _retrieve_context(content, user_id)
-    try:
-        web_results = web_search.search(content, top_k=6)
-    except Exception as e:
-        logger.warning("Agent web search failed: %s", e)
-        web_results = []
+
+    # Vitesse : très courts messages en conversation libre (« merci », « ok »)
+    # → pas de recherche du tout, réponse immédiate du LLM.
+    trivial = free_chat and len(content.strip()) < 25
+
+    if trivial:
+        doc_passages, web_results = [], []
+    else:
+        # RAG et recherche web en PARALLÈLE (elles ne partagent pas la session DB).
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            f_docs = ex.submit(_retrieve_context, content, user_id)
+            f_web = ex.submit(web_search.search, content, 6)
+            try:
+                web_results = f_web.result()
+            except Exception as e:
+                logger.warning("Agent web search failed: %s", e)
+                web_results = []
+            _, doc_passages = f_docs.result()
 
     # Rerank web + internal together → one relevance-ordered context + citations.
     combined_context, citations = _assemble_sources(content, web_results, doc_passages)

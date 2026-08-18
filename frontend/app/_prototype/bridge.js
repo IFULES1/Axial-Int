@@ -156,11 +156,29 @@ export async function axNewConversation() {
  * "auto" (conversation libre, routing par intention) or an explicit persona key. */
 export async function axChat(text) {
   const cid = await ensureConversation();
+  return axChatIn(cid, text);
+}
+/** Send a chat message into a SPECIFIC backend conversation. */
+export async function axChatIn(cid, text) {
   let agent = "auto";
   try { agent = localStorage.getItem("axial_agent_mode") || "auto"; } catch (e) {}
   return axFetch(`/intelligence/conversations/${cid}/messages`, {
     method: "POST", body: { content: text, agent },
   });
+}
+/** Create a fresh backend conversation and return its id. */
+export async function axCreateConversation() {
+  return ensureConversation(true);
+}
+/** List the user's conversations (first project). */
+export async function axListConversations() {
+  const projects = await axFetch("/intelligence/projects");
+  if (!projects.length) return [];
+  return axFetch(`/intelligence/projects/${projects[0].id}/conversations`);
+}
+/** Full message history of one conversation. */
+export async function axMessages(cid) {
+  return axFetch(`/intelligence/conversations/${cid}/messages`);
 }
 
 // --- veille agents (watches) ---

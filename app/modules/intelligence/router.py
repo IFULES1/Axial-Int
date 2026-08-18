@@ -40,6 +40,7 @@ class ConversationOut(BaseModel):
     title: str
     default_agent: str
     message_count: int
+    last_message_at: dt.datetime | None = None
 
 
 class MessageIn(BaseModel):
@@ -104,7 +105,8 @@ def create_conversation(project_id: str, payload: ConversationIn,
                         db: Session = Depends(get_db)) -> ConversationOut:
     c = service.create_conversation(db, user.id, project_id, payload.title, payload.default_agent)
     return ConversationOut(id=str(c.id), project_id=str(c.project_id), title=c.title,
-                           default_agent=c.default_agent, message_count=c.message_count)
+                           default_agent=c.default_agent, message_count=c.message_count,
+                           last_message_at=c.last_message_at)
 
 
 @router.get("/projects/{project_id}/conversations", response_model=list[ConversationOut])
@@ -112,7 +114,8 @@ def list_conversations(project_id: str, user: AuthUser = Depends(get_current_use
                        db: Session = Depends(get_db)) -> list[ConversationOut]:
     return [
         ConversationOut(id=str(c.id), project_id=str(c.project_id), title=c.title,
-                        default_agent=c.default_agent, message_count=c.message_count)
+                        default_agent=c.default_agent, message_count=c.message_count,
+                        last_message_at=c.last_message_at)
         for c in service.list_conversations(db, user.id, project_id)
     ]
 
