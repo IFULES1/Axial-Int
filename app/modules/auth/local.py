@@ -110,3 +110,20 @@ def login(db: Session, data: LoginRequest) -> TokenResponse:
         raise AppError("Email ou mot de passe invalide.", 401, code="bad_credentials")
     analytics.record_login(user_id=str(user.id), email=user.email)
     return _issue_tokens(user, onboarding_complete=_onboarding_complete(db, str(user.id)))
+
+
+def refresh(db: Session, refresh_token: str) -> TokenResponse:
+    """Échange un refresh token local valide contre une nouvelle paire de jetons."""
+    settings = get_settings()
+    try:
+        claims = jwt.decode(refresh_token, settings.supabase_jwt_secret,
+                            algorithms=["HS256"])
+    except jwt.InvalidTokenError as e:
+        raise AppError("Session expirée — reconnecte-toi.", 401,
+                       code="refresh_invalid") from e
+    if claims.get("type") != "refresh":
+        raise AppError("Jeton invalide.", 401, code="refresh_invalid")
+    user = db.get(DevUser, uuid.UUID(claims["sub"]))
+    if not user:
+        raise AppError("Compte introuvable.", 401, code="refresh_invalid")
+    return _issue_tokens(user, onboarding_complete=_onboarding_complete(db, str(user.id)))

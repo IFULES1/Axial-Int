@@ -120,3 +120,22 @@ def _sign_in(email: str, password: str):
     if not resp or not resp.session:
         raise AppError("Email ou mot de passe invalide.", 401, code="bad_credentials")
     return resp.session
+
+
+def refresh(refresh_token: str, db=None) -> TokenResponse:
+    """Nouvelle paire de jetons à partir d'un refresh token (les access tokens
+    expirent en ~1h ; sans ça, l'app passait silencieusement en 401)."""
+    settings = get_settings()
+    if settings.auth_mode == "local":
+        from app.modules.auth import local
+
+        return local.refresh(db, refresh_token)
+
+    try:
+        resp = public_client().auth.refresh_session(refresh_token)
+    except Exception as e:
+        raise AppError("Session expirée — reconnecte-toi.", 401,
+                       code="refresh_invalid") from e
+    if not resp or not resp.session or not resp.user:
+        raise AppError("Session expirée — reconnecte-toi.", 401, code="refresh_invalid")
+    return _token_response(resp.session, resp.user)

@@ -5,18 +5,47 @@
 
 export const AX_API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8090";
 const TOKEN_KEY = "axial_token";
+const REFRESH_KEY = "axial_refresh";
 
-export function axSetToken(t) {
-  try { localStorage.setItem(TOKEN_KEY, t); } catch (e) {}
+export function axSetToken(t, refresh) {
+  try {
+    localStorage.setItem(TOKEN_KEY, t);
+    if (refresh) localStorage.setItem(REFRESH_KEY, refresh);
+  } catch (e) {}
 }
 export function axGetToken() {
   try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; }
 }
 export function axClearToken() {
-  try { localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+  try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(REFRESH_KEY); } catch (e) {}
 }
 
-export async function axFetch(path, { method = "GET", body, auth = true } = {}) {
+// Les access tokens expirent (~1h). Sur un 401, on échange le refresh token
+// contre une nouvelle paire puis on rejoue la requête UNE fois — fini les
+// échecs silencieux (upload, messages, mémoire) au bout d'une heure.
+let _refreshing = null;
+async function tryRefresh() {
+  if (_refreshing) return _refreshing;  // une seule tentative simultanée
+  let rt = null;
+  try { rt = localStorage.getItem(REFRESH_KEY); } catch (e) {}
+  if (!rt) return Promise.resolve(false);
+  _refreshing = (async () => {
+    try {
+      const res = await fetch(AX_API + "/auth/refresh", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: rt }),
+      });
+      if (!res.ok) { axClearToken(); return false; }
+      const d = await res.json();
+      axSetToken(d.access_token, d.refresh_token);
+      return true;
+    } catch (e) { return false; }
+    finally { setTimeout(() => { _refreshing = null; }, 0); }
+  })();
+  return _refreshing;
+}
+
+export async function axFetch(path, { method = "GET", body, auth = true, _retried = false } = {}) {
   const headers = { "Content-Type": "application/json" };
   const tok = auth ? axGetToken() : null;
   if (tok) headers["Authorization"] = "Bearer " + tok;
@@ -25,6 +54,10 @@ export async function axFetch(path, { method = "GET", body, auth = true } = {}) 
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401 && auth && !_retried && path !== "/auth/refresh") {
+    const ok = await tryRefresh();
+    if (ok) return axFetch(path, { method, body, auth, _retried: true });
+  }
   if (!res.ok) {
     let msg = res.statusText, code;
     try {
@@ -47,14 +80,14 @@ export async function axRegister(email, password, full_name) {
     method: "POST", auth: false,
     body: { email, password, full_name: full_name || null },
   });
-  axSetToken(r.access_token);
+  axSetToken(r.access_token, r.refresh_token);
   return r.user;
 }
 export async function axLogin(email, password) {
   const r = await axFetch("/auth/login", {
     method: "POST", auth: false, body: { email, password },
   });
-  axSetToken(r.access_token);
+  axSetToken(r.access_token, r.refresh_token);
   return r.user;
 }
 export async function axMe() {
@@ -210,7 +243,7 @@ export async function axDeleteFeed(id) { return axFetch(`/watches/feeds/${id}`, 
 // --- documents (user RAG) ---
 export async function axListDocuments() { return axFetch("/documents"); }
 export async function axDeleteDocument(id) { return axFetch(`/documents/${id}`, { method: "DELETE" }); }
-export async function axUploadDocument(file) {
+export async function axUploadDocument(file, _retried = false) {
   const tok = axGetToken();
   const fd = new FormData();
   fd.append("file", file);
@@ -219,6 +252,10 @@ export async function axUploadDocument(file) {
     headers: tok ? { Authorization: "Bearer " + tok } : {},
     body: fd,
   });
+  if (res.status === 401 && !_retried) {
+    const ok = await tryRefresh();
+    if (ok) return axUploadDocument(file, true);
+  }
   if (!res.ok) {
     let msg = "upload failed";
     try { const d = await res.json(); msg = d.detail?.message || d.detail || msg; } catch (e) {}

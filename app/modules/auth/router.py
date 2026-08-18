@@ -9,6 +9,7 @@ preserved (see service.py / security.py).
 """
 from __future__ import annotations
 
+from pydantic import BaseModel
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -28,6 +29,15 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> TokenRe
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     return service.login(payload, db)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+@router.post("/refresh", response_model=TokenResponse)
+def refresh(payload: RefreshRequest, db: Session = Depends(get_db)) -> TokenResponse:
+    return service.refresh(payload.refresh_token, db)
 
 
 @router.get("/me", response_model=AuthUser)

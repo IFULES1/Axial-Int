@@ -27,8 +27,8 @@
 - [ ] **Compléter les mentions légales** (`frontend/app/legal/mentions/page.tsx`) : forme juridique, capital, adresse du siège, SIREN/RCS, directeur de la publication — puis faire valider CGU + confidentialité par un juriste.
 
 ## Déjà en file (sessions précédentes)
-- [ ] Refresh token frontend (401 silencieux après ~1h) — gardé pour la fin sur décision du 17/08.
-- [ ] Cleanage front : estimations rapports fictives (`estCredits`), typo « marcé », dark mode Rapports, wordings agents/documents.
+- [x] Refresh token frontend *(fait 18/08 : endpoint `/auth/refresh` (Supabase + local) + retry automatique sur 401 dans axFetch et l'upload — fini les échecs silencieux au bout d'une heure)*.
+- [x] Cleanage front *(fait 18/08 : coûts de rapports RÉELS (25-40 cr) + types d'analyse réellement câblés + sélecteur de profondeur factice retiré ; titres des tuiles Rapports lisibles en sombre ; wording agents + 3 exemples dans l'état vide ; typo corrigée plus tôt)*.
 - [x] Blocage serveur de l'étape carte *(fait 18/08 : table `user_subscriptions` + gate à la reprise de session basé sur l'état Stripe réel, avec backfill)*.
 - [ ] Robustesse + légal : durcissement VPS, RGPD/CGU, monitoring.
 - [ ] Data/veille : tag Inoreader « concurrents [secteur] », filtrage bruit RSS.

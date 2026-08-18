@@ -3097,3 +3097,7 @@ html[data-theme="light"] .sidebar {
   .docs-toc { position: static; flex-direction: row; flex-wrap: wrap; }
   .docs-compare { grid-template-columns: 1fr; }
 }
+
+/* Fix lisibilité : titres des types de rapport invisibles en thème sombre */
+.rep-type-tile h4 { color: var(--fg); }
+.rep-type-tile.active h4 { color: var(--fg); }

@@ -26,12 +26,14 @@ window.AXIAL_DATA = { SUGGESTED_PROMPTS };
 /* surfaces-data.js */
 /* surfaces-data.js — mock data for new surfaces (FR-first w/ EN strings nested) */
 
+// Coûts RÉELS (= CREDIT_COSTS backend) — les anciennes estimations étaient des
+// chiffres de maquette sans lien avec le débit effectif.
 const REPORT_TYPES = [
-  { id: 'market', icon: 'trending', estCredits: 320, estMin: 8 },
-  { id: 'competitive', icon: 'users', estCredits: 280, estMin: 7 },
-  { id: 'regulatory', icon: 'shield', estCredits: 240, estMin: 6 },
-  { id: 'risk', icon: 'alert', estCredits: 360, estMin: 9 },
-  { id: 'custom', icon: 'sparkle', estCredits: 400, estMin: 10 },
+  { id: 'market', icon: 'trending', at: 'etude_marche', cost: 40 },
+  { id: 'competitive', icon: 'users', at: 'analyse_concurrentielle', cost: 25 },
+  { id: 'regulatory', icon: 'shield', at: 'analyse_risques', cost: 25 },
+  { id: 'risk', icon: 'alert', at: 'analyse_risques', cost: 25 },
+  { id: 'custom', icon: 'sparkle', at: 'synthese_executive', cost: 25 },
 ];
 
 const REPORT_TEMPLATES = {
@@ -432,7 +434,7 @@ const STRINGS = {
 
     // agents
     'agents.title': 'Agents',
-    'agents.subtitle': 'Travailleurs persistants. Vous définissez la mission, ils ramènent des trouvailles.',
+    'agents.subtitle': 'Automatisez vos veilles et analyses récurrentes. Définissez une mission, Axial l\'exécute selon la fréquence choisie.',
     'agents.status.running': 'En cours',
     'agents.status.paused': 'En pause',
     'agents.status.idle': 'Au repos',
@@ -2365,7 +2367,6 @@ function ReportsEmpty({ onStart }) {
   const t = window.useT();
   const lang = window.AXIAL_LANG || 'fr';
   const [type, setType] = useStateS('market');
-  const [depth, setDepth] = useStateS('standard');
   const [prompt, setPrompt] = useStateS(
     lang === 'fr'
       ? 'Cartographie concurrentielle du marché SIRH français : Lucca, Payfit, Cegid. Positionnement, parts, forces structurelles.'
@@ -2374,9 +2375,7 @@ function ReportsEmpty({ onStart }) {
   const types = window.AXIAL_SURFACES.REPORT_TYPES;
   const tpl = window.AXIAL_SURFACES.REPORT_TEMPLATES[lang];
   const sel = types.find((x) => x.id === type);
-  const depthMul = { scan: 0.4, standard: 1, deep: 2 }[depth];
-  const credits = Math.round(sel.estCredits * depthMul);
-  const minutes = Math.round(sel.estMin * depthMul);
+  const credits = sel.cost;
 
   return (
     <div className="surface">
@@ -2412,19 +2411,11 @@ function ReportsEmpty({ onStart }) {
         />
         <div className="rep-prompt-foot">
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{t('reports.depth')}</span>
-              <div className="rep-depth-seg">
-                <button className={depth === 'scan' ? 'active' : ''} onClick={() => setDepth('scan')}>{t('reports.depth.scan')}</button>
-                <button className={depth === 'standard' ? 'active' : ''} onClick={() => setDepth('standard')}>{t('reports.depth.standard')}</button>
-                <button className={depth === 'deep' ? 'active' : ''} onClick={() => setDepth('deep')}>{t('reports.depth.deep')}</button>
-              </div>
-            </div>
             <div className="rep-estimate">
-              {t('reports.estimate')} : <strong>{credits}</strong> {t('reports.cost')} · <strong>~{minutes}</strong> {t('reports.duration')}
+              {t('reports.estimate')} : <strong>{credits}</strong> {t('reports.cost')} · ~1 min
             </div>
           </div>
-          <button className="btn btn-primary" onClick={() => onStart({ type, depth, prompt })}>
+          <button className="btn btn-primary" onClick={() => onStart({ type, analysisType: sel.at, prompt })}>
             <Icon name="sparkle" size={15} /> {t('reports.start')}
           </button>
         </div>
@@ -2941,6 +2932,16 @@ function AgentsLibrary({ onCreate, onOpenSession }) {
           <div style={{ fontSize: 14.5, fontWeight: 700 }}>{t('agents.create')}</div>
           <div style={{ fontSize: 12.5, color: 'var(--fg-2)', maxWidth: 220 }}>
             {lang === 'fr' ? '4 étapes : déclencheur, sources, livrable, cadence.' : '4 steps: trigger, sources, output, schedule.'}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 10, fontSize: 12, color: 'var(--fg-3)', textAlign: 'left' }}>
+            {(lang === 'fr'
+              ? ['Veille concurrents hebdomadaire', 'Veille réglementaire mensuelle', 'Suivi d’un marché ou secteur']
+              : ['Weekly competitor watch', 'Monthly regulatory watch', 'Market / sector tracking']
+            ).map((ex) => (
+              <span key={ex} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <Icon name="sparkle" size={10} /> {ex}
+              </span>
+            ))}
           </div>
         </button>
 
@@ -5297,10 +5298,10 @@ function App() {
   }, [route]);
   const [reportsState, setReportsState] = useState('empty'); // empty | generating | editor | quota
   const [reportData, setReportData] = useState(null);
-  const startReport = async ({ type, depth, prompt }) => {
+  const startReport = async ({ type, analysisType, prompt }) => {
     setReportsState('generating');
     try {
-      const r = await axRunAnalysis({ query: prompt, analysis_type: 'synthese_executive' });
+      const r = await axRunAnalysis({ query: prompt, analysis_type: analysisType || 'synthese_executive' });
       setReportData(r);
     } catch (e) {
       setReportData({ title: 'Erreur', content: '⚠️ ' + ((e && e.message) || 'Échec de génération'), sources: [] });
