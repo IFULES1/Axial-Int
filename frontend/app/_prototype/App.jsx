@@ -3276,13 +3276,13 @@ function DocumentsPanel() {
         <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current && fileRef.current.click()} disabled={busy}>
           <Icon name="plus" size={13} />{busy ? (lang === 'fr' ? 'Envoi…' : 'Uploading…') : (lang === 'fr' ? 'Ajouter' : 'Add')}
         </button>
-        <input ref={fileRef} type="file" accept=".pdf,.txt,.md" style={{ display: 'none' }} onChange={onFile} />
+        <input ref={fileRef} type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.md" style={{ display: 'none' }} onChange={onFile} />
       </div>
       {err && <p style={{ color: 'var(--error, #e5484d)', fontSize: 12.5, marginBottom: 10 }}>{err}</p>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {docs === null && <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>…</p>}
         {docs !== null && docs.length === 0 && (
-          <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>{lang === 'fr' ? 'Aucun document. Ajoute ton pitch deck, une étude marché…' : 'No document yet.'}</p>
+          <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>{lang === 'fr' ? 'Ajoutez vos documents pour enrichir le contexte d’Axial et obtenir des analyses plus personnalisées. Pitch deck, étude de marché, business plan… (PDF, DOCX, XLSX, CSV, TXT — 20 Mo max, PDF scannés lus par OCR)' : 'Add documents to enrich Axial’s context and get more personalized analyses. Pitch deck, market study, business plan… (PDF, DOCX, XLSX, CSV, TXT — 20 MB max, scanned PDFs read via OCR)'}</p>
         )}
         {(docs || []).map((d) => (
           <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', background: 'var(--surface-2)', borderRadius: 8 }}>
