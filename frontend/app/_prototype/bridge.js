@@ -158,13 +158,20 @@ export async function axChat(text) {
   const cid = await ensureConversation();
   return axChatIn(cid, text);
 }
-/** Send a chat message into a SPECIFIC backend conversation. */
+/** Send a chat message into a SPECIFIC backend conversation.
+ * Attaches any documents queued via the composer (window.AXIAL_PENDING_DOCS):
+ * they are injected directly into THIS message's context, like an attachment. */
 export async function axChatIn(cid, text) {
   let agent = "auto";
   try { agent = localStorage.getItem("axial_agent_mode") || "auto"; } catch (e) {}
-  return axFetch(`/intelligence/conversations/${cid}/messages`, {
-    method: "POST", body: { content: text, agent },
+  const pending = (typeof window !== "undefined" && window.AXIAL_PENDING_DOCS) || [];
+  const document_ids = pending.map((d) => d.id);
+  const r = await axFetch(`/intelligence/conversations/${cid}/messages`, {
+    method: "POST", body: { content: text, agent, document_ids: document_ids.length ? document_ids : null },
   });
+  if (typeof window !== "undefined") window.AXIAL_PENDING_DOCS = [];
+  try { window.dispatchEvent(new Event("axial-pending-docs")); } catch (e) {}
+  return r;
 }
 /** Create a fresh backend conversation and return its id. */
 export async function axCreateConversation() {

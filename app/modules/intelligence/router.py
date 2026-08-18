@@ -46,6 +46,9 @@ class ConversationOut(BaseModel):
 class MessageIn(BaseModel):
     content: str = Field(min_length=1)
     agent: str | None = None
+    # Documents joints via le composer : injectés DIRECTEMENT dans le contexte
+    # de ce message (garantis), en plus de leur indexation RAG durable.
+    document_ids: list[str] | None = None
 
 
 class MessageOut(BaseModel):
@@ -138,5 +141,6 @@ def post_message(conversation_id: str, payload: MessageIn,
                  user: AuthUser = Depends(get_current_user),
                  db: Session = Depends(get_db)) -> MessageOut:
     m = service.post_message(db, user.id, conversation_id, payload.content,
-                             payload.agent, is_admin=user.is_admin)
+                             payload.agent, is_admin=user.is_admin,
+                             document_ids=payload.document_ids)
     return _msg_out(m)

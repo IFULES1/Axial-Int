@@ -2113,6 +2113,12 @@ function Composer({ value, onChange, onSend }) {
     setMode(k);
     try { localStorage.setItem('axial_agent_mode', k); } catch (e) {}
   };
+  const [pendingDocs, setPendingDocs] = React.useState(() => (window.AXIAL_PENDING_DOCS || []));
+  React.useEffect(() => {
+    const sync = () => setPendingDocs([...(window.AXIAL_PENDING_DOCS || [])]);
+    window.addEventListener('axial-pending-docs', sync);
+    return () => window.removeEventListener('axial-pending-docs', sync);
+  }, []);
   const onPickFile = async (e) => {
     const f = e.target.files && e.target.files[0];
     e.target.value = '';
@@ -2120,11 +2126,18 @@ function Composer({ value, onChange, onSend }) {
     setUploading(true); setUploadMsg(null);
     try {
       const d = await axUploadDocument(f);
-      setUploadMsg({ ok: true, text: `« ${d.filename} » ajouté — il nourrira les prochaines réponses.` });
+      // Joint au PROCHAIN message envoyé (comme une pièce jointe), en plus de
+      // rester durablement dans la mémoire documentaire.
+      window.AXIAL_PENDING_DOCS = [...(window.AXIAL_PENDING_DOCS || []), { id: d.id, filename: d.filename }];
+      window.dispatchEvent(new Event('axial-pending-docs'));
     } catch (ex) {
       setUploadMsg({ ok: false, text: (ex && ex.message) || 'Échec de l’import.' });
     }
     setUploading(false);
+  };
+  const removePending = (id) => {
+    window.AXIAL_PENDING_DOCS = (window.AXIAL_PENDING_DOCS || []).filter((d) => d.id !== id);
+    window.dispatchEvent(new Event('axial-pending-docs'));
   };
   useConvEffect(() => {
     const el = ref.current; if (!el) return;
@@ -2160,9 +2173,23 @@ function Composer({ value, onChange, onSend }) {
           <Icon name="arrow-up" size={16} />
         </button>
       </div>
-      {uploadMsg && (
-        <div style={{ fontSize: 12.5, marginTop: 6, color: uploadMsg.ok ? 'var(--success)' : 'var(--error, #e5484d)', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Icon name={uploadMsg.ok ? 'check' : 'alert'} size={12} /> {uploadMsg.text}
+      {pendingDocs.length > 0 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+          {pendingDocs.map((d) => (
+            <span key={d.id} className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(121,118,247,0.10)', fontSize: 12 }}>
+              <Icon name="database" size={11} /> {d.filename}
+              <span style={{ color: 'var(--fg-3)', fontSize: 11 }}>· joint au prochain message</span>
+              <button onClick={() => removePending(d.id)} aria-label="Retirer"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg-3)', padding: 0, display: 'inline-flex' }}>
+                <Icon name="x" size={11} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {uploadMsg && !uploadMsg.ok && (
+        <div style={{ fontSize: 12.5, marginTop: 6, color: 'var(--error, #e5484d)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Icon name="alert" size={12} /> {uploadMsg.text}
         </div>
       )}
       <div className="composer-tip" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>

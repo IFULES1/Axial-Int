@@ -182,8 +182,31 @@ def _wants_long_answer(query: str) -> bool:
     return len(q) > 220 or any(s in q for s in _LONG_ANSWER_SIGNALS)
 
 
+def _attached_docs_context(db: Session, user_id: str,
+                           document_ids: list[str] | None) -> str:
+    """Contenu des documents joints au message — injecté tel quel dans le
+    prompt (comme une pièce jointe), sans dépendre du rerank RAG."""
+    if not document_ids:
+        return ""
+    from app.modules.documents import service as documents
+
+    parts: list[str] = []
+    for doc_id in document_ids[:3]:  # au plus 3 pièces jointes par message
+        try:
+            doc = documents.get_document(db, user_id, doc_id)
+        except Exception:
+            continue
+        body = (doc.content or "")[:8000]
+        parts.append(f"### Document joint : {doc.filename}\n{body}")
+    if not parts:
+        return ""
+    return ("## Documents joints par l'utilisateur (source PRIORITAIRE pour ce "
+            "message)\n" + "\n\n".join(parts))
+
+
 def post_message(db: Session, user_id: str, conversation_id: str, content: str,
-                 agent_override: str | None = None, *, is_admin: bool = False) -> Message:
+                 agent_override: str | None = None, *, is_admin: bool = False,
+                 document_ids: list[str] | None = None) -> Message:
     conv = _own_conversation(db, user_id, conversation_id)
     requested = agent_override or conv.default_agent
     # Conversation libre : AUCUN routing d'agent — discussion directe avec le LLM
@@ -216,10 +239,11 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
     from app.shared import search as web_search
 
     company_context = memory.build_context(db, user_id)
+    attached_context = _attached_docs_context(db, user_id, document_ids)
 
     # Vitesse : très courts messages en conversation libre (« merci », « ok »)
     # → pas de recherche du tout, réponse immédiate du LLM.
-    trivial = free_chat and len(content.strip()) < 25
+    trivial = free_chat and len(content.strip()) < 25 and not attached_context
 
     if trivial:
         doc_passages, web_results = [], []
@@ -242,6 +266,7 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
 
     parts = [p for p in (
         company_context,
+        attached_context,
         f"Sources (classées par pertinence) :\n{combined_context}" if combined_context else "",
     ) if p]
     prompt = (("\n\n".join(parts) + f"\n\nQuestion: {content}") if parts else content)
