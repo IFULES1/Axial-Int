@@ -9,7 +9,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy import Uuid as SAUuid
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,6 +37,22 @@ class CompanyProfile(Base):
     known_competitors: Mapped[str | None] = mapped_column(Text)
     main_challenge: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now
+    )
+
+
+class NotificationPrefs(Base):
+    """Préférences de notification email — une ligne par utilisateur.
+
+    Absence de ligne = valeurs par défaut (findings/weekly activés). Les types
+    « mentions/commentaires » ont été retirés du produit (décision 18/08)."""
+    __tablename__ = "notification_prefs"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(SAUuid, primary_key=True)
+    findings: Mapped[bool] = mapped_column(Boolean, default=True)   # emails de veille
+    weekly: Mapped[bool] = mapped_column(Boolean, default=True)     # récap hebdo
+    marketing: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now
     )

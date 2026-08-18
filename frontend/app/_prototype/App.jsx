@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axChat, axChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axCreateReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axCreateReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -1434,6 +1434,30 @@ function OnbStep1({ value, onChange, onNext }) {
         <Field label="VOTRE MARCHÉ">
           <ChipsRow value={v.geo} options={GEOS} onChange={(o) => onChange({ ...v, geo: o })} />
         </Field>
+        <Field label="PRÉCISIONS (OPTIONNEL — enrichissent la mémoire d'Axial)">
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <input className="input" style={{ flex: '1 1 130px' }} value={v.foundingYear || ''}
+              placeholder="Année de création" inputMode="numeric"
+              onChange={(e) => onChange({ ...v, foundingYear: e.target.value.replace(/[^0-9]/g, '').slice(0, 4) })} />
+            <input className="input" style={{ flex: '1 1 130px' }} value={v.teamSize || ''}
+              placeholder="Taille d'équipe (ex. 4)"
+              onChange={(e) => onChange({ ...v, teamSize: e.target.value })} />
+            <input className="input" style={{ flex: '1 1 130px' }} value={v.country || ''}
+              placeholder="Pays"
+              onChange={(e) => onChange({ ...v, country: e.target.value })} />
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+            <input className="input" style={{ flex: '1 1 200px' }} value={v.clientSegment || ''}
+              placeholder="Segment client (ex. DRH de PME 50-500)"
+              onChange={(e) => onChange({ ...v, clientSegment: e.target.value })} />
+            <input className="input" style={{ flex: '1 1 200px' }} value={v.competitors || ''}
+              placeholder="Concurrents connus (séparés par des virgules)"
+              onChange={(e) => onChange({ ...v, competitors: e.target.value })} />
+          </div>
+        </Field>
+        <Field label="VOS DOCUMENTS (OPTIONNEL — pitch deck, étude, business plan)">
+          <OnbDocUpload />
+        </Field>
       </div>
 
       <div className="onb-preview-card">
@@ -1451,6 +1475,41 @@ function OnbStep1({ value, onChange, onNext }) {
         </p>
       </div>
     </OnbShell>
+  );
+}
+
+function OnbDocUpload() {
+  const fileRef = React.useRef(null);
+  const [docs, setDocs] = React.useState([]);
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+  const onFile = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f || busy) return;
+    setBusy(true); setErr('');
+    try {
+      const d = await axUploadDocument(f);
+      setDocs((ds) => [...ds, d.filename]);
+    } catch (ex) { setErr((ex && ex.message) || 'Échec de l\'import.'); }
+    setBusy(false);
+  };
+  return (
+    <div>
+      <input ref={fileRef} type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.md" style={{ display: 'none' }} onChange={onFile} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <button type="button" className="btn btn-secondary" disabled={busy}
+          onClick={() => fileRef.current && fileRef.current.click()}>
+          <Icon name="plus" size={13} /> {busy ? 'Import…' : 'Ajouter un document'}
+        </button>
+        {docs.map((n) => (
+          <span key={n} className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+            <Icon name="check" size={11} /> {n}
+          </span>
+        ))}
+      </div>
+      {err && <p className="caption" style={{ color: 'var(--error, #e5484d)', margin: '6px 0 0' }}>{err}</p>}
+    </div>
   );
 }
 
@@ -3492,7 +3551,12 @@ function SettingsSurface() {
   const lang = window.AXIAL_LANG || 'fr';
   const [theme, setTheme] = window.useTheme();
   const [tab, setTab] = useStateM('account');
-  const [notif, setNotif] = useStateM({ findings: true, weekly: true, marketing: false });
+  const [notif, setNotifState] = useStateM({ findings: true, weekly: true, marketing: false });
+  React.useEffect(() => { axGetNotifPrefs().then(setNotifState).catch(() => {}); }, []);
+  const setNotif = (next) => {
+    setNotifState(next);
+    axSetNotifPrefs(next).catch(() => {});  // persistance silencieuse
+  };
 
   const tabs = [
     { group: t('settings.personal'), items: [
@@ -4443,7 +4507,7 @@ function DocsMemory({ isFR }) {
         </div>
         <p style={{ color: 'var(--fg-2)', fontSize: 13.5, lineHeight: 1.6, marginTop: 16 }}>
           {isFR
-            ? 'Les faits temporels (m\u00e9triques, hypoth\u00e8ses) p\u00e9riment apr\u00e8s 90 jours sans confirmation. Les faits structurels (secteur, marc\u00e9 cible) restent jusqu\u2019\u00e0 r\u00e9vocation.'
+            ? 'Les faits temporels (m\u00e9triques, hypoth\u00e8ses) p\u00e9riment apr\u00e8s 90 jours sans confirmation. Les faits structurels (secteur, march\u00e9 cible) restent jusqu\u2019\u00e0 r\u00e9vocation.'
             : 'Temporal facts (metrics, assumptions) expire after 90 days without confirmation. Structural facts (sector, target market) stay until revoked.'}
         </p>
       </section>
@@ -5372,6 +5436,11 @@ function App() {
           funding_stage: onbCtx.stage || null,
           main_challenge: onbCtx.challenge || null,
           target_market: onbCtx.geo || null,
+          founding_year: onbCtx.foundingYear ? parseInt(onbCtx.foundingYear, 10) : null,
+          team_size: onbCtx.teamSize || null,
+          country: onbCtx.country || null,
+          client_segment: onbCtx.clientSegment || null,
+          known_competitors: onbCtx.competitors || null,
         });
       } catch (e) { /* non bloquant */ }
       go('onb4');

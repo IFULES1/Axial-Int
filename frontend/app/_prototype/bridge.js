@@ -101,6 +101,11 @@ export async function axSubscribe(plan, trial = false) {
 export async function axPrefill(url) {
   return axFetch("/memory/prefill", { method: "POST", body: { url } });
 }
+/** Email notification preferences. */
+export async function axGetNotifPrefs() { return axFetch("/memory/notifications"); }
+export async function axSetNotifPrefs(prefs) {
+  return axFetch("/memory/notifications", { method: "PUT", body: prefs });
+}
 /** Current subscription mirror (plan, status, next debit date). */
 export async function axSubscription() {
   return axFetch("/billing/subscription");

@@ -162,3 +162,29 @@ def prefill_from_website(url: str) -> dict:
         "sector": (data.get("sector") or None),
         "website": url if url.startswith("http") else "https://" + url,
     }
+
+
+# --- Préférences de notification -------------------------------------------
+
+def get_notification_prefs(db: Session, user_id: str) -> dict:
+    from app.modules.memory.models import NotificationPrefs
+
+    row = db.get(NotificationPrefs, uuid.UUID(user_id))
+    if row is None:
+        return {"findings": True, "weekly": True, "marketing": False}
+    return {"findings": row.findings, "weekly": row.weekly, "marketing": row.marketing}
+
+
+def set_notification_prefs(db: Session, user_id: str, prefs: dict) -> dict:
+    from app.modules.memory.models import NotificationPrefs
+
+    uid = uuid.UUID(user_id)
+    row = db.get(NotificationPrefs, uid)
+    if row is None:
+        row = NotificationPrefs(user_id=uid)
+        db.add(row)
+    for k in ("findings", "weekly", "marketing"):
+        if k in prefs and prefs[k] is not None:
+            setattr(row, k, bool(prefs[k]))
+    db.commit()
+    return get_notification_prefs(db, user_id)

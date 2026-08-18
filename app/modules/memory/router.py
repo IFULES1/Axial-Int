@@ -74,3 +74,21 @@ def delete_profile(user: AuthUser = Depends(get_current_user),
                    db: Session = Depends(get_db)) -> Response:
     service.delete_profile(db, user.id)
     return Response(status_code=204)
+
+
+class NotifPrefsIn(BaseModel):
+    findings: bool | None = None
+    weekly: bool | None = None
+    marketing: bool | None = None
+
+
+@router.get("/notifications")
+def get_notifications(user: AuthUser = Depends(get_current_user),
+                      db: Session = Depends(get_db)) -> dict:
+    return service.get_notification_prefs(db, user.id)
+
+
+@router.put("/notifications")
+def put_notifications(payload: NotifPrefsIn, user: AuthUser = Depends(get_current_user),
+                      db: Session = Depends(get_db)) -> dict:
+    return service.set_notification_prefs(db, user.id, payload.model_dump())

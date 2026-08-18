@@ -29,6 +29,45 @@ def tick() -> None:
             logger.info("Worker tick: ran %d due watch(es)", count)
 
 
+def weekly_recap() -> None:
+    """Récap hebdo par email (lundi matin) — uniquement aux utilisateurs dont la
+    préférence `weekly` est active ET qui ont eu de l'activité de veille."""
+    from sqlalchemy import text
+
+    from app.modules.watches.email import send_email
+
+    with SessionLocal() as db:
+        rows = db.execute(text("""
+            SELECT u.id, u.email,
+                   count(DISTINCT w.id)  AS watches,
+                   count(r.id)           AS runs,
+                   count(r.id) FILTER (WHERE r.had_changes) AS runs_new
+            FROM auth.users u
+            JOIN watches w ON w.user_id = u.id
+            LEFT JOIN watch_runs r ON r.watch_id = w.id
+                 AND r.created_at > now() - interval '7 days'
+            LEFT JOIN notification_prefs np ON np.user_id = u.id
+            WHERE COALESCE(np.weekly, true)
+            GROUP BY u.id, u.email
+        """)).all()
+        for uid, email, watches, runs, runs_new in rows:
+            if not runs:
+                continue  # pas d'activité → pas d'email
+            body = (
+                f"# Votre semaine Axial\n\n"
+                f"- **{watches}** agent(s) de veille actifs\n"
+                f"- **{runs}** run(s) exécutés ces 7 derniers jours\n"
+                f"- **{runs_new}** avec du nouveau\n\n"
+                f"Retrouvez le détail dans l'onglet Agents : https://app.axial-ia.fr\n\n"
+                f"---\n*Pour ne plus recevoir ce récap : Paramètres → Notifications.*"
+            )
+            try:
+                send_email([email], "[Axial] Récap hebdomadaire de votre veille", body)
+                logger.info("Récap hebdo envoyé à %s", email)
+            except Exception:
+                logger.warning("Récap hebdo : échec pour %s", email, exc_info=True)
+
+
 def main() -> None:
     logger.info("Axial worker starting (tick=%ss)", TICK_SECONDS)
     scheduler = BlockingScheduler(timezone="UTC")
@@ -36,6 +75,8 @@ def main() -> None:
     # next_run_time=None would ADD the job PAUSED (it never runs) — the bug we hit.
     scheduler.add_job(tick, "interval", seconds=TICK_SECONDS,
                       next_run_time=dt.datetime.now(dt.timezone.utc))
+    # Lundi 08:00 Paris ≈ 06:00 UTC (été) — récap hebdo.
+    scheduler.add_job(weekly_recap, "cron", day_of_week="mon", hour=6, minute=0)
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):

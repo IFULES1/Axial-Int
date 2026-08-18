@@ -168,7 +168,10 @@ def run_watch(db: Session, watch: Watch) -> bool:
 
         # 4. Charge credits + email the digest.
         billing.consume_credits(db, uid, "run_agent_veille", is_admin=False)  # 5 crédits / run
-        if watch.email_recipients:
+        from app.modules.memory import service as memory_service
+
+        wants_email = memory_service.get_notification_prefs(db, uid).get("findings", True)
+        if watch.email_recipients and wants_email:
             send_email(watch.email_recipients, f"[Axial · Veille] {watch.name}",
                        _email_body(watch.name, veille))
 

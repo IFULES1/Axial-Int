@@ -7,7 +7,7 @@
 
 ### Parcours & données
 - [x] **Purger toutes les données mockées** *(fait 18/08 : MOCK_USER/MOCK_CONVERSATIONS supprimés, fallback neutre, suggestions personnalisées depuis le vrai profil)*
-- [ ] **Onboarding ↔ Mémoire alignés** : demander à l'onboarding exactement les mêmes informations que celles de l'onglet Mémoire (constat : les infos saisies à l'onboarding ne se retrouvent pas ensuite dans la mémoire) + **chargement de documents dès l'onboarding**.
+- [x] **Onboarding ↔ Mémoire alignés** *(fait 18/08 : les 12 champs Mémoire sont demandés à l'onboarding — bloc « Précisions (optionnel) » — + upload de documents dès l'étape 1)*.
 - [x] **Inverser les étapes 3 et 4** *(fait 18/08 : Contexte → Démo → Activation (carte) → Première analyse ; profil sauvegardé dès l'étape 2)*
 - [x] **Ne pas lancer d'analyse automatiquement** *(fait 18/08 : la question suggérée pré-remplit le composer, l'utilisateur envoie lui-même)*
 
@@ -16,11 +16,11 @@
 - [x] **Paramètres** : historiques conso + factures Stripe *(fait 18/08 : journal `credit_events` + factures avec PDF, onglet Facturation réel)*.
 
 ### Navigation & UI
-- [ ] Vérifier que **tous les boutons retour** mènent au bon endroit.
-- [ ] **Réagencer la page Documentation** pour la rendre lisible.
+- [x] Vérifier les **boutons retour** *(audit 18/08 : 8 boutons vérifiés cohérents avec le nouveau flux — RAS)*.
+- [x] **Réagencer la page Documentation** *(fait 18/08 : cause racine = les classes .docs-* n'avaient JAMAIS eu de CSS ; feuille de style complète écrite — hiérarchie, tableaux de coûts, cartes, responsive — + typo « marcé » corrigée)*.
 
 ### Notifications & paramètres
-- [ ] **Notifications par email** à mettre en place *(la partie « supprimer mentions/commentaires » est faite le 18/08 ; reste le backend d'envoi réel)*.
+- [x] **Notifications par email** *(fait 18/08 : préférences persistées (migration 0010) + toggles réels dans Paramètres + emails de veille gérés par la préférence « findings » + récap hebdo lundi matin dans le worker)*.
 - [x] Paramètres > Espace de travail : **retirer « Membres »** *(fait 18/08)*
 
 ### Légal (ouvert le 18/08)
