@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axCreateReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -2363,19 +2363,40 @@ function TopControls() {
 /* =================================================================
    REPORTS — Empty state composer (state 1)
    ================================================================= */
-function ReportsEmpty({ onStart }) {
+function ReportsEmpty({ onStart, onOpenReport }) {
   const t = window.useT();
   const lang = window.AXIAL_LANG || 'fr';
   const [type, setType] = useStateS('market');
-  const [prompt, setPrompt] = useStateS(
-    lang === 'fr'
-      ? 'Cartographie concurrentielle du marché SIRH français : Lucca, Payfit, Cegid. Positionnement, parts, forces structurelles.'
-      : 'Competitive map of the French HRIS market: Lucca, Payfit, Cegid. Positioning, share, structural forces.'
-  );
+  const [prompt, setPrompt] = useStateS('');
+  const [saved, setSaved] = useStateS(null);
+  useEffectS(() => { axListReports().then(setSaved).catch(() => setSaved([])); }, []);
   const types = window.AXIAL_SURFACES.REPORT_TYPES;
   const tpl = window.AXIAL_SURFACES.REPORT_TEMPLATES[lang];
   const sel = types.find((x) => x.id === type);
   const credits = sel.cost;
+  const fmtD = (iso) => new Date(iso).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  const savedList = saved && saved.length > 0 && (
+    <div style={{ marginTop: 34 }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 12 }}>
+        {lang === 'fr' ? 'Vos rapports' : 'Your reports'}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 760 }}>
+        {saved.map((r) => (
+          <button key={r.id} onClick={() => onOpenReport && onOpenReport(r.id)}
+            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
+                     background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10,
+                     padding: '11px 14px', cursor: 'pointer', color: 'var(--fg)', textAlign: 'left', fontSize: 13.5 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+              <Icon name="file" size={13} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</span>
+            </span>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', flexShrink: 0 }}>{r.created_at ? fmtD(r.created_at) : ''}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="surface">
@@ -2431,6 +2452,7 @@ function ReportsEmpty({ onStart }) {
           ))}
         </div>
       </div>
+      {savedList}
     </div>
   );
 }
@@ -2438,292 +2460,66 @@ function ReportsEmpty({ onStart }) {
 /* =================================================================
    REPORTS — Generating (state 2)
    ================================================================= */
-function ReportsGenerating({ onDone }) {
+function ReportsGenerating({ genMeta }) {
   const t = window.useT();
   const lang = window.AXIAL_LANG || 'fr';
-  const [progress, setProgress] = useStateS(0);
-  const [sourceCount, setSourceCount] = useStateS(0);
   const [elapsed, setElapsed] = useStateS(0);
-
   useEffectS(() => {
-    const id = setInterval(() => {
-      setProgress((p) => Math.min(p + 1.4, 100));
-      setElapsed((e) => e + 1);
-      setSourceCount((c) => Math.min(c + (Math.random() < 0.4 ? 1 : 0), 47));
-    }, 220);
+    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => clearInterval(id);
   }, []);
 
-  const tasks = [
-    { key: 'parsed', threshold: 8 },
-    { key: 'gathered', threshold: 32 },
-    { key: 'cross', threshold: 50 },
-    { key: 'drafting', threshold: 72 },
-    { key: 'charts', threshold: 86 },
-    { key: 'review', threshold: 96 },
-  ];
-
-  const head = lang === 'fr'
-    ? 'Cartographie concurrentielle — SIRH France'
-    : 'Competitive map — French HRIS';
-  const meta = lang === 'fr'
-    ? 'Brouillon · Profondeur Standard · 47 sources scannées'
-    : 'Draft · Standard depth · 47 sources scanned';
+  // Étapes INDICATIVES basées sur le temps écoulé (le backend ne stream pas
+  // encore sa progression) — aucune fausse métrique, aucun faux contenu.
+  const steps = lang === 'fr'
+    ? ['Recherche des sources (web + vos documents)', 'Analyse et recoupement', 'Rédaction du rapport']
+    : ['Gathering sources (web + your documents)', 'Analysis & cross-checking', 'Writing the report'];
+  const current = elapsed < 15 ? 0 : elapsed < 35 ? 1 : 2;
 
   return (
     <div className="surface" style={{ paddingBottom: 32 }}>
       <div className="surface-head">
         <div>
           <h1>{t('reports.gen.title')}</h1>
-          <p>{lang === 'fr' ? 'Vous pouvez quitter cette page — Axial vous notifie quand le rapport est prêt.' : 'You can leave this page — Axial will notify you when the report is ready.'}</p>
+          <p>{lang === 'fr'
+            ? 'Vous pouvez naviguer ailleurs — le rapport s\'ouvrira ici dès qu\'il est prêt.'
+            : 'You can navigate away — the report will open here as soon as it\'s ready.'}</p>
         </div>
         <TopControls />
       </div>
 
       <div className="rep-gen">
         <div className="rep-gen-doc">
-          <h1>{head}</h1>
-          <div className="doc-meta">{meta}</div>
-
-          <h2>{lang === 'fr' ? '1. Synthèse exécutive' : '1. Executive summary'}</h2>
-          <p>
-            {lang === 'fr'
-              ? 'Le marché français du SIRH atteint 1,8 Md€ en 2025, en croissance de 11 % vs 2024. Trois acteurs concentrent 62 % du segment > 50 employés : Lucca (24 %), Payfit (22 %), Cegid (16 %).'
-              : 'The French HRIS market reaches €1.8B in 2025, up 11% vs 2024. Three players hold 62% of the >50-employee segment: Lucca (24%), Payfit (22%), Cegid (16%).'}
-            <span className="gen-cursor"></span>
-          </p>
-          <div className="skeleton med"></div>
-          <div className="skeleton"></div>
-          <div className="skeleton short"></div>
-
-          <h2>{lang === 'fr' ? '2. Cadrage de la question' : '2. Framing the question'}</h2>
-          <div className="skeleton"></div>
-          <div className="skeleton med"></div>
-          <div className="skeleton short"></div>
-          <div className="skeleton"></div>
-        </div>
-
-        <div className="rep-gen-side">
-          <div className="rep-gen-progress">
-            <div className="rep-gen-progress-label">
-              <span>{Math.round(progress)}%</span>
-              <span>{t('reports.gen.elapsed')} {Math.floor(elapsed / 5)}m {(elapsed * 12) % 60}s</span>
-            </div>
-            <div className="rep-gen-progress-track">
-              <div className="rep-gen-progress-fill" style={{ width: progress + '%' }}></div>
-            </div>
+          <h1 style={{ fontSize: 20 }}>{(genMeta && genMeta.prompt) || (lang === 'fr' ? 'Votre rapport' : 'Your report')}</h1>
+          <div className="doc-meta mono" style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+            <span className="ax-thinking"><span className="dots"><i /><i /><i /></span></span>
+            <span>{lang === 'fr' ? 'Génération en cours' : 'Generating'} · {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')} · ~1-2 min</span>
           </div>
 
-          <div className="task-list">
-            {tasks.map((tk) => {
-              const done = progress >= tk.threshold;
-              const active = !done && progress >= (tk.threshold - 14);
-              return (
-                <div key={tk.key} className={'task' + (done ? ' done' : '') + (active ? ' active' : '')}>
-                  <span className="task-dot">
-                    {done ? <Icon name="check" size={11} stroke={2.4} /> : (active ? <span className="spinner" style={{ width: 10, height: 10, margin: 0, borderWidth: 1.5 }} /> : null)}
-                  </span>
-                  <div className="task-body">
-                    <div className="task-title">{t(`reports.gen.tasks.${tk.key}`)}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="rep-source-counter">
-            <span className="num">{sourceCount}</span>
-            <span className="lbl">{t('reports.gen.sources_found')}</span>
-          </div>
-
-          <button className="btn btn-secondary" onClick={onDone} style={{ marginTop: 'auto' }}>
-            {lang === 'fr' ? 'Voir le brouillon' : 'View draft'} <Icon name="arrow-right" size={14} />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* =================================================================
-   REPORTS — Editor (state 3) — three-column
-   ================================================================= */
-function renderInline(text, kp, onCite) {
-  const nodes = [];
-  const re = /\*\*(.+?)\*\*|\[(\d+(?:\]\[\d+)*)\]/g;
-  let last = 0, m, i = 0;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) nodes.push(text.slice(last, m.index));
-    if (m[1] !== undefined) nodes.push(<strong key={kp + 'b' + i++}>{m[1]}</strong>);
-    else {
-      const firstId = parseInt(m[2], 10);
-      nodes.push(
-        <sup key={kp + 'c' + i++}
-          onClick={onCite ? () => onCite(firstId) : undefined}
-          style={{ color: 'var(--v-bright)', fontWeight: 600, marginLeft: 1,
-                   cursor: onCite ? 'pointer' : 'inherit' }}>[{m[2]}]</sup>
-      );
-    }
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) nodes.push(text.slice(last));
-  return nodes;
-}
-
-function MarkdownView({ text, onCite }) {
-  const lines = (text || '').split('\n');
-  const blocks = [];
-  let bullets = [];
-  const flush = (k) => {
-    if (bullets.length) {
-      blocks.push(
-        <ul key={'ul' + k} style={{ margin: '6px 0 6px 20px', display: 'flex', flexDirection: 'column', gap: 5 }}>
-          {bullets.map((b, i) => <li key={i} style={{ lineHeight: 1.55 }}>{renderInline(b, 'l' + k + i, onCite)}</li>)}
-        </ul>,
-      );
-      bullets = [];
-    }
-  };
-  lines.forEach((raw, idx) => {
-    const line = raw.replace(/\s+$/, '');
-    if (!line.trim()) { flush(idx); return; }
-    if (line.startsWith('### ')) { flush(idx); blocks.push(<h3 key={idx} style={{ fontSize: 15, fontWeight: 700, margin: '14px 0 6px' }}>{renderInline(line.slice(4), 'h' + idx, onCite)}</h3>); }
-    else if (line.startsWith('## ')) { flush(idx); blocks.push(<h2 key={idx} style={{ fontSize: 17, fontWeight: 700, margin: '18px 0 8px' }}>{renderInline(line.slice(3), 'h' + idx, onCite)}</h2>); }
-    else if (line.startsWith('# ')) { flush(idx); blocks.push(<h1 key={idx} style={{ fontSize: 20, fontWeight: 800, margin: '8px 0 10px' }}>{renderInline(line.slice(2), 'h' + idx, onCite)}</h1>); }
-    else if (line.trim() === '---' || line.trim() === '***') { flush(idx); blocks.push(<hr key={idx} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '16px 0' }} />); }
-    else if (/^\s*[-*]\s+/.test(line)) { bullets.push(line.replace(/^\s*[-*]\s+/, '')); }
-    else { flush(idx); blocks.push(<p key={idx} style={{ margin: '6px 0', lineHeight: 1.6 }}>{renderInline(line, 'p' + idx, onCite)}</p>); }
-  });
-  flush('end');
-  return <div>{blocks}</div>;
-}
-
-function ReportsEditor({ data, onBack, openShare }) {
-  const lang = window.AXIAL_LANG || 'fr';
-  const t = window.useT();
-  const [saving, setSaving] = React.useState(false);
-  const [savedId, setSavedId] = React.useState(null);
-  const title = (data && data.title) || (lang === 'fr' ? 'Rapport' : 'Report');
-  const content = (data && data.content) || '';
-  const sources = (data && data.sources) || [];
-
-  const exportPdf = async () => {
-    setSaving(true);
-    try {
-      let id = savedId;
-      if (!id) {
-        const r = await axCreateReport({ title, content, analysis_type: (data && data.analysis_type) || 'synthese_executive', sources });
-        id = r.id; setSavedId(id);
-      }
-      await axDownloadReportPdf(id, title.slice(0, 60) + '.pdf');
-    } catch (e) { /* noop */ }
-    setSaving(false);
-  };
-
-  return (
-    <div className="surface" style={{ paddingTop: 16, paddingBottom: 16, maxWidth: 1000 }}>
-      <div className="surface-head" style={{ marginBottom: 14 }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <button className="btn btn-ghost btn-sm" onClick={onBack}><Icon name="arrow-left" size={14} /></button>
-          <div>
-            <h1 style={{ fontSize: 22 }}>{title}</h1>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-              {sources.length} sources · {lang === 'fr' ? 'Rapport Axial' : 'Axial report'}
-            </p>
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button className="btn btn-secondary btn-sm" onClick={openShare}><Icon name="share" size={14} />{t('common.share')}</button>
-          <button className="btn btn-primary btn-sm" onClick={exportPdf} disabled={saving}>
-            <Icon name="download" size={14} />{saving ? (lang === 'fr' ? 'Export…' : 'Exporting…') : 'PDF'}
-          </button>
-          <TopControls />
-        </div>
-      </div>
-
-      <div className="rep-doc" style={{ fontSize: 14, maxWidth: 820 }}>
-        {content ? <MarkdownView text={content} /> : (lang === 'fr' ? 'Aucun contenu.' : 'No content.')}
-      </div>
-
-      {sources.length > 0 && (
-        <div style={{ marginTop: 28 }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 12 }}>
-            Sources
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {sources.map((s, i) => (
-              <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 13 }}>
-                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--v-bright)' }}>[{i + 1}]</span>
-                {s.url
-                  ? <a href={s.url} target="_blank" rel="noreferrer" style={{ color: 'var(--fg)', textDecoration: 'none' }}>{s.title || s.url}</a>
-                  : <span>{s.title || s.reference || ''}</span>}
-                {s.domain && <span style={{ color: 'var(--fg-3)' }}>· {s.domain}</span>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, margin: '22px 0' }}>
+            {steps.map((s, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13.5,
+                color: i < current ? 'var(--success)' : i === current ? 'var(--fg)' : 'var(--fg-3)' }}>
+                {i < current
+                  ? <Icon name="check" size={13} />
+                  : i === current
+                    ? <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--v-bright)', boxShadow: '0 0 8px var(--v-bright)', flexShrink: 0 }} />
+                    : <span style={{ width: 10, height: 10, borderRadius: '50%', border: '1px solid var(--border-strong)', flexShrink: 0 }} />}
+                {s}
               </div>
             ))}
           </div>
-        </div>
-      )}
-    </div>
-  );
-}
 
-/* =================================================================
-   REPORTS — Quota Exceeded (state 6)
-   ================================================================= */
-function ReportsQuota({ onClose }) {
-  const t = window.useT();
-  const lang = window.AXIAL_LANG || 'fr';
-  return (
-    <div className="surface">
-      <div className="surface-head">
-        <div>
-          <h1>{t('reports.quota.title')}</h1>
-          <p>{t('reports.quota.body')}</p>
+          <div className="skeleton med"></div>
+          <div className="skeleton"></div>
+          <div className="skeleton"></div>
+          <div className="skeleton med"></div>
         </div>
-        <TopControls />
-      </div>
-      <div className="quota-card">
-        <div className="quota-usage">
-          <h3>{t('reports.quota.title')}</h3>
-          <p style={{ fontSize: 13.5, color: 'var(--fg-2)', lineHeight: 1.6, margin: '6px 0 0' }}>
-            {t('reports.quota.body')}
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div className="quota-option featured">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <h3>Pro</h3>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--v-soft)', letterSpacing: '0.10em', textTransform: 'uppercase', fontWeight: 700 }}>{lang === 'fr' ? 'Recommandé' : 'Recommended'}</span>
-            </div>
-            <div className="price">50 €<small>/{lang === 'fr' ? 'mois' : 'mo'}</small></div>
-            <ul>
-              <li><Icon name="check" size={13} className="check" />120 {lang === 'fr' ? 'crédits' : 'credits'} / {lang === 'fr' ? 'mois' : 'mo'}</li>
-              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? '2 agents de veille' : '2 monitoring agents'}</li>
-              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? 'Templates (fundraising, ICP, GTM)' : 'Templates (fundraising, ICP, GTM)'}</li>
-              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? 'Export PDF' : 'PDF export'}</li>
-            </ul>
-            <button className="btn btn-primary" style={{ marginTop: 4 }}>{t('reports.quota.upgrade')}</button>
-          </div>
-
-          <div className="quota-option">
-            <h3>{lang === 'fr' ? 'Recharge ponctuelle' : 'One-time top-up'}</h3>
-            <div className="price">20 €<small>{lang === 'fr' ? ' · 50 crédits' : ' · 50 credits'}</small></div>
-            <p style={{ fontSize: 12.5, color: 'var(--fg-2)', margin: 0, lineHeight: 1.5 }}>
-              {lang === 'fr' ? 'Packs ponctuels (50, 100 ou 200 crédits) qui ne périment pas.' : 'One-off packs (50, 100 or 200 credits) that never expire.'}
-            </p>
-            <button className="btn btn-secondary" style={{ marginTop: 4 }}>{t('reports.quota.topup')}</button>
-          </div>
-        </div>
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
-        <button className="btn btn-ghost" onClick={onClose}>{t('common.back')}</button>
       </div>
     </div>
   );
 }
 
-window.ReportsEmpty = ReportsEmpty;
 window.ReportsGenerating = ReportsGenerating;
 window.ReportsEditor = ReportsEditor;
 function SourceConflictModal({ onClose }) {
@@ -5298,7 +5094,9 @@ function App() {
   }, [route]);
   const [reportsState, setReportsState] = useState('empty'); // empty | generating | editor | quota
   const [reportData, setReportData] = useState(null);
+  const [genMeta, setGenMeta] = useState(null); // { prompt } pendant la génération
   const startReport = async ({ type, analysisType, prompt }) => {
+    setGenMeta({ prompt });
     setReportsState('generating');
     try {
       const r = await axRunAnalysis({ query: prompt, analysis_type: analysisType || 'synthese_executive' });
@@ -5306,7 +5104,15 @@ function App() {
     } catch (e) {
       setReportData({ title: 'Erreur', content: '⚠️ ' + ((e && e.message) || 'Échec de génération'), sources: [] });
     }
+    setGenMeta(null);
     setReportsState('editor');
+  };
+  const openSavedReport = async (id) => {
+    try {
+      const r = await axGetReport(id);
+      setReportData({ ...r, report_id: r.id });
+      setReportsState('editor');
+    } catch (e) { /* noop */ }
   };
   const [agentsState, setAgentsState] = useState('library'); // library | session
   const [activeAgent, setActiveAgent] = useState(null);
@@ -5512,7 +5318,8 @@ function App() {
         subRoute={subRoute}
         onSubRoute={(r) => {
           setSubRoute(r);
-          if (r === 'reports') setReportsState('empty');
+          // Ne PAS réinitialiser l'écran Rapports : une génération en cours ou
+          // un rapport ouvert doivent survivre à la navigation.
           if (r === 'agents') setAgentsState('library');
         }}>
 
@@ -5532,10 +5339,10 @@ function App() {
         )}
 
         {subRoute === 'reports' && reportsState === 'empty' && (
-          <ReportsEmpty onStart={startReport} />
+          <ReportsEmpty onStart={startReport} onOpenReport={openSavedReport} />
         )}
         {subRoute === 'reports' && reportsState === 'generating' && (
-          <ReportsGenerating onDone={() => {}} />
+          <ReportsGenerating genMeta={genMeta} />
         )}
         {subRoute === 'reports' && reportsState === 'editor' && (
           <ReportsEditor

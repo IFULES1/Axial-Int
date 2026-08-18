@@ -17,6 +17,7 @@ class AnalysisResponse(BaseModel):
     analysis_type: str
     title: str
     content: str
+    report_id: str | None = None  # rapport archivé automatiquement
     sources: list[dict]
     degraded: bool  # True if the primary web-search engine was unavailable
     status_note: str | None  # human-readable explanation when degraded

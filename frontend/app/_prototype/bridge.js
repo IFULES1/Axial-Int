@@ -268,6 +268,7 @@ export async function axUploadDocument(file, _retried = false) {
 export async function axRunAnalysis(body) { return axFetch("/analysis/run", { method: "POST", body }); }
 export async function axCreateReport(body) { return axFetch("/reports", { method: "POST", body }); }
 export async function axListReports() { return axFetch("/reports"); }
+export async function axGetReport(id) { return axFetch(`/reports/${id}`); }
 
 /** Fetch a report's PDF with auth and trigger a browser download. */
 export async function axDownloadReportPdf(reportId, filename) {
