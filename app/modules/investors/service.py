@@ -246,6 +246,66 @@ def _match_vocabulary(answer: str, vocabulary: list[str]) -> list[str]:
     return picked
 
 
+def _alive_sectors() -> set[int]:
+    """Sector ids that actually have at least one tagged investor.
+
+    12 of the 35 sectors are tagged on nothing — almost all of them sub-sectors
+    whose parent carries the tagging instead. Broadening has to know this, or it
+    keeps proposing empty branches.
+    """
+    d = client.dataset()
+    return {r["secteur_id"] for r in d["investisseur_secteur"]}
+
+
+def _broaden(sector_ids: list[int]) -> tuple[list[int], list[str], str]:
+    """Climb the sector taxonomy until the branch actually holds investors.
+
+    Returns (ids, names, how) — `how` is empty when nothing was broadened.
+    """
+    d = client.dataset()
+    by_id = {s["id"]: s for s in d["secteur"]}
+    alive = _alive_sectors()
+
+    kept = [i for i in sector_ids if i in alive]
+    if kept:
+        return kept, [by_id[i]["nom"] for i in kept if i in by_id], ""
+
+    # 1. Parent of each empty sector (a sub-sector's tagging lives on its parent).
+    parents: list[int] = []
+    for i in sector_ids:
+        parent = (by_id.get(i) or {}).get("secteur_parent_id")
+        if parent and parent in alive and parent not in parents:
+            parents.append(parent)
+    if parents:
+        return parents, [by_id[p]["nom"] for p in parents], "parent"
+
+    # 2. Siblings under the same parent.
+    siblings: list[int] = []
+    for i in sector_ids:
+        parent = (by_id.get(i) or {}).get("secteur_parent_id")
+        if not parent:
+            continue
+        for s in d["secteur"]:
+            if s.get("secteur_parent_id") == parent and s["id"] in alive \
+                    and s["id"] not in siblings:
+                siblings.append(s["id"])
+    if siblings:
+        return siblings, [by_id[s]["nom"] for s in siblings], "voisins"
+
+    # 3. Closest populated sectors, chosen by the model among live ones only.
+    names = [by_id[i]["nom"] for i in sector_ids if i in by_id]
+    if names:
+        vocabulary = sorted(by_id[i]["nom"] for i in alive)
+        suggested = _llm_map_to_referential(
+            "secteur (aucun investisseur n'est tagué sur ce secteur, trouve les "
+            "secteurs les plus proches)", names, vocabulary, "secteur")
+        ids = resolve_names(suggested, d["secteur"])
+        if ids:
+            return ids, suggested, "proches"
+
+    return [], [], "aucun"
+
+
 def map_for_profile(profile: dict, *, limit: int = 15) -> dict:
     """Full mapping for a company profile: resolve, search, rank, summarise."""
     d = client.dataset()
@@ -271,6 +331,13 @@ def map_for_profile(profile: dict, *, limit: int = 15) -> dict:
                                                 refs["stades"], "stade")
         stage_ids = resolve_names(mapped_stages, d["stade"])
 
+    # 3. Le secteur demandé peut n'avoir AUCUN investisseur tagué : on élargit
+    # le long de la taxonomie plutôt que de renvoyer une page blanche.
+    broadening = ""
+    broadened_names: list[str] = []
+    if sector_ids:
+        sector_ids, broadened_names, broadening = _broaden(sector_ids)
+
     zone_ids = resolve_names([raw_zone] if raw_zone else [], d["zone_geographique"])
     zone_id = zone_ids[0] if zone_ids else None
 
@@ -286,24 +353,44 @@ def map_for_profile(profile: dict, *, limit: int = 15) -> dict:
     funds, networks = search(set(sector_ids), set(stage_ids), zone_id)
     sector_name = {s["id"]: s["nom"] for s in d["secteur"]}
     stage_name = {s["id"]: s["nom"] for s in d["stade"]}
+
+    asked = mapped_sectors or raw_sectors
+    note = None
+    if broadening and broadening != "aucun":
+        reason = {
+            "parent": "aucun investisseur n'est référencé sur ce secteur précis ; "
+                      "la recherche a été élargie au secteur parent",
+            "voisins": "aucun investisseur n'est référencé sur ce secteur précis ; "
+                       "la recherche a été élargie aux secteurs voisins",
+            "proches": "aucun investisseur n'est référencé sur ce secteur précis ; "
+                       "la recherche a été élargie aux secteurs les plus proches",
+        }[broadening]
+        note = (f"Élargissement : {reason} ({', '.join(asked)} → "
+                f"{', '.join(broadened_names)}).")
+
     return {
         "resolved": {
             "secteurs": [sector_name[i] for i in sector_ids if i in sector_name],
+            "secteurs_demandes": asked,
             "stades": [stage_name[i] for i in stage_ids if i in stage_name],
             "zone": raw_zone,
             "via_llm": bool(mapped_sectors or mapped_stages),
+            "elargissement": broadening or None,
         },
         "funds": funds[:limit],
         "networks": networks[:limit],
         "total_funds": len(funds),
         "total_networks": len(networks),
-        "note": None,
+        "note": note,
     }
 
 
 def format_context(mapping: dict) -> str:
     """Numbered context block — the same [N] citation contract as web sources."""
     lines: list[str] = []
+    if mapping.get("note"):
+        # En tête, pour que le rapport annonce l'élargissement au lieu de le taire.
+        lines.append(f"(avertissement méthodologique) {mapping['note']}")
     n = 0
     for f in mapping.get("funds") or []:
         n += 1

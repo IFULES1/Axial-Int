@@ -69,3 +69,10 @@
 - [x] Secrets posés par Miradie le 20/08 — connexion active en prod (35 secteurs / 7 stades / 18 zones lus).
 - [x] Correctif : le repli LLM renvoyait une réponse TRONQUÉE (« Agritech / Food ») car les modèles récents décomptent leur réflexion du même plafond de tokens — budget élargi + appariement tolérant du vocabulaire. Vérifié : « robotique agricole » → Robotique + Agritech + Hardware/IoT + IA → 41 SGP et Agri Angels.
 - [ ] Durcissement à prévoir : créer une clé/rôle **lecture seule** sur le projet DB-investisseur plutôt que d'utiliser `service_role` (l'app ne fait que des GET, mais la clé porte des droits d'écriture).
+
+### Amélioration ③.1 — jamais de cul-de-sac (20/08)
+- Constat : **12 secteurs sur 35 n'ont aucun investisseur tagué** dans la base, dont 11 sous-secteurs (le taguage n'existe qu'au niveau parent). Un fondateur « Marketplace » ou « Paiement » obtenait une page blanche.
+- Échelle d'élargissement déterministe : secteur exact → **secteur parent** (taxonomie de la base) → **secteurs voisins** (mêmes parents) → secteurs les plus proches suggérés par le modèle **parmi les seuls secteurs peuplés**.
+- L'élargissement est **annoncé au lecteur** : note méthodologique en tête du contexte + consigne dans la directive pour l'annoncer dès l'introduction.
+- Vérifié en prod : Marketplace/Pre-seed 0 → **10 SGP + 2 réseaux**, Paiement/Seed 0 → **18 SGP** (parent Fintech), Quantique/Pre-seed 0 → **14 SGP** (parent Deeptech) ; SaaS B2B/Seed n'élargit pas (cas normal préservé).
+- 🔧 **Vraie correction de fond, côté base** : taguer les 12 secteurs orphelins (Marketplace en tête, qui n'a aucun parent).

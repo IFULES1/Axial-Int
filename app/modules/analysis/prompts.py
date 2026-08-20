@@ -183,6 +183,10 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
             "réseaux BA) plutôt qu'en liste plate, et pour chaque fonds cité explique "
             "en une à deux phrases POURQUOI il correspond à cette entreprise. "
             "Termine par les angles de discours à préparer et les objections probables. "
+            "Si un « avertissement méthodologique » figure en tête des sources "
+            "(recherche élargie faute d'investisseurs référencés sur le secteur exact), "
+            "annonce-le dès l'introduction, en clair : le lecteur doit savoir que la "
+            "liste couvre un périmètre voisin du sien. "
             "Ne JAMAIS inventer de fonds absent des sources fournies."
         ),
     },
