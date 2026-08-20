@@ -6,7 +6,7 @@
 
 ---
 
-**Objet** : `Axial fait peau neuve — vos rapports vous attendent`
+**Objet** : `Axial fait peau neuve — tes rapports t'attendent`
 
 **Expéditeur** : `Axial Intelligence <bonjour@axial-ia.fr>`
 
