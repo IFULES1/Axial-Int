@@ -76,3 +76,21 @@
 - L'élargissement est **annoncé au lecteur** : note méthodologique en tête du contexte + consigne dans la directive pour l'annoncer dès l'introduction.
 - Vérifié en prod : Marketplace/Pre-seed 0 → **10 SGP + 2 réseaux**, Paiement/Seed 0 → **18 SGP** (parent Fintech), Quantique/Pre-seed 0 → **14 SGP** (parent Deeptech) ; SaaS B2B/Seed n'élargit pas (cas normal préservé).
 - 🔧 **Vraie correction de fond, côté base** : taguer les 12 secteurs orphelins (Marketplace en tête, qui n'a aucun parent).
+
+### Chantier ② — Inventaire de l'ancienne base (20/08, lecture seule)
+Ancienne app (insight-map) : containers Docker toujours actifs sur le MÊME VPS (`supabase-db`).
+
+| Élément | Total | Dont utilisateurs externes réels |
+|---|---|---|
+| Comptes | 76 | **47** (29 = tests `axial-qa/example/axial.com` + internes `axial-ia.fr/skema/francedigitale`) |
+| Comptes avec une activité | — | **20** (27 externes n'ont jamais rien produit) |
+| Connectés dans les 90 derniers jours | 16 | **6** |
+| Rapports | 672 | **223** appartenant à **19** utilisateurs (moyenne 2 127 mots ; 32 vides/courts) |
+| Documents (`user_documents`) | 601 | **0** — aucun ne vient d'un utilisateur externe |
+| Conversations / messages | 98 / 229 | — |
+| **Clients Stripe** | **0** | **aucun paiement à reprendre** |
+
+Dernier rapport créé le 13/06/2026 → l'ancienne app est silencieuse depuis ~2 mois.
+Un compte externe concentre 114 rapports (gmail, connecté le 13/08) — **à confirmer avec Miradie** : usage personnel ou vrai utilisateur ?
+
+**Décision attendue de Miradie** : périmètre (les 47, les 20 actifs, ou les 6 récents), contenu repris (compte seul / + rapports), et message d'annonce.
