@@ -23,12 +23,28 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=TokenResponse)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    return service.register(payload, db)
+    token = service.register(payload, db)
+    _restore_legacy(db, token)
+    return token
 
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
-    return service.login(payload, db)
+    token = service.login(payload, db)
+    _restore_legacy(db, token)
+    return token
+
+
+def _restore_legacy(db: Session, token: TokenResponse) -> None:
+    """Bring back the reports this address produced on the previous platform.
+
+    Runs on both register and login so a returning user gets them whichever way
+    they come back. Best-effort by construction — never blocks authentication.
+    """
+    from app.modules.reports import legacy
+
+    legacy.restore_for(db, token.user.id, token.user.email)
+    legacy.grant_return_bonus(db, token.user.id, token.user.email)
 
 
 class RefreshRequest(BaseModel):

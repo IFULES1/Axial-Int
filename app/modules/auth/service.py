@@ -49,8 +49,17 @@ def register(data: RegisterRequest, db=None) -> TokenResponse:
     if settings.require_invitation_code and not data.invitation_code:
         raise AppError("Code d'invitation requis.", 400, code="invitation_required")
 
-    # 2. Professional-email policy (both modes, preserved)
-    if not settings.allow_freemail and not is_professional_email(data.email):
+    # 2. Professional-email policy (both modes, preserved).
+    # Exception : les utilisateurs de l'ancienne plateforme reviennent avec
+    # l'adresse qu'ils avaient — elle est antérieure à cette règle, la leur
+    # refuser reviendrait à les exclure de leur propre migration.
+    returning = False
+    if db is not None:
+        from app.modules.reports import legacy
+
+        returning = legacy.is_known(db, data.email)
+    if not settings.allow_freemail and not returning \
+            and not is_professional_email(data.email):
         raise AppError(
             "Merci d'utiliser ton email professionnel. Les adresses Gmail, Yahoo, "
             "Outlook, Hotmail, iCloud et similaires ne sont pas acceptées.",
