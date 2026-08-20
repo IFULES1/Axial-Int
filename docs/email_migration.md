@@ -8,8 +8,13 @@
 
 **Objet** : `Axial fait peau neuve — tes rapports t'attendent`
 
-**Expéditeur** : `Miradie Buranturukwa <miradie.buranturu@axial-ia.fr>`
-*(même domaine que celui vérifié chez Resend — les réponses arrivent directement dans la boîte de Miradie, ce que promet la dernière ligne du mail.)*
+**Expéditeur** : `"Miradie @Axial" <miradie.buranturu@axial-ia.fr>`
+
+*Les guillemets sont obligatoires : un nom d'affichage contenant « @ » n'est pas
+un atome valide au sens de la RFC 5322 et serait rejeté ou mal découpé sans eux.
+Le destinataire, lui, voit simplement « Miradie @Axial ».
+Même domaine que celui vérifié chez Resend — les réponses arrivent directement
+dans la boîte de Miradie, ce que promet la dernière ligne du mail.*
 
 ---
 
