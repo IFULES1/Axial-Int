@@ -35,7 +35,7 @@ def run(payload: AnalysisRequest, user: AuthUser = Depends(get_current_user),
     result = service.run_analysis(
         query=payload.query, analysis_type=payload.analysis_type,
         user_id=user.id, title=payload.title, top_k=payload.top_k,
-        company_context=company_context,
+        company_context=company_context, profile=service._profile_dict(db, user.id),
     )
     # Charge + archive + track (no-op on degraded results).
     info = service.finalize(db, user.id, payload.analysis_type, result, is_admin=user.is_admin)

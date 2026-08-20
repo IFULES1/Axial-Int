@@ -58,3 +58,13 @@
 - [x] **Chat** : réponse mot à mot (`POST /intelligence/conversations/{id}/messages/stream`), sources envoyées AVANT le premier mot, repli automatique sur la route bloquante.
 - [x] Bascule de provider possible tant qu'aucun mot n'est parti ; coupure en cours de réponse → le texte déjà écrit est conservé et signalé.
 - Mesures lot A + ① : rapport 1 692 → **3 554 mots**, 8 → **25 sources** (dont documents internes), 87 citations sur 24 sources distinctes, aucun numéro orphelin.
+
+### Chantier ③ — Connexion DB-investisseur (20/08)
+- [x] Module `app/modules/investors/` : accès PostgREST **lecture seule** au projet Supabase DB-investisseur, dataset complet (~10 400 lignes) chargé et mis en cache 1 h, dégradation sur cache périmé si la base est injoignable.
+- [x] Scoring **porté à l'identique** du script `rechercher_investisseurs.py` (regroupement par SGP + spécificité en 1/n) — vérifié : mêmes 15 SGP, mêmes scores, même ordre que le script original sur « Agritech / Foodtech + Seed ».
+- [x] Correspondance déterministe onboarding → référentiel (8 secteurs et 6 stades de l'app vers les 35 secteurs / 7 stades de la base), repli LLM pour les profils en texte libre.
+- [x] 6e type de rapport `cartographie_investisseurs` (30 crédits) : données de la base numérotées EN PREMIER, web ensuite pour le timing — numérotation [N] continue et citations 1:1.
+- [x] Endpoints `/investors/status|referentials|mapping` + tuile dans l'écran Rapports.
+- [x] Garde : base indisponible → rapport dégradé explicite, **aucun crédit débité**.
+- [ ] ⚠️ **ACTION MIRADIE** : poser les secrets `INVESTOR_DB_URL` / `INVESTOR_DB_KEY` dans Doppler (config prd) — le déploiement automatique a été bloqué (déplacement d'une clé admin entre systèmes).
+- [ ] Durcissement à prévoir : créer une clé/rôle **lecture seule** sur le projet DB-investisseur plutôt que d'utiliser `service_role` (l'app ne fait que des GET, mais la clé porte des droits d'écriture).

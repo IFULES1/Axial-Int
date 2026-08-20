@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     serper_api_key: str = ""
 
     # --- PII sidecar ------------------------------------------------------
+    # Base investisseurs (projet Supabase distinct, accès lecture seule) :
+    # alimente la cartographie des investisseurs.
+    investor_db_url: str = ""
+    investor_db_key: str = ""
+
     presidio_url: str = "http://localhost:8010"
     pii_guard_mode: Literal["off", "shadow", "enforce"] = "shadow"
     pii_mapping_key: str = ""

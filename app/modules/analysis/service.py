@@ -29,6 +29,15 @@ logger = logging.getLogger("axial.analysis")
 # Cadence des battements de cœur SSE pendant la génération (secondes).
 HEARTBEAT_SECONDS = 8
 
+# Type d'analyse adossé à la base investisseurs plutôt qu'à la recherche web.
+INVESTOR_MAPPING = "cartographie_investisseurs"
+
+
+def _canonical_type(analysis_type: str) -> str:
+    from app.modules.analysis.prompts import _canonical
+
+    return _canonical(analysis_type)
+
 
 @dataclass
 class AnalysisResult:
@@ -57,7 +66,8 @@ def _retrieve_context(query: str, user_id: str, top_k: int):
 
 def run_analysis(*, query: str, analysis_type: str, user_id: str,
                  title: str | None = None, top_k: int | None = None,
-                 company_context: str = "", tier: str = "report") -> AnalysisResult:
+                 company_context: str = "", tier: str = "report",
+                 profile: dict | None = None) -> AnalysisResult:
     if not is_valid_type(analysis_type):
         raise AppError(f"Type d'analyse inconnu : {analysis_type}", 400,
                        code="unknown_analysis_type")
@@ -87,7 +97,40 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
     # separate numberings colliding in the same prompt).
     from app.shared import grounding
 
-    context, citations = grounding.assemble(query, web_results, passages, top_k)
+    # Investor mapping is grounded FIRST on Axial's own investor database — that
+    # verified data is the subject of the report; web results only add timing
+    # context, and are numbered after so every [N] still maps to one citation.
+    investor_context, investor_citations = "", []
+    if _canonical_type(analysis_type) == INVESTOR_MAPPING:
+        from app.modules.investors import service as investors
+
+        mapping = None
+        try:
+            mapping = investors.map_for_profile(profile or {})
+            investor_context = investors.format_context(mapping)
+            investor_citations = investors.citations(mapping)
+        except Exception as e:
+            logger.warning("Investor mapping unavailable: %s", e)
+        # Ce rapport N'EXISTE que par la base investisseurs : sans elle, mieux
+        # vaut le dire et ne rien facturer qu'un texte adossé au web seul.
+        if not investor_citations:
+            reason = (mapping or {}).get("note") if mapping else None
+            return AnalysisResult(
+                analysis_type=analysis_type, title=label_title,
+                content=("⚠️ La cartographie des investisseurs n'a pas pu être "
+                         "produite. " + (reason or "La base investisseurs est "
+                         "momentanément indisponible.") + " Aucun crédit n'a été "
+                         "débité."),
+                degraded=True, status_note="investors_unavailable",
+                metadata={"passages": len(passages), "web_sources": len(web_results)},
+            )
+
+    context, citations = grounding.assemble(
+        query, web_results, passages, top_k, start_at=len(investor_citations) + 1
+    )
+    if investor_context:
+        context = investor_context + ("\n\n" + context if context else "")
+        citations = investor_citations + citations
     prompt = get_prompt_template(analysis_type).format(context=context or "Aucun.")
     if company_context:
         prompt = f"{company_context}\n\n{prompt}"
@@ -225,6 +268,7 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
     from app.modules.memory import service as memory
 
     company_context = memory.build_context(db, user_id)
+    profile = _profile_dict(db, user_id)
 
     # La génération tourne dans un thread pendant que le flux continue d'émettre :
     # un rapport de fond prend plusieurs minutes, et une connexion silencieuse
@@ -236,7 +280,7 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
         future = pool.submit(
             run_analysis, query=query, analysis_type=analysis_type,
             user_id=user_id, title=title, top_k=top_k,
-            company_context=company_context,
+            company_context=company_context, profile=profile,
         )
         waited, progress = 0, 40
         while not future.done():
@@ -281,4 +325,18 @@ def _result_payload(result: AnalysisResult) -> dict:
         "degraded": result.degraded,
         "status_note": result.status_note,
         "metadata": result.metadata,
+    }
+
+
+def _profile_dict(db, user_id: str) -> dict:
+    """Company profile as a plain dict — what the investor mapping matches on."""
+    from app.modules.memory import service as memory
+
+    p = memory.get_profile(db, user_id)
+    if p is None:
+        return {}
+    return {
+        "sector": p.sector, "funding_stage": p.funding_stage,
+        "target_market": p.target_market, "country": getattr(p, "country", None),
+        "company_name": p.company_name,
     }

@@ -161,6 +161,31 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
             "d'alerte à surveiller + première action de mitigation."
         ),
     },
+    "cartographie_investisseurs": {
+        "target_words": "2500-3500",
+        "min_sources": 10,
+        "objective": ("Cartographie des investisseurs pertinents pour cette "
+                      "entreprise et stratégie d'approche priorisée"),
+        "key_angles": [
+            "Cœur de cible : les fonds dont la thèse recoupe vraiment le secteur et le stade",
+            "Cercle élargi : les fonds plausibles mais moins spécialisés, et à quelle condition les viser",
+            "Réseaux de business angels et plateformes de financement participatif adaptés au stade",
+            "Ordre d'approche recommandé et angle de discours par groupe",
+            "Signaux de marché récents utiles au timing de la levée",
+        ],
+        "special_instructions": (
+            "Les sources numérotées proviennent de la base investisseurs propriétaire "
+            "d'Axial : ce sont des données vérifiées, pas des résultats de recherche web. "
+            "Le « score de pertinence » mesure la correspondance secteur/stade pondérée "
+            "par la spécialisation du fonds — il n'exprime AUCUNE probabilité "
+            "d'investissement : dis-le explicitement au lecteur. "
+            "Structure le rapport en groupes d'approche (cœur de cible, cercle élargi, "
+            "réseaux BA) plutôt qu'en liste plate, et pour chaque fonds cité explique "
+            "en une à deux phrases POURQUOI il correspond à cette entreprise. "
+            "Termine par les angles de discours à préparer et les objections probables. "
+            "Ne JAMAIS inventer de fonds absent des sources fournies."
+        ),
+    },
     "etude_marche": {
         "target_words": "4500-6000",
         "min_sources": 35,
@@ -186,6 +211,7 @@ ANALYSIS_LABELS: dict[str, str] = {
     "veille_technologique": "Veille technologique",
     "analyse_risques": "Analyse des risques",
     "etude_marche": "Étude de marché",
+    "cartographie_investisseurs": "Cartographie des investisseurs",
 }
 
 # Alias legacy → canoniques (mêmes clés que le billing).

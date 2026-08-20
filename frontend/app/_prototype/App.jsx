@@ -33,6 +33,7 @@ const REPORT_TYPES = [
   { id: 'competitive', icon: 'users', at: 'analyse_concurrentielle', cost: 25 },
   { id: 'regulatory', icon: 'shield', at: 'analyse_risques', cost: 25 },
   { id: 'risk', icon: 'alert', at: 'analyse_risques', cost: 25 },
+  { id: 'investors', icon: 'briefcase', at: 'cartographie_investisseurs', cost: 30 },
   { id: 'custom', icon: 'sparkle', at: 'synthese_executive', cost: 25 },
 ];
 
@@ -386,6 +387,8 @@ const STRINGS = {
     'reports.types.regulatory_desc': 'Cadres légaux applicables, calendriers d\'entrée en vigueur.',
     'reports.types.risk': 'Analyse de risques',
     'reports.types.risk_desc': 'Risques opérationnels, marché, réglementaires.',
+    'reports.types.investors': 'Cartographie des investisseurs',
+    'reports.types.investors_desc': 'Fonds et réseaux BA correspondant à votre secteur et votre stade, avec stratégie d\'approche.',
     'reports.types.custom': 'Étude personnalisée',
     'reports.types.custom_desc': 'Question stratégique ouverte. Axial cadre.',
     'reports.template_strip': 'Modèles récents',
@@ -585,6 +588,8 @@ const STRINGS = {
     'reports.types.regulatory_desc': 'Applicable legal frames and timelines.',
     'reports.types.risk': 'Risk analysis',
     'reports.types.risk_desc': 'Operational, market, regulatory risks.',
+    'reports.types.investors': 'Investor mapping',
+    'reports.types.investors_desc': 'Funds and angel networks matching your sector and stage, with an approach strategy.',
     'reports.types.custom': 'Custom study',
     'reports.types.custom_desc': 'Open strategic question. Axial frames it.',
     'reports.template_strip': 'Recent templates',

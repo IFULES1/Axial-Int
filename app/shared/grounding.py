@@ -16,7 +16,8 @@ place in the ranking.
 from __future__ import annotations
 
 
-def assemble(query: str, web_results, doc_passages, top_k: int = 8):
+def assemble(query: str, web_results, doc_passages, top_k: int = 8,
+             start_at: int = 1):
     """Return (context_block, citations) — both derived from one ordering."""
     from app.shared import search as web_search
 
@@ -63,6 +64,7 @@ def assemble(query: str, web_results, doc_passages, top_k: int = 8):
         seen.add(it["key"])
         deduped.append(it)
 
-    lines = [f"[{n}] {it['tag']} {it['body']}" for n, it in enumerate(deduped, 1)]
+    lines = [f"[{n}] {it['tag']} {it['body']}"
+             for n, it in enumerate(deduped, start_at)]
     citations = [it["cite"] for it in deduped]
     return "\n\n".join(lines), citations

@@ -59,6 +59,7 @@ def _mount_routers() -> None:
     from app.modules.rag.router import router as rag_router
     from app.modules.reports.router import router as reports_router
     from app.modules.watches.router import router as watches_router
+    from app.modules.investors.router import router as investors_router
 
     app.include_router(auth_router)
     app.include_router(documents_router)
@@ -69,6 +70,7 @@ def _mount_routers() -> None:
     app.include_router(reports_router)
     app.include_router(memory_router)
     app.include_router(watches_router)
+    app.include_router(investors_router)
 
 
 _mount_routers()

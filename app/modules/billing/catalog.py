@@ -13,6 +13,8 @@ CREDIT_COSTS: dict[str, int] = {
     "veille_technologique": 25,
     "analyse_risques": 25,
     "synthese_executive": 25,
+    # Données propriétaires (base investisseurs Axial) + stratégie d'approche.
+    "cartographie_investisseurs": 30,
     "agent_message": 2,
     "run_agent_veille": 5,  # one cumulative veille run (RSS + web + LLM)
 }
