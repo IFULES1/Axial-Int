@@ -39,3 +39,8 @@
 - [x] **Rendu du texte dans le chat** *(fait 18/08 : MarkdownView appliqué aux messages — gras, titres, listes, avec streaming conservé)*.
 - [x] **Historique des conversations persistant** *(fait 18/08 : conversations rechargées à la connexion, messages chargés à l'ouverture, envois liés aux vrais ids backend)*.
 - [ ] **Vitesse des réponses** *(quick wins faits 18/08 : RAG + recherche web parallélisés, zéro recherche sur les messages triviaux en conversation libre. Levier suivant = streaming des réponses LLM — chantier à part)*.
+
+## Noté le 20/08/2026
+- [ ] **Migration des utilisateurs de l'ancienne version** : transférer comptes (+ données pertinentes : profils, historique si utile) de l'ancienne app (insight-map) vers app.axial-ia.fr, avec communication aux utilisateurs.
+- [ ] **Connexion DB-investisseur** : brancher la base investisseurs (Supabase DB-investisseur : fonds VC/PE, SGP, réseaux BA, crowdequity, partners) à l'app — activée à la demande pour produire une **cartographie des investisseurs** pertinents (secteur + stade + zone, cf. script `rechercher_investisseurs.py`).
+- [ ] **Connexions MCP (Notion, Google)** : intégrations Notion + Gmail + Drive côté app — (a) enrichir les rapports avec les données des outils du client, (b) livrer les réponses/rapports directement dans Notion, Drive, etc.
