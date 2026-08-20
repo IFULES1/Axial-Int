@@ -300,7 +300,7 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
         tier = "report" if (free_chat and _wants_long_answer(content)) else "chat"
         try:
             result = llm_client.generate(system=system, prompt=prompt, tier=tier,
-                                         max_tokens=4000 if tier == "report" else 2500)
+                                         max_tokens=8000 if tier == "report" else 2500)
             answer = result.text
         except Exception as e:
             logger.warning("Agent generation failed: %s", e)

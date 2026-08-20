@@ -95,14 +95,27 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
             metadata={"passages": len(passages), "web_sources": len(web_results)},
         )
     try:
+        # Sonnet 5 : le thinking adaptatif se décompte de max_tokens — un budget
+        # trop court peut être entièrement consommé en réflexion (texte vide).
         result = llm_client.generate(system=SYSTEM_PROMPT, prompt=prompt,
-                                     tier=tier, max_tokens=4000)
+                                     tier=tier, max_tokens=12000)
     except Exception as e:
         logger.warning("Generation failed: %s", e)
         return AnalysisResult(
             analysis_type=analysis_type, title=label_title,
             content=f"⚠️ La génération a échoué ({type(e).__name__}). Réessaie dans un instant.",
             degraded=True, status_note="generation_failed",
+            metadata={"passages": len(passages), "web_sources": len(web_results)},
+        )
+
+    if not (result.text or "").strip():
+        logger.warning("Génération vide (thinking a consommé le budget ?) — modèle %s",
+                       result.model)
+        return AnalysisResult(
+            analysis_type=analysis_type, title=label_title,
+            content=("⚠️ La génération n'a pas abouti. Réessaie dans un instant — "
+                     "aucun crédit n'a été débité."),
+            degraded=True, status_note="empty_generation",
             metadata={"passages": len(passages), "web_sources": len(web_results)},
         )
 
