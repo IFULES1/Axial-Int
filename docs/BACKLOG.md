@@ -66,5 +66,6 @@
 - [x] 6e type de rapport `cartographie_investisseurs` (30 crédits) : données de la base numérotées EN PREMIER, web ensuite pour le timing — numérotation [N] continue et citations 1:1.
 - [x] Endpoints `/investors/status|referentials|mapping` + tuile dans l'écran Rapports.
 - [x] Garde : base indisponible → rapport dégradé explicite, **aucun crédit débité**.
-- [ ] ⚠️ **ACTION MIRADIE** : poser les secrets `INVESTOR_DB_URL` / `INVESTOR_DB_KEY` dans Doppler (config prd) — le déploiement automatique a été bloqué (déplacement d'une clé admin entre systèmes).
+- [x] Secrets posés par Miradie le 20/08 — connexion active en prod (35 secteurs / 7 stades / 18 zones lus).
+- [x] Correctif : le repli LLM renvoyait une réponse TRONQUÉE (« Agritech / Food ») car les modèles récents décomptent leur réflexion du même plafond de tokens — budget élargi + appariement tolérant du vocabulaire. Vérifié : « robotique agricole » → Robotique + Agritech + Hardware/IoT + IA → 41 SGP et Agri Angels.
 - [ ] Durcissement à prévoir : créer une clé/rôle **lecture seule** sur le projet DB-investisseur plutôt que d'utiliser `service_role` (l'app ne fait que des GET, mais la clé porte des droits d'écriture).

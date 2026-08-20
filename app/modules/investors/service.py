@@ -203,18 +203,47 @@ def _llm_map_to_referential(label: str, values: list[str], vocabulary: list[str]
           "aucun autre texte. Si rien ne correspond vraiment, réponds : AUCUN."
     )
     try:
+        # Budget large : les modèles récents décomptent leur réflexion du même
+        # plafond, et une réponse tronquée en plein mot ne correspond à aucune
+        # entrée du vocabulaire (« Agritech / Food » au lieu de « … / Foodtech »).
         out = llm_client.generate(
             system="Tu fais correspondre un profil d'entreprise à un vocabulaire fermé. "
                    "Tu ne réponds QUE par des entrées exactes de la liste fournie.",
-            prompt=prompt, tier="chat", max_tokens=200,
+            prompt=prompt, tier="chat", max_tokens=2000,
         ).text.strip()
     except Exception as e:
         logger.warning("Mapping LLM du profil échoué (%s) : %s", kind, e)
         return []
     if "AUCUN" in out.upper():
         return []
+    return _match_vocabulary(out, vocabulary)
+
+
+def _match_vocabulary(answer: str, vocabulary: list[str]) -> list[str]:
+    """Map a free-form model answer onto exact vocabulary entries.
+
+    Tolerant on purpose: models answer with bullets, line breaks or a truncated
+    last item, and a strict equality check would silently return nothing.
+    """
+    import re
+
     known = {v.lower(): v for v in vocabulary}
-    return [known[p.strip().lower()] for p in out.split(",") if p.strip().lower() in known]
+    picked: list[str] = []
+    for raw in re.split(r"[,\n]", answer):
+        cand = raw.strip().strip("-•*\"' \t").lower()
+        if not cand:
+            continue
+        if cand in known:
+            match = known[cand]
+        else:
+            # Truncated or slightly-off item: accept an unambiguous prefix.
+            starts = [v for k, v in known.items() if k.startswith(cand)]
+            if len(starts) != 1:
+                continue
+            match = starts[0]
+        if match not in picked:
+            picked.append(match)
+    return picked
 
 
 def map_for_profile(profile: dict, *, limit: int = 15) -> dict:
