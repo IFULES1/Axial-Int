@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -2061,7 +2061,7 @@ function ConvThread({ conversation, onSend, streamingSpeed, openCite }) {
             m.role === 'user'
               ? <UserMsg key={i} text={m.content} />
               : <AiMsg key={i} content={m.content} sources={m.sources || []} agent={m.agent}
-                  streamingSpeed={streamingSpeed} openCite={openCite}
+                  streamingSpeed={streamingSpeed} openCite={openCite} live={m.live}
                   isLast={i === conversation.messages.length - 1} />
           ))}
         </div>
@@ -2086,7 +2086,7 @@ function UserMsg({ text }) {
 // (clé "conseiller") reste une discussion simple, sans badge.
 const AGENT_LABELS = { market_scanner: 'Market Scanner · PESTEL', competitor_radar: 'Competitor Radar · Porter' };
 
-function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast }) {
+function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast, live }) {
   // Pending state: a real backend answer is on its way (search + RAG + LLM can
   // take 20-40s). Show a clear "thinking" indicator instead of a mute placeholder.
   if (content === '__PENDING__') {
@@ -2107,6 +2107,9 @@ function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast }) {
   const [shown, setShown] = useConvState(isLast ? 0 : fullText.length);
 
   useConvEffect(() => {
+    // Flux réel : le texte arrive déjà progressivement du serveur — pas
+    // d'animation locale par-dessus, sinon les deux se battent.
+    if (live) { setShown(fullText.length); return; }
     if (!isLast) { setShown(fullText.length); return; }
     if (streamingSpeed === 0) { setShown(fullText.length); return; }
     let cancelled = false;
@@ -2119,10 +2122,10 @@ function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast }) {
     };
     tick();
     return () => { cancelled = true; };
-  }, [fullText, isLast, streamingSpeed]);
+  }, [fullText, isLast, streamingSpeed, live]);
 
   const shownText = fullText.slice(0, shown);
-  const stillStreaming = isLast && shown < fullText.length && streamingSpeed > 0;
+  const stillStreaming = live || (isLast && shown < fullText.length && streamingSpeed > 0);
 
   return (
     <div className="msg-ai-wrap">
@@ -5346,6 +5349,29 @@ function App() {
     } catch (e) { /* la conversation reste vide plutôt que de casser l'UI */ }
   };
 
+  // Envoi en flux : le message assistant grandit mot à mot dans la conversation.
+  const sendStreamed = async (cid, text, baseMessages) => {
+    let acc = '';
+    const setMsgs = (msgs) => setConversations((cs) => cs.map((c) => c.id === cid ? { ...c, messages: msgs } : c));
+    const onEvent = (evt) => {
+      if (evt.step === 'sources') {
+        setMsgs([...baseMessages, { role: 'assistant', content: '__PENDING__', agent: evt.agent, sources: mapCitations(evt.citations), live: true }]);
+      } else if (evt.step === 'delta') {
+        acc += evt.delta || '';
+        setConversations((cs) => cs.map((c) => {
+          if (c.id !== cid) return c;
+          const last = c.messages[c.messages.length - 1] || {};
+          return { ...c, messages: [...baseMessages, { ...last, role: 'assistant', content: acc, live: true }] };
+        }));
+      }
+    };
+    const final = await axStreamChatIn(cid, text, onEvent);
+    setMsgs([...baseMessages, {
+      role: 'assistant', content: final.content, agent: final.agent,
+      sources: mapCitations(final.citations), live: false,
+    }]);
+  };
+
   const handleSendInActive = async (text) => {
     if (!activeId) return;
     const cid = activeId;
@@ -5356,10 +5382,8 @@ function App() {
       lastUpdated: now,
     } : c));
     try {
-      const reply = await axChatIn(cid, text);
-      setConversations((cs) => cs.map((c) => c.id === cid ? {
-        ...c, messages: [...c.messages.slice(0, -1), { role: 'assistant', content: reply.content, agent: reply.agent, sources: mapCitations(reply.citations) }],
-      } : c));
+      const base = (conversations.find((c) => c.id === cid) || {}).messages || [];
+      await sendStreamed(cid, text, [...base.slice(0, -1)]);
     } catch (e) {
       setConversations((cs) => cs.map((c) => c.id === cid ? {
         ...c, messages: [...c.messages.slice(0, -1), { role: 'assistant', content: '⚠️ ' + ((e && e.message) || 'Erreur') }],
@@ -5380,10 +5404,7 @@ function App() {
     }, ...cs]);
     setActiveId(id);
     try {
-      const reply = await axChatIn(id, text);
-      setConversations((cs) => cs.map((c) => c.id === id ? {
-        ...c, messages: [{ role: 'user', content: text }, { role: 'assistant', content: reply.content, agent: reply.agent, sources: mapCitations(reply.citations) }],
-      } : c));
+      await sendStreamed(id, text, [{ role: 'user', content: text }]);
     } catch (e) {
       setConversations((cs) => cs.map((c) => c.id === id ? {
         ...c, messages: [{ role: 'user', content: text }, { role: 'assistant', content: '⚠️ ' + ((e && e.message) || 'Erreur') }],

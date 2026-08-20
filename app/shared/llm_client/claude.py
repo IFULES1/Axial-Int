@@ -78,3 +78,20 @@ class ClaudeProvider:
                 getattr(usage, "output_tokens", 0) or 0
             )
         return LLMResult(text=text, model=model, provider=self.name, tokens=tokens)
+
+
+def stream(*, system: str, prompt: str, model: str | None = None,
+           max_tokens: int = 4000):
+    """Yield text chunks as they are produced (streaming variant of generate())."""
+    settings = get_settings()
+    if not settings.anthropic_api_key:
+        raise ProviderUnavailable("ANTHROPIC_API_KEY non configurée")
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    model = model or settings.llm_report_model
+    with client.messages.stream(
+        model=model, max_tokens=max_tokens, system=system,
+        messages=[{"role": "user", "content": prompt}],
+    ) as s:
+        yield from s.text_stream

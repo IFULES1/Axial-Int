@@ -53,3 +53,34 @@ def generate(*, system: str, prompt: str, model: str | None = None,
         text = "".join(p.get("text", "") for p in parts)
     tokens = (data.get("usageMetadata") or {}).get("totalTokenCount", 0) or 0
     return LLMResult(text=text, model=model, provider="gemini", tokens=tokens)
+
+
+def stream(*, system: str, prompt: str, model: str | None = None,
+           max_tokens: int = 4000):
+    """Yield text chunks as they are produced (SSE variant of generate())."""
+    import json
+
+    settings = get_settings()
+    if not settings.gemini_api_key:
+        raise ProviderUnavailable("GEMINI_API_KEY non configurée")
+    model = model or settings.llm_chat_model
+    payload = {
+        "system_instruction": {"parts": [{"text": system}]},
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"maxOutputTokens": max_tokens, "temperature": 0.3},
+    }
+    url = f"{_BASE}/{model}:streamGenerateContent?alt=sse&key={settings.gemini_api_key}"
+    with httpx.stream("POST", url, json=payload, timeout=180.0) as r:
+        r.raise_for_status()
+        for line in r.iter_lines():
+            if not line or not line.startswith("data:"):
+                continue
+            try:
+                data = json.loads(line[5:].strip())
+            except ValueError:
+                continue
+            for cand in data.get("candidates") or []:
+                for part in (cand.get("content") or {}).get("parts") or []:
+                    chunk = part.get("text")
+                    if chunk:
+                        yield chunk

@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import uuid
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -157,9 +158,25 @@ def _attached_docs_context(db: Session, user_id: str,
             "message)\n" + "\n\n".join(parts))
 
 
-def post_message(db: Session, user_id: str, conversation_id: str, content: str,
-                 agent_override: str | None = None, *, is_admin: bool = False,
-                 document_ids: list[str] | None = None) -> Message:
+@dataclass
+class _Turn:
+    """Everything a turn needs once the context is assembled — shared by the
+    blocking path (post_message) and the streaming path (stream_message) so the
+    two can never drift apart."""
+    conv: Conversation
+    agent_key: str
+    redirect_note: str | None
+    system: str
+    prompt: str
+    citations: list
+    tier: str
+    max_tokens: int
+    blocked_answer: str | None = None  # set when no LLM is available at all
+
+
+def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
+                  agent_override: str | None, *, is_admin: bool,
+                  document_ids: list[str] | None) -> _Turn:
     conv = _own_conversation(db, user_id, conversation_id)
     requested = agent_override or conv.default_agent
     # Conversation libre : AUCUN routing d'agent — discussion directe avec le LLM
@@ -228,47 +245,50 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
 
     prompt = guard_outbound(prompt)
 
-    degraded = False
     if not llm_client.generation_available():
-        degraded = True
-        answer = ("⚠️ Aucun moteur de génération n'est disponible pour le moment. "
-                  "Réessaie plus tard.")
-    else:
-        # Conversation libre = discussion naturelle (pas de bloc « AXIAL Recommande »
-        # imposé) ; agents spécialisés = persona complète avec cadre d'analyse.
-        system = persona.system_prompt if free_chat else persona.full_system_prompt()
-        # Rendre la mémoire PERCEPTIBLE : quand un contexte entreprise existe,
-        # la réponse doit s'y ancrer explicitement (jamais un acteur générique).
-        if company_context:
-            system += (
-                "\n\nUn bloc « Contexte entreprise (mémoire) » est fourni dans le "
-                "message. Ancre EXPLICITEMENT ta réponse dedans : ouvre par une "
-                "phrase du type « Dans votre contexte — [nom de l'entreprise], "
-                "[élément pertinent du profil]… », désigne l'entreprise par son nom, "
-                "et adapte chaque recommandation à SA situation (positionnement, "
-                "stade, défi) plutôt qu'à un acteur générique du secteur."
-            )
-        # Conversation libre : Gemini (chat) pour le court, Sonnet (report) pour le
-        # long. Agents spécialisés : tier chat (comportement historique).
-        tier = "report" if (free_chat and _wants_long_answer(content)) else "chat"
-        try:
-            result = llm_client.generate(system=system, prompt=prompt, tier=tier,
-                                         max_tokens=8000 if tier == "report" else 2500)
-            answer = result.text
-        except Exception as e:
-            logger.warning("Agent generation failed: %s", e)
-            degraded = True
-            answer = "⚠️ La génération a échoué. Réessaie dans un instant."
+        return _Turn(conv=conv, agent_key=agent_key, redirect_note=redirect_note,
+                     system="", prompt=prompt, citations=citations, tier="chat",
+                     max_tokens=0,
+                     blocked_answer=("⚠️ Aucun moteur de génération n'est disponible "
+                                     "pour le moment. Réessaie plus tard."))
 
-    if redirect_note:
-        answer = f"> ℹ️ {redirect_note}\n\n{answer}"
+    # Conversation libre = discussion naturelle (pas de bloc « AXIAL Recommande »
+    # imposé) ; agents spécialisés = persona complète avec cadre d'analyse.
+    system = persona.system_prompt if free_chat else persona.full_system_prompt()
+    # Rendre la mémoire PERCEPTIBLE : quand un contexte entreprise existe,
+    # la réponse doit s'y ancrer explicitement (jamais un acteur générique).
+    if company_context:
+        system += (
+            "\n\nUn bloc « Contexte entreprise (mémoire) » est fourni dans le "
+            "message. Ancre EXPLICITEMENT ta réponse dedans : ouvre par une "
+            "phrase du type « Dans votre contexte — [nom de l'entreprise], "
+            "[élément pertinent du profil]… », désigne l'entreprise par son nom, "
+            "et adapte chaque recommandation à SA situation (positionnement, "
+            "stade, défi) plutôt qu'à un acteur générique du secteur."
+        )
+    # Conversation libre : Gemini (chat) pour le court, Sonnet (report) pour le
+    # long. Agents spécialisés : tier chat (comportement historique).
+    tier = "report" if (free_chat and _wants_long_answer(content)) else "chat"
+    return _Turn(conv=conv, agent_key=agent_key, redirect_note=redirect_note,
+                 system=system, prompt=prompt, citations=citations, tier=tier,
+                 max_tokens=8000 if tier == "report" else 2500)
 
-    assistant_msg = Message(id=uuid.uuid4(), conversation_id=conv.id, role="assistant",
-                            agent=agent_key, content=answer, citations=citations or None)
+
+def _finalize_turn(db: Session, user_id: str, turn: _Turn, answer: str, *,
+                   is_admin: bool, degraded: bool) -> Message:
+    """Persist the assistant turn, update the conversation, bill on success."""
+    from app.modules.billing import service as billing
+
+    if turn.redirect_note:
+        answer = f"> ℹ️ {turn.redirect_note}\n\n{answer}"
+
+    assistant_msg = Message(id=uuid.uuid4(), conversation_id=turn.conv.id,
+                            role="assistant", agent=turn.agent_key, content=answer,
+                            citations=turn.citations or None)
     db.add(assistant_msg)
 
-    conv.message_count += 2
-    conv.last_message_at = _now()
+    turn.conv.message_count += 2
+    turn.conv.last_message_at = _now()
     db.commit()
     db.refresh(assistant_msg)
 
@@ -282,3 +302,96 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
                                   credits=billing_res.get("charged", 0))
 
     return assistant_msg
+
+
+def post_message(db: Session, user_id: str, conversation_id: str, content: str,
+                 agent_override: str | None = None, *, is_admin: bool = False,
+                 document_ids: list[str] | None = None) -> Message:
+    turn = _prepare_turn(db, user_id, conversation_id, content, agent_override,
+                         is_admin=is_admin, document_ids=document_ids)
+    if turn.blocked_answer:
+        return _finalize_turn(db, user_id, turn, turn.blocked_answer,
+                              is_admin=is_admin, degraded=True)
+    try:
+        result = llm_client.generate(system=turn.system, prompt=turn.prompt,
+                                     tier=turn.tier, max_tokens=turn.max_tokens)
+        answer, degraded = result.text, False
+    except Exception as e:
+        logger.warning("Agent generation failed: %s", e)
+        answer, degraded = "⚠️ La génération a échoué. Réessaie dans un instant.", True
+    return _finalize_turn(db, user_id, turn, answer, is_admin=is_admin,
+                          degraded=degraded)
+
+
+# --- Flux temps réel du chat ------------------------------------------------
+
+def _sse(event: dict) -> str:
+    import json
+
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+def stream_message(db: Session, user_id: str, conversation_id: str, content: str,
+                   agent_override: str | None = None, *, is_admin: bool = False,
+                   document_ids: list[str] | None = None):
+    """Same turn as post_message, but the answer arrives word by word.
+
+    Order matters: the citations are sent BEFORE the first word, so the reader
+    can already see what the answer is built on while it is being written.
+    """
+    try:
+        turn = _prepare_turn(db, user_id, conversation_id, content, agent_override,
+                             is_admin=is_admin, document_ids=document_ids)
+    except AppError as e:
+        yield _sse({"step": "error", "done": True, "error": e.message, "code": e.code})
+        return
+    except Exception as e:
+        logger.warning("Stream prepare failed: %s", e)
+        yield _sse({"step": "error", "done": True,
+                    "error": "La préparation de la réponse a échoué."})
+        return
+
+    yield _sse({"step": "sources", "agent": turn.agent_key,
+                "citations": turn.citations or []})
+
+    if turn.blocked_answer:
+        msg = _finalize_turn(db, user_id, turn, turn.blocked_answer,
+                             is_admin=is_admin, degraded=True)
+        yield _sse({"step": "done", "done": True, "degraded": True,
+                    "data": _stream_payload(msg, turn)})
+        return
+
+    chunks: list[str] = []
+    try:
+        for chunk in llm_client.stream_text(system=turn.system, prompt=turn.prompt,
+                                            tier=turn.tier,
+                                            max_tokens=turn.max_tokens):
+            chunks.append(chunk)
+            yield _sse({"step": "delta", "delta": chunk})
+    except Exception as e:
+        logger.warning("Agent stream failed: %s", e)
+        if not chunks:
+            msg = _finalize_turn(db, user_id, turn,
+                                 "⚠️ La génération a échoué. Réessaie dans un instant.",
+                                 is_admin=is_admin, degraded=True)
+            yield _sse({"step": "done", "done": True, "degraded": True,
+                        "data": _stream_payload(msg, turn)})
+            return
+        # Coupure en cours de réponse : on garde ce qui a été écrit et on le dit.
+        chunks.append("\n\n*(réponse interrompue — le service a coupé en cours "
+                      "de rédaction)*")
+
+    answer = "".join(chunks)
+    msg = _finalize_turn(db, user_id, turn, answer, is_admin=is_admin, degraded=False)
+    yield _sse({"step": "done", "done": True, "data": _stream_payload(msg, turn)})
+
+
+def _stream_payload(msg: Message, turn: _Turn) -> dict:
+    return {
+        "id": str(msg.id),
+        "role": msg.role,
+        "agent": msg.agent,
+        "content": msg.content,
+        "citations": msg.citations or [],
+        "created_at": msg.created_at.isoformat() if msg.created_at else None,
+    }

@@ -63,6 +63,44 @@ def generate(*, system: str, prompt: str, tier: str = "chat",
     raise ProviderUnavailable("Aucun LLM de génération configuré (Gemini/Claude).")
 
 
+def stream_text(*, system: str, prompt: str, tier: str = "chat",
+                max_tokens: int = 4000):
+    """Streaming counterpart of generate(): yields text chunks.
+
+    Failover only applies BEFORE the first chunk — once text has reached the
+    user, switching provider mid-answer would splice two different replies
+    together, so a late failure surfaces as an error instead.
+    """
+    import logging
+
+    from app.shared.llm_client import claude, gemini
+
+    logger = logging.getLogger("axial.llm")
+    chain = ([("claude", claude), ("gemini", gemini)] if tier == "report"
+             else [("gemini", gemini), ("claude", claude)])
+
+    last_err: Exception | None = None
+    for name, mod in chain:
+        if not mod.available():
+            continue
+        started = False
+        try:
+            for chunk in mod.stream(system=system, prompt=prompt,
+                                    max_tokens=max_tokens):
+                started = True
+                yield chunk
+            return
+        except Exception as e:  # noqa: BLE001
+            if started:
+                logger.warning("LLM %s a coupé en cours de réponse : %s", name, e)
+                raise
+            last_err = e
+            logger.warning("LLM %s a échoué avant le 1er mot, bascule : %s", name, e)
+    if last_err:
+        raise last_err
+    raise ProviderUnavailable("Aucun LLM de génération configuré (Gemini/Claude).")
+
+
 def providers_health() -> dict[str, bool]:
     """Real availability of each provider, for GET /health/providers."""
     from app.shared.llm_client import claude, gemini

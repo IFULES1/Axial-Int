@@ -47,7 +47,14 @@
 - [ ] **Vérification du système de rapports vs ancienne app** — comparer le pipeline actuel (`app/modules/analysis/`) à l'audit de l'ancienne version (artifact « Anatomie des rapports » : https://claude.ai/code/artifact/f2368db0-3d36-4ad9-bc21-fe684e74641d). Écarts déjà identifiés : LLM principal (Perplexity `sonar-pro` + recherche web native vs Claude Sonnet 5 single-pass), volumes cibles (8000-10000 mots / 40 sources min pour la synthèse exécutive vs ~1800 mots / 8 sources aujourd'hui), enrichissements absents (Pappers, stats macro, Serper, APA), progression SSE réelle, garde PII (Presidio) avant envoi LLM.
 
 > **Chantiers du jour (20/08)** : ① streaming SSE · ② migration des utilisateurs · ③ connexion DB-investisseur · ④ connexions MCP Notion/Google · ⑤ vérification des rapports vs ancienne app.
+  - ⏸ **Lot A déployé le 20/08 — chantier laissé OUVERT** : la forme est validée par Miradie (volumes, sources, progression). Retour sur le FOND (le rapport apprend-il vraiment quelque chose, ou meuble-t-il pour atteindre 10 000 mots ?) attendu plus tard → ajustements ensuite.
   - **Audit réalisé le 20/08** → « Écart de profondeur » : https://claude.ai/code/artifact/0f6507f4-dfbb-4801-b8a6-f9b6d3548b1c
     Causes racines : (1) `top_k=8` alors que l'ancien exigeait 25-40 sources ; (2) aucune longueur cible dans les directives (le port V4 a omis `target_words`) ; (3) `max_tokens=12000` partagé avec le thinking de Sonnet 5.
     Bonnes surprises : `/analysis/stream` (SSE + facturation) déjà complet côté backend, seul le front appelle `/analysis/run` ; garde PII déjà codé mais `PII_GUARD_MODE=off` + sidecar Presidio éteint.
     Plan : lot A (profondeur, à valider — touche au contenu produit) · lot B (Pappers/stats/APA) · lot C (6e type réglementaire + PII activé, avant la migration des utilisateurs).
+
+### Chantier ① — Streaming (20/08, livré)
+- [x] **Rapports** : progression réelle SSE + battements de cœur toutes les 8 s (mesuré : 21 battements sur une génération de 4 min, connexion jamais coupée).
+- [x] **Chat** : réponse mot à mot (`POST /intelligence/conversations/{id}/messages/stream`), sources envoyées AVANT le premier mot, repli automatique sur la route bloquante.
+- [x] Bascule de provider possible tant qu'aucun mot n'est parti ; coupure en cours de réponse → le texte déjà écrit est conservé et signalé.
+- Mesures lot A + ① : rapport 1 692 → **3 554 mots**, 8 → **25 sources** (dont documents internes), 87 citations sur 24 sources distinctes, aucun numéro orphelin.

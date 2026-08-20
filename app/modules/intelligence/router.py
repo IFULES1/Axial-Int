@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+from fastapi.responses import StreamingResponse
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -124,6 +125,22 @@ def list_conversations(project_id: str, user: AuthUser = Depends(get_current_use
 
 
 # --- messages --------------------------------------------------------------
+
+@router.post("/conversations/{conversation_id}/messages/stream")
+def stream_message(conversation_id: str, payload: MessageIn,
+                   user: AuthUser = Depends(get_current_user),
+                   db: Session = Depends(get_db)) -> StreamingResponse:
+    """Word-by-word answer (SSE). Same billing and persistence as the blocking route."""
+    generator = service.stream_message(
+        db, user.id, conversation_id, payload.content, payload.agent,
+        is_admin=user.is_admin, document_ids=payload.document_ids,
+    )
+    return StreamingResponse(
+        generator,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
 
 def _msg_out(m) -> MessageOut:
     return MessageOut(id=str(m.id), role=m.role, agent=m.agent, content=m.content,

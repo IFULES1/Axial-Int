@@ -211,6 +211,64 @@ export async function axChatIn(cid, text) {
   try { window.dispatchEvent(new Event("axial-pending-docs")); } catch (e) {}
   return r;
 }
+/** Streamed chat answer: onEvent({step, delta, citations}) fires as words arrive.
+ * Returns the final persisted message. Falls back to the blocking route if the
+ * stream can't be opened. */
+export async function axStreamChatIn(cid, text, onEvent) {
+  let agent = "auto";
+  try { agent = localStorage.getItem("axial_agent_mode") || "auto"; } catch (e) {}
+  const pending = (typeof window !== "undefined" && window.AXIAL_PENDING_DOCS) || [];
+  const document_ids = pending.map((d) => d.id);
+  const body = { content: text, agent, document_ids: document_ids.length ? document_ids : null };
+
+  const run = async (retried) => {
+    const tok = axGetToken();
+    const res = await fetch(AX_API + `/intelligence/conversations/${cid}/messages/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(tok ? { Authorization: "Bearer " + tok } : {}) },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401 && !retried) {
+      const ok = await tryRefresh();
+      if (ok) return run(true);
+    }
+    if (!res.ok || !res.body) { const e = new Error("stream_unavailable"); e.status = res.status; throw e; }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "", final = null;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() || "";
+      for (const frame of frames) {
+        const line = frame.split("\n").find((l) => l.startsWith("data:"));
+        if (!line) continue;
+        let evt;
+        try { evt = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+        if (onEvent) onEvent(evt);
+        if (evt.done) {
+          if (evt.error) { const e = new Error(evt.error); e.code = evt.code; throw e; }
+          final = evt.data || null;
+        }
+      }
+    }
+    if (!final) throw new Error("Réponse interrompue.");
+    return final;
+  };
+
+  try {
+    const r = await run(false);
+    if (typeof window !== "undefined") window.AXIAL_PENDING_DOCS = [];
+    try { window.dispatchEvent(new Event("axial-pending-docs")); } catch (e) {}
+    return r;
+  } catch (e) {
+    if (e && e.message === "stream_unavailable") return axChatIn(cid, text);  // repli
+    throw e;
+  }
+}
+
 /** Create a fresh backend conversation and return its id. */
 export async function axCreateConversation() {
   return ensureConversation(true);
