@@ -8,7 +8,8 @@
 
 **Objet** : `Axial fait peau neuve — tes rapports t'attendent`
 
-**Expéditeur** : `Axial Intelligence <bonjour@axial-ia.fr>`
+**Expéditeur** : `Miradie Buranturukwa <miradie.buranturu@axial-ia.fr>`
+*(même domaine que celui vérifié chez Resend — les réponses arrivent directement dans la boîte de Miradie, ce que promet la dernière ligne du mail.)*
 
 ---
 
