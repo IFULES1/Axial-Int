@@ -112,57 +112,10 @@ def _retrieve_context(query: str, user_id: str, top_k: int = 6):
 
 
 def _assemble_sources(query: str, web_results, doc_passages, top_k: int = 8):
-    """Merge web results + internal passages into ONE relevance-ranked pool via
-    Cohere rerank, then derive both the LLM context block and the citations from
-    that single ordering — so web and internal compete on equal footing instead
-    of being concatenated with non-comparable scores."""
-    from app.shared import search as web_search
+    """Pool unifié web + interne (implémentation partagée avec les rapports)."""
+    from app.shared import grounding
 
-    pool: list[dict] = []
-    for r in web_results:
-        pool.append({
-            "text": f"{r.title}\n{r.snippet}",
-            "tag": f"(web : {r.domain})" if r.domain else "(web)",
-            "body": r.snippet or r.title,
-            "cite": {"title": r.title, "url": r.url, "domain": r.domain, "source": "web",
-                     "excerpt": (r.snippet or "")[:350]},
-            "key": f"web::{r.domain}::{r.title.strip().lower()}",
-        })
-    for p in doc_passages:
-        if p.source not in ("kb", "user"):
-            continue
-        meta = p.meta or {}
-        title = meta.get("title") or meta.get("filename") or "Base de connaissance"
-        ref = meta.get("source") or meta.get("category") or ""
-        pool.append({
-            "text": p.text,
-            "tag": f"(réf. interne : {ref} — {title})" if ref else f"(réf. interne : {title})",
-            "body": p.text,
-            "cite": {"title": title,
-                     "source": "interne" if p.source == "kb" else "document",
-                     "reference": ref, "excerpt": (p.text or "")[:350]},
-            "key": f"doc::{title}",
-        })
-    if not pool:
-        return "", []
-
-    order = web_search.rerank_indices(query, [it["text"] for it in pool], top_k)
-    ranked = [pool[i] for i, _ in order] or pool[:top_k]
-
-    # Dedupe FIRST, then number — so the inline [N] markers the model emits from
-    # the numbered context map 1:1 to the citations list the user sees. Numbering
-    # the context and the (deduped) citations separately would desync them.
-    deduped: list[dict] = []
-    seen: set[str] = set()
-    for it in ranked:
-        if it["key"] in seen:
-            continue
-        seen.add(it["key"])
-        deduped.append(it)
-
-    lines = [f"[{n}] {it['tag']} {it['body']}" for n, it in enumerate(deduped, 1)]
-    citations = [it["cite"] for it in deduped]
-    return "\n\n".join(lines), citations
+    return grounding.assemble(query, web_results, doc_passages, top_k)
 
 
 AGENT_MESSAGE_ACTION = "agent_message"

@@ -28,10 +28,17 @@ def generate(*, system: str, prompt: str, model: str | None = None,
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     model = model or settings.llm_report_model
-    message = client.messages.create(
-        model=model, max_tokens=max_tokens, system=system,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    kwargs = {
+        "model": model, "max_tokens": max_tokens, "system": system,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    # Au-delà de ~16k tokens de sortie, une requête bloquante expire côté HTTP :
+    # le SDK impose le streaming. On agrège nous-mêmes le message final.
+    if max_tokens > 16000:
+        with client.messages.stream(**kwargs) as stream:
+            message = stream.get_final_message()
+    else:
+        message = client.messages.create(**kwargs)
     text = "".join(b.text for b in message.content if getattr(b, "type", "") == "text")
     usage = getattr(message, "usage", None)
     tokens = 0

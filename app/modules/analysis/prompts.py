@@ -6,7 +6,8 @@ clés, instructions spéciales). Adaptations à la nouvelle plateforme :
   * les sources sont FOURNIES dans le contexte (web + RAG rerankés, numérotées)
     — plus de recherche Perplexity intégrée ;
   * les enrichissements legacy (Pappers/Serper/stats) n'existent plus ici ;
-  * longueurs cibles ramenées à l'échelle d'une génération single-pass.
+  * volumes et minima de sources REPRIS À L'IDENTIQUE de la V4 (décision du
+    20/08) : le pipeline fournit autant de sources que la directive en exige.
 """
 from __future__ import annotations
 
@@ -96,6 +97,8 @@ def get_master_prompt() -> str:
 
 ANALYSIS_DIRECTIVES: dict[str, dict] = {
     "synthese_executive": {
+        "target_words": "8000-10000",
+        "min_sources": 40,
         "objective": ("Vue d'ensemble stratégique : état du marché, concurrence, "
                       "opportunités, risques et trajectoires d'évolution"),
         "key_angles": [
@@ -112,6 +115,8 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
         ),
     },
     "analyse_concurrentielle": {
+        "target_words": "3000-4000",
+        "min_sources": 30,
         "objective": ("Cartographie concurrentielle et identification des avantages "
                       "compétitifs durables"),
         "key_angles": [
@@ -128,6 +133,8 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
         ),
     },
     "veille_technologique": {
+        "target_words": "2500-3500",
+        "min_sources": 25,
         "objective": "État de l'art technologique, maturité et fenêtres d'adoption",
         "key_angles": [
             "Technologies émergentes et leur maturité réelle",
@@ -141,6 +148,8 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
         ),
     },
     "analyse_risques": {
+        "target_words": "2500-3000",
+        "min_sources": 25,
         "objective": "Identification et hiérarchisation des risques actionnables",
         "key_angles": [
             "Risques marché, concurrentiels, réglementaires, technologiques, d'exécution",
@@ -153,6 +162,8 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
         ),
     },
     "etude_marche": {
+        "target_words": "4500-6000",
+        "min_sources": 35,
         "objective": ("Dimensionnement et dynamique du marché : taille, segments, "
                       "demande, accès"),
         "key_angles": [
@@ -209,12 +220,29 @@ def get_prompt_template(analysis_type: str) -> str:
         "DIRECTIVE D'ANALYSE\n"
         f"Objectif : {d['objective']}\n"
         f"Angles clés à instruire (si pertinents pour la question) :\n{angles}\n"
-        f"Instructions spécifiques : {d['special_instructions']}\n\n"
+        f"Instructions spécifiques : {d['special_instructions']}\n"
+        f"Volume attendu : {d['target_words']} mots. C'est un rapport de fond, "
+        "pas une note de synthèse : développe chaque section en profondeur plutôt "
+        "que de survoler. N'atteins ce volume qu'avec de la matière réelle issue "
+        "du contexte — jamais en paraphrasant ou en répétant.\n"
+        f"Ancrage : appuie-toi sur au moins {d['min_sources']} sources distinctes "
+        "parmi celles fournies, et cite-les par leur numéro au fil du texte.\n\n"
         "CONTEXTE (profil entreprise + sources numérotées) :\n{context}\n\n"
         "Produis le rapport en respectant le style, les citations et la section "
         "Sources définis dans tes instructions système. Ancre l'analyse dans le "
         "contexte de l'entreprise quand il est fourni."
     )
+
+
+def sources_for(analysis_type: str) -> int:
+    """Combien de sources le pipeline doit fournir pour ce type d'analyse.
+
+    C'est la directive qui commande : promettre au modèle « au moins 40 sources »
+    tout en ne lui en fournissant que 8 est la meilleure façon d'obtenir des
+    citations inventées.
+    """
+    d = ANALYSIS_DIRECTIVES.get(_canonical(analysis_type))
+    return d["min_sources"] if d else 25
 
 
 def is_valid_type(analysis_type: str) -> bool:

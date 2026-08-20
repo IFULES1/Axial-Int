@@ -10,7 +10,9 @@ class AnalysisRequest(BaseModel):
     query: str = Field(min_length=1)
     analysis_type: str = "synthese_executive"
     title: str | None = None
-    top_k: int = Field(default=8, ge=0, le=30)
+    # None = le nombre de sources est décidé par le type d'analyse (la directive
+    # exige 25 à 40 sources selon le rapport ; cf. prompts.sources_for).
+    top_k: int | None = Field(default=None, ge=0, le=60)
 
 
 class AnalysisResponse(BaseModel):

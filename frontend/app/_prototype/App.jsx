@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -2469,12 +2469,15 @@ function ReportsGenerating({ genMeta }) {
     return () => clearInterval(id);
   }, []);
 
-  // Étapes INDICATIVES basées sur le temps écoulé (le backend ne stream pas
-  // encore sa progression) — aucune fausse métrique, aucun faux contenu.
+  // Progression RÉELLE émise par le backend (flux SSE). Repli sur le temps
+  // écoulé si le flux n'est pas disponible.
   const steps = lang === 'fr'
-    ? ['Recherche des sources (web + vos documents)', 'Analyse et recoupement', 'Rédaction du rapport']
-    : ['Gathering sources (web + your documents)', 'Analysis & cross-checking', 'Writing the report'];
-  const current = elapsed < 15 ? 0 : elapsed < 35 ? 1 : 2;
+    ? ['Recherche des sources (web + vos documents)', 'Analyse et rédaction', 'Finalisation']
+    : ['Gathering sources (web + your documents)', 'Analysis & writing', 'Finalizing'];
+  const pct = genMeta && typeof genMeta.progress === 'number' ? genMeta.progress : null;
+  const current = pct === null
+    ? (elapsed < 15 ? 0 : elapsed < 35 ? 1 : 2)
+    : (pct < 40 ? 0 : pct < 90 ? 1 : 2);
 
   return (
     <div className="surface" style={{ paddingBottom: 32 }}>
@@ -2491,10 +2494,15 @@ function ReportsGenerating({ genMeta }) {
       <div className="rep-gen">
         <div className="rep-gen-doc">
           <h1 style={{ fontSize: 20 }}>{(genMeta && genMeta.prompt) || (lang === 'fr' ? 'Votre rapport' : 'Your report')}</h1>
-          <div className="doc-meta mono" style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <div className="doc-meta mono" style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
             <span className="ax-thinking"><span className="dots"><i /><i /><i /></span></span>
-            <span>{lang === 'fr' ? 'Génération en cours' : 'Generating'} · {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')} · ~1-2 min</span>
+            <span>{(genMeta && genMeta.message) || (lang === 'fr' ? 'Génération en cours' : 'Generating')} · {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}{pct !== null ? ` · ${pct} %` : ''}</span>
           </div>
+          {pct !== null && (
+            <div style={{ height: 3, background: 'var(--surface-2)', borderRadius: 3, overflow: 'hidden', margin: '12px 0 0' }}>
+              <div style={{ height: '100%', width: pct + '%', background: 'var(--v-bright)', transition: 'width .4s ease' }} />
+            </div>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, margin: '22px 0' }}>
             {steps.map((s, i) => (
@@ -5272,10 +5280,13 @@ function App() {
   const [reportData, setReportData] = useState(null);
   const [genMeta, setGenMeta] = useState(null); // { prompt } pendant la génération
   const startReport = async ({ type, analysisType, prompt }) => {
-    setGenMeta({ prompt });
+    setGenMeta({ prompt, progress: 5, step: 'start' });
     setReportsState('generating');
     try {
-      const r = await axRunAnalysis({ query: prompt, analysis_type: analysisType || 'synthese_executive' });
+      const r = await axStreamAnalysis(
+        { query: prompt, analysis_type: analysisType || 'synthese_executive' },
+        (evt) => setGenMeta((m) => ({ ...(m || { prompt }), progress: evt.progress ?? (m && m.progress), step: evt.step, message: evt.message })),
+      );
       setReportData(r);
     } catch (e) {
       setReportData({ title: 'Erreur', content: '⚠️ ' + ((e && e.message) || 'Échec de génération'), sources: [] });

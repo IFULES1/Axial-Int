@@ -19,11 +19,15 @@ from app.modules.analysis.prompts import (
     SYSTEM_PROMPT,
     get_prompt_template,
     is_valid_type,
+    sources_for,
 )
 from app.errors import AppError
 from app.shared import llm_client
 
 logger = logging.getLogger("axial.analysis")
+
+# Cadence des battements de cœur SSE pendant la génération (secondes).
+HEARTBEAT_SECONDS = 8
 
 
 @dataclass
@@ -52,11 +56,15 @@ def _retrieve_context(query: str, user_id: str, top_k: int):
 
 
 def run_analysis(*, query: str, analysis_type: str, user_id: str,
-                 title: str | None = None, top_k: int = 8,
+                 title: str | None = None, top_k: int | None = None,
                  company_context: str = "", tier: str = "report") -> AnalysisResult:
     if not is_valid_type(analysis_type):
         raise AppError(f"Type d'analyse inconnu : {analysis_type}", 400,
                        code="unknown_analysis_type")
+
+    # Le type d'analyse commande le volume de sources (40 pour une synthèse
+    # exécutive, 25 pour une veille) — la directive et le pipeline restent alignés.
+    top_k = top_k or sources_for(analysis_type)
 
     label_title = title or analysis_type.replace("_", " ").title()
 
@@ -68,14 +76,19 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
     except Exception as e:
         logger.warning("Web search failed: %s", e)
         web_results = []
-    web_context = web_search.format_sources(web_results)
 
-    # 2. Internal grounding: RAG over the user's documents.
-    rag_context, passages = _retrieve_context(query, user_id, top_k)
+    # 2. Internal grounding: RAG over the user's documents. No arbitrary cap —
+    # retrieval hands over everything it finds and the reranker below arbitrates,
+    # so a user with rich documents gets all of their relevant material.
+    _, passages = _retrieve_context(query, user_id, top_k)
 
-    # 3. Assemble context + prompt.
-    context = "\n\n".join(c for c in (web_context, rag_context) if c) or "Aucun."
-    prompt = get_prompt_template(analysis_type).format(context=context)
+    # 3. ONE ranked, numbered pool: web and internal compete on relevance and the
+    # [N] markers map 1:1 to the citations the reader sees (they used to be two
+    # separate numberings colliding in the same prompt).
+    from app.shared import grounding
+
+    context, citations = grounding.assemble(query, web_results, passages, top_k)
+    prompt = get_prompt_template(analysis_type).format(context=context or "Aucun.")
     if company_context:
         prompt = f"{company_context}\n\n{prompt}"
     prompt = f"{prompt}\n\nQuestion de l'utilisateur : {query}"
@@ -98,7 +111,7 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
         # Sonnet 5 : le thinking adaptatif se décompte de max_tokens — un budget
         # trop court peut être entièrement consommé en réflexion (texte vide).
         result = llm_client.generate(system=SYSTEM_PROMPT, prompt=prompt,
-                                     tier=tier, max_tokens=12000)
+                                     tier=tier, max_tokens=32000)
     except Exception as e:
         logger.warning("Generation failed: %s", e)
         return AnalysisResult(
@@ -119,8 +132,7 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
             metadata={"passages": len(passages), "web_sources": len(web_results)},
         )
 
-    sources = [{"title": r.title, "url": r.url, "domain": r.domain,
-                "provider": r.provider, "score": r.score} for r in web_results]
+    sources = citations
     return AnalysisResult(
         analysis_type=analysis_type,
         title=label_title,
@@ -190,7 +202,8 @@ def _sse(event: dict) -> str:
 
 
 def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
-                    analysis_type: str, title: str | None = None, top_k: int = 8):
+                    analysis_type: str, title: str | None = None,
+                    top_k: int | None = None):
     """Generator yielding SSE progress events, then a final `done` event.
 
     Bills only on success: credit check upfront, consume + archive + track after
@@ -212,13 +225,38 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
     from app.modules.memory import service as memory
 
     company_context = memory.build_context(db, user_id)
-    try:
-        result = run_analysis(query=query, analysis_type=analysis_type,
-                              user_id=user_id, title=title, top_k=top_k,
-                              company_context=company_context)
-    except AppError as e:
-        yield _sse({"step": "error", "done": True, "error": e.message})
-        return
+
+    # La génération tourne dans un thread pendant que le flux continue d'émettre :
+    # un rapport de fond prend plusieurs minutes, et une connexion silencieuse
+    # est coupée par les proxys bien avant la fin.
+    import concurrent.futures as _cf
+    import time as _time
+
+    with _cf.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            run_analysis, query=query, analysis_type=analysis_type,
+            user_id=user_id, title=title, top_k=top_k,
+            company_context=company_context,
+        )
+        waited, progress = 0, 40
+        while not future.done():
+            _time.sleep(1)
+            waited += 1
+            if waited % HEARTBEAT_SECONDS:
+                continue
+            progress = min(progress + 3, 85)
+            yield _sse({"progress": progress, "step": "generate", "heartbeat": True,
+                        "message": f"Rédaction en cours… ({waited // 60} min {waited % 60:02d} s)"})
+        try:
+            result = future.result()
+        except AppError as e:
+            yield _sse({"step": "error", "done": True, "error": e.message})
+            return
+        except Exception as e:
+            logger.warning("Stream generation failed: %s", e)
+            yield _sse({"step": "error", "done": True,
+                        "error": "La génération a échoué. Réessaie dans un instant."})
+            return
 
     if result.degraded:
         # No charge, no archive.
@@ -228,9 +266,10 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
         return
 
     yield _sse({"progress": 90, "step": "finalize", "message": "Finalisation…"})
-    finalize(db, user_id, analysis_type, result, is_admin=is_admin)
-    yield _sse({"progress": 100, "step": "done", "done": True,
-                "data": _result_payload(result)})
+    info = finalize(db, user_id, analysis_type, result, is_admin=is_admin) or {}
+    payload = _result_payload(result)
+    payload["report_id"] = info.get("report_id")
+    yield _sse({"progress": 100, "step": "done", "done": True, "data": payload})
 
 
 def _result_payload(result: AnalysisResult) -> dict:

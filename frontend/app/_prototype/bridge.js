@@ -266,6 +266,59 @@ export async function axUploadDocument(file, _retried = false) {
 
 // --- reports ---
 export async function axRunAnalysis(body) { return axFetch("/analysis/run", { method: "POST", body }); }
+/** Streamed analysis: real progress events, then the finished report.
+ * onEvent({progress, step, message}) fires as the backend advances.
+ * Returns the final report payload. Falls back to the blocking route on 401
+ * retry or when streaming isn't available. */
+export async function axStreamAnalysis(body, onEvent) {
+  const run = async (retried) => {
+    const tok = axGetToken();
+    const res = await fetch(AX_API + "/analysis/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(tok ? { Authorization: "Bearer " + tok } : {}) },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401 && !retried) {
+      const ok = await tryRefresh();
+      if (ok) return run(true);
+    }
+    if (!res.ok || !res.body) {
+      const err = new Error("stream_unavailable");
+      err.status = res.status;
+      throw err;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "", final = null;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // SSE frames are separated by a blank line.
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() || "";
+      for (const frame of frames) {
+        const line = frame.split("\n").find((l) => l.startsWith("data:"));
+        if (!line) continue;
+        let evt;
+        try { evt = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+        if (onEvent) onEvent(evt);
+        if (evt.done) {
+          if (evt.error) { const e = new Error(evt.error); e.code = evt.code; throw e; }
+          final = evt.data || null;
+        }
+      }
+    }
+    if (!final) throw new Error("Génération interrompue.");
+    return final;
+  };
+  try {
+    return await run(false);
+  } catch (e) {
+    if (e && e.message === "stream_unavailable") return axRunAnalysis(body);  // repli
+    throw e;
+  }
+}
 export async function axCreateReport(body) { return axFetch("/reports", { method: "POST", body }); }
 export async function axListReports() { return axFetch("/reports"); }
 export async function axGetReport(id) { return axFetch(`/reports/${id}`); }
