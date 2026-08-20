@@ -2520,6 +2520,182 @@ function ReportsGenerating({ genMeta }) {
   );
 }
 
+function renderInline(text, kp, onCite) {
+  const nodes = [];
+  const re = /\*\*(.+?)\*\*|\[(\d+(?:\]\[\d+)*)\]/g;
+  let last = 0, m, i = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) nodes.push(text.slice(last, m.index));
+    if (m[1] !== undefined) nodes.push(<strong key={kp + 'b' + i++}>{m[1]}</strong>);
+    else {
+      const firstId = parseInt(m[2], 10);
+      nodes.push(
+        <sup key={kp + 'c' + i++}
+          onClick={onCite ? () => onCite(firstId) : undefined}
+          style={{ color: 'var(--v-bright)', fontWeight: 600, marginLeft: 1,
+                   cursor: onCite ? 'pointer' : 'inherit' }}>[{m[2]}]</sup>
+      );
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
+function MarkdownView({ text, onCite }) {
+  const lines = (text || '').split('\n');
+  const blocks = [];
+  let bullets = [];
+  const flush = (k) => {
+    if (bullets.length) {
+      blocks.push(
+        <ul key={'ul' + k} style={{ margin: '6px 0 6px 20px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {bullets.map((b, i) => <li key={i} style={{ lineHeight: 1.55 }}>{renderInline(b, 'l' + k + i, onCite)}</li>)}
+        </ul>,
+      );
+      bullets = [];
+    }
+  };
+  lines.forEach((raw, idx) => {
+    const line = raw.replace(/\s+$/, '');
+    if (!line.trim()) { flush(idx); return; }
+    if (line.startsWith('### ')) { flush(idx); blocks.push(<h3 key={idx} style={{ fontSize: 15, fontWeight: 700, margin: '14px 0 6px' }}>{renderInline(line.slice(4), 'h' + idx, onCite)}</h3>); }
+    else if (line.startsWith('## ')) { flush(idx); blocks.push(<h2 key={idx} style={{ fontSize: 17, fontWeight: 700, margin: '18px 0 8px' }}>{renderInline(line.slice(3), 'h' + idx, onCite)}</h2>); }
+    else if (line.startsWith('# ')) { flush(idx); blocks.push(<h1 key={idx} style={{ fontSize: 20, fontWeight: 800, margin: '8px 0 10px' }}>{renderInline(line.slice(2), 'h' + idx, onCite)}</h1>); }
+    else if (line.trim() === '---' || line.trim() === '***') { flush(idx); blocks.push(<hr key={idx} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '16px 0' }} />); }
+    else if (/^\s*[-*]\s+/.test(line)) { bullets.push(line.replace(/^\s*[-*]\s+/, '')); }
+    else { flush(idx); blocks.push(<p key={idx} style={{ margin: '6px 0', lineHeight: 1.6 }}>{renderInline(line, 'p' + idx, onCite)}</p>); }
+  });
+  flush('end');
+  return <div>{blocks}</div>;
+}
+
+function ReportsEditor({ data, onBack, openShare }) {
+  const lang = window.AXIAL_LANG || 'fr';
+  const t = window.useT();
+  const [saving, setSaving] = React.useState(false);
+  const [savedId, setSavedId] = React.useState((data && data.report_id) || null);
+  const title = (data && data.title) || (lang === 'fr' ? 'Rapport' : 'Report');
+  const content = (data && data.content) || '';
+  const sources = (data && data.sources) || [];
+
+  const exportPdf = async () => {
+    setSaving(true);
+    try {
+      let id = savedId;
+      if (!id) {
+        const r = await axCreateReport({ title, content, analysis_type: (data && data.analysis_type) || 'synthese_executive', sources });
+        id = r.id; setSavedId(id);
+      }
+      await axDownloadReportPdf(id, title.slice(0, 60) + '.pdf');
+    } catch (e) { /* noop */ }
+    setSaving(false);
+  };
+
+  return (
+    <div className="surface" style={{ paddingTop: 16, paddingBottom: 16, maxWidth: 1000 }}>
+      <div className="surface-head" style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <button className="btn btn-ghost btn-sm" onClick={onBack}><Icon name="arrow-left" size={14} /></button>
+          <div>
+            <h1 style={{ fontSize: 22 }}>{title}</h1>
+            <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+              {sources.length} sources · {lang === 'fr' ? 'Rapport Axial' : 'Axial report'}
+            </p>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button className="btn btn-secondary btn-sm" onClick={openShare}><Icon name="share" size={14} />{t('common.share')}</button>
+          <button className="btn btn-primary btn-sm" onClick={exportPdf} disabled={saving}>
+            <Icon name="download" size={14} />{saving ? (lang === 'fr' ? 'Export…' : 'Exporting…') : 'PDF'}
+          </button>
+          <TopControls />
+        </div>
+      </div>
+
+      <div className="rep-doc" style={{ fontSize: 14, maxWidth: 820 }}>
+        {content ? <MarkdownView text={content} /> : (lang === 'fr' ? 'Aucun contenu.' : 'No content.')}
+      </div>
+
+      {sources.length > 0 && (
+        <div style={{ marginTop: 28 }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 12 }}>
+            Sources
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {sources.map((s, i) => (
+              <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 13 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--v-bright)' }}>[{i + 1}]</span>
+                {s.url
+                  ? <a href={s.url} target="_blank" rel="noreferrer" style={{ color: 'var(--fg)', textDecoration: 'none' }}>{s.title || s.url}</a>
+                  : <span>{s.title || s.reference || ''}</span>}
+                {s.domain && <span style={{ color: 'var(--fg-3)' }}>· {s.domain}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* =================================================================
+   REPORTS — Quota Exceeded (state 6)
+   ================================================================= */
+function ReportsQuota({ onClose }) {
+  const t = window.useT();
+  const lang = window.AXIAL_LANG || 'fr';
+  return (
+    <div className="surface">
+      <div className="surface-head">
+        <div>
+          <h1>{t('reports.quota.title')}</h1>
+          <p>{t('reports.quota.body')}</p>
+        </div>
+        <TopControls />
+      </div>
+      <div className="quota-card">
+        <div className="quota-usage">
+          <h3>{t('reports.quota.title')}</h3>
+          <p style={{ fontSize: 13.5, color: 'var(--fg-2)', lineHeight: 1.6, margin: '6px 0 0' }}>
+            {t('reports.quota.body')}
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="quota-option featured">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <h3>Pro</h3>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--v-soft)', letterSpacing: '0.10em', textTransform: 'uppercase', fontWeight: 700 }}>{lang === 'fr' ? 'Recommandé' : 'Recommended'}</span>
+            </div>
+            <div className="price">50 €<small>/{lang === 'fr' ? 'mois' : 'mo'}</small></div>
+            <ul>
+              <li><Icon name="check" size={13} className="check" />120 {lang === 'fr' ? 'crédits' : 'credits'} / {lang === 'fr' ? 'mois' : 'mo'}</li>
+              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? '2 agents de veille' : '2 monitoring agents'}</li>
+              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? 'Templates (fundraising, ICP, GTM)' : 'Templates (fundraising, ICP, GTM)'}</li>
+              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? 'Export PDF' : 'PDF export'}</li>
+            </ul>
+            <button className="btn btn-primary" style={{ marginTop: 4 }}>{t('reports.quota.upgrade')}</button>
+          </div>
+
+          <div className="quota-option">
+            <h3>{lang === 'fr' ? 'Recharge ponctuelle' : 'One-time top-up'}</h3>
+            <div className="price">20 €<small>{lang === 'fr' ? ' · 50 crédits' : ' · 50 credits'}</small></div>
+            <p style={{ fontSize: 12.5, color: 'var(--fg-2)', margin: 0, lineHeight: 1.5 }}>
+              {lang === 'fr' ? 'Packs ponctuels (50, 100 ou 200 crédits) qui ne périment pas.' : 'One-off packs (50, 100 or 200 credits) that never expire.'}
+            </p>
+            <button className="btn btn-secondary" style={{ marginTop: 4 }}>{t('reports.quota.topup')}</button>
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
+        <button className="btn btn-ghost" onClick={onClose}>{t('common.back')}</button>
+      </div>
+    </div>
+  );
+}
+
+window.ReportsEmpty = ReportsEmpty;
 window.ReportsGenerating = ReportsGenerating;
 window.ReportsEditor = ReportsEditor;
 function SourceConflictModal({ onClose }) {
