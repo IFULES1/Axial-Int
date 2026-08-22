@@ -71,7 +71,8 @@ def generate(*, system: str, prompt: str, tier: str = "chat",
 
 
 def stream_text(*, system: str, prompt: str, tier: str = "chat",
-                max_tokens: int = 4000):
+                max_tokens: int = 4000, mcp_servers: list | None = None,
+                mcp_tools: list | None = None):
     """Streaming counterpart of generate(): yields text chunks.
 
     Failover only applies BEFORE the first chunk — once text has reached the
@@ -92,8 +93,10 @@ def stream_text(*, system: str, prompt: str, tier: str = "chat",
             continue
         started = False
         try:
+            extra = ({"mcp_servers": mcp_servers, "mcp_tools": mcp_tools}
+                     if (mcp_servers and name == "claude") else {})
             for chunk in mod.stream(system=system, prompt=prompt,
-                                    max_tokens=max_tokens):
+                                    max_tokens=max_tokens, **extra):
                 started = True
                 yield chunk
             return

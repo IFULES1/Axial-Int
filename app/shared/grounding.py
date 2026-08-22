@@ -32,18 +32,23 @@ def assemble(query: str, web_results, doc_passages, top_k: int = 8,
             "key": f"web::{r.domain}::{r.title.strip().lower()}",
         })
     for p in doc_passages:
-        if p.source not in ("kb", "user"):
+        if p.source not in ("kb", "user", "notion"):
             continue
         meta = p.meta or {}
         title = meta.get("title") or meta.get("filename") or "Base de connaissance"
         ref = meta.get("source") or meta.get("category") or ""
+        espace = p.source == "notion"
         pool.append({
             "text": p.text,
-            "tag": f"(réf. interne : {ref} — {title})" if ref else f"(réf. interne : {title})",
+            "tag": (f"(espace Notion : {title})" if espace
+                    else (f"(réf. interne : {ref} — {title})" if ref
+                          else f"(réf. interne : {title})")),
             "body": p.text,
             "cite": {"title": title,
-                     "source": "interne" if p.source == "kb" else "document",
-                     "reference": ref, "excerpt": (p.text or "")[:350]},
+                     "source": "notion" if espace else ("interne" if p.source == "kb" else "document"),
+                     "url": meta.get("url") if espace else None,
+                     "reference": "Votre espace Notion" if espace else ref,
+                     "excerpt": (p.text or "")[:350]},
             # Passages from the same document are distinct evidence: key on the
             # text, not the filename, or a long document collapses to one entry.
             "key": f"doc::{title}::{(p.text or '')[:80].strip().lower()}",

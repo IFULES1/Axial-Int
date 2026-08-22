@@ -68,7 +68,7 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
                  title: str | None = None, top_k: int | None = None,
                  company_context: str = "", tier: str = "report",
                  profile: dict | None = None,
-                 mcp: tuple[list, list] | None = None) -> AnalysisResult:
+                 db_pour_notion=None) -> AnalysisResult:
     if not is_valid_type(analysis_type):
         raise AppError(f"Type d'analyse inconnu : {analysis_type}", 400,
                        code="unknown_analysis_type")
@@ -126,6 +126,15 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
                 metadata={"passages": len(passages), "web_sources": len(web_results)},
             )
 
+    # Espace Notion de l'utilisateur : ses pages rejoignent le pool de sources.
+    try:
+        from app.modules.integrations import notion_context
+
+        passages = list(passages) + notion_context.passages_pour(db_pour_notion, user_id, query) \
+            if db_pour_notion is not None else list(passages)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Espace Notion indisponible : %s", e)
+
     context, citations = grounding.assemble(
         query, web_results, passages, top_k, start_at=len(investor_citations) + 1
     )
@@ -154,16 +163,8 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
     try:
         # Sonnet 5 : le thinking adaptatif se décompte de max_tokens — un budget
         # trop court peut être entièrement consommé en réflexion (texte vide).
-        mcp_servers, mcp_tools = mcp or ([], [])
-        if mcp_servers:
-            prompt += ("\n\nOutils connectés : tu as accès à l'espace de travail "
-                       "de l'utilisateur. Consulte-le quand il peut contenir des "
-                       "éléments utiles (notes, comptes rendus, documents "
-                       "stratégiques) et cite ces sources comme « espace de "
-                       "travail » — jamais comme une source publique.")
         result = llm_client.generate(system=SYSTEM_PROMPT, prompt=prompt,
-                                     tier=tier, max_tokens=32000,
-                                     mcp_servers=mcp_servers, mcp_tools=mcp_tools)
+                                     tier=tier, max_tokens=32000)
     except Exception as e:
         logger.warning("Generation failed: %s", e)
         return AnalysisResult(
@@ -278,13 +279,6 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
 
     company_context = memory.build_context(db, user_id)
     profile = _profile_dict(db, user_id)
-    try:
-        from app.modules.integrations import service as integrations
-
-        mcp = integrations.mcp_pour_rapport(db, user_id)
-    except Exception as e:  # noqa: BLE001 — un outil indisponible ne bloque rien
-        logger.warning("Outils connectés indisponibles : %s", e)
-        mcp = ([], [])
 
     # La génération tourne dans un thread pendant que le flux continue d'émettre :
     # un rapport de fond prend plusieurs minutes, et une connexion silencieuse
@@ -296,7 +290,8 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
         future = pool.submit(
             run_analysis, query=query, analysis_type=analysis_type,
             user_id=user_id, title=title, top_k=top_k,
-            company_context=company_context, profile=profile, mcp=mcp,
+            company_context=company_context, profile=profile,
+            db_pour_notion=db,
         )
         waited, progress = 0, 40
         while not future.done():

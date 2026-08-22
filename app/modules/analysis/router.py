@@ -24,16 +24,6 @@ def types() -> dict:
     return {"types": available_types()}
 
 
-def _outils_connectes(db: Session, user_id: str) -> tuple[list, list]:
-    """Serveurs MCP des outils que l'utilisateur a connectés (Notion…)."""
-    try:
-        from app.modules.integrations import service as integrations
-
-        return integrations.mcp_pour_rapport(db, user_id)
-    except Exception:  # noqa: BLE001
-        return [], []
-
-
 @router.post("/run", response_model=AnalysisResponse)
 def run(payload: AnalysisRequest, user: AuthUser = Depends(get_current_user),
         db: Session = Depends(get_db)) -> AnalysisResponse:
@@ -46,7 +36,7 @@ def run(payload: AnalysisRequest, user: AuthUser = Depends(get_current_user),
         query=payload.query, analysis_type=payload.analysis_type,
         user_id=user.id, title=payload.title, top_k=payload.top_k,
         company_context=company_context, profile=service._profile_dict(db, user.id),
-        mcp=_outils_connectes(db, user.id),
+        db_pour_notion=db,
     )
     # Charge + archive + track (no-op on degraded results).
     info = service.finalize(db, user.id, payload.analysis_type, result, is_admin=user.is_admin)

@@ -92,8 +92,14 @@ class ClaudeProvider:
 
 
 def stream(*, system: str, prompt: str, model: str | None = None,
-           max_tokens: int = 4000):
-    """Yield text chunks as they are produced (streaming variant of generate())."""
+           max_tokens: int = 4000, mcp_servers: list | None = None,
+           mcp_tools: list | None = None):
+    """Yield text chunks as they are produced (streaming variant of generate()).
+
+    Avec des serveurs MCP, les appels d'outils sont exécutés côté Anthropic :
+    le flux de texte reste le même pour l'appelant, il marque simplement une
+    pause pendant que Claude interroge l'outil.
+    """
     settings = get_settings()
     if not settings.anthropic_api_key:
         raise ProviderUnavailable("ANTHROPIC_API_KEY non configurée")
@@ -101,8 +107,14 @@ def stream(*, system: str, prompt: str, model: str | None = None,
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     model = model or settings.llm_report_model
-    with client.messages.stream(
-        model=model, max_tokens=max_tokens, system=system,
-        messages=[{"role": "user", "content": prompt}],
-    ) as s:
+    kwargs = {
+        "model": model, "max_tokens": max_tokens, "system": system,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+    if mcp_servers and mcp_tools:
+        kwargs["mcp_servers"] = mcp_servers
+        kwargs["tools"] = mcp_tools
+        kwargs["betas"] = ["mcp-client-2025-11-20"]
+    espace = client.beta.messages if "betas" in kwargs else client.messages
+    with espace.stream(**kwargs) as s:
         yield from s.text_stream

@@ -231,6 +231,17 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
                 web_results = []
             _, doc_passages = f_docs.result()
 
+    # Espace Notion de l'utilisateur : ses pages rejoignent le même pool que le
+    # web et ses documents, donc elles sont rerankées et citées comme le reste.
+    if not trivial:
+        try:
+            from app.modules.integrations import notion_context
+
+            doc_passages = list(doc_passages) + notion_context.passages_pour(
+                db, user_id, content)
+        except Exception as e:  # noqa: BLE001 — un outil injoignable ne bloque rien
+            logger.warning("Espace Notion indisponible : %s", e)
+
     # Rerank web + internal together → one relevance-ordered context + citations.
     combined_context, citations = _assemble_sources(content, web_results, doc_passages)
 
@@ -269,6 +280,17 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
     # Conversation libre : Gemini (chat) pour le court, Sonnet (report) pour le
     # long. Agents spécialisés : tier chat (comportement historique).
     tier = "report" if (free_chat and _wants_long_answer(content)) else "chat"
+
+    # Quand des pages Notion sont dans les sources, le modèle doit les traiter
+    # comme le matériau de l'utilisateur — pas comme une source publique.
+    if any((getattr(p, "source", "") == "notion") for p in doc_passages):
+        system += (
+            "\n\nESPACE DE TRAVAIL : certaines sources numérotées proviennent de "
+            "l'espace Notion de l'utilisateur (repérées « espace Notion »). Ce sont "
+            "SES contenus : exploite-les en priorité, désigne-les comme « votre "
+            "espace Notion » et ne dis jamais que tu n'y as pas accès."
+        )
+
     return _Turn(conv=conv, agent_key=agent_key, redirect_note=redirect_note,
                  system=system, prompt=prompt, citations=citations, tier=tier,
                  max_tokens=8000 if tier == "report" else 2500)
