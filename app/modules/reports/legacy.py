@@ -56,8 +56,19 @@ def is_known(db: Session, email: str) -> bool:
         return False
     try:
         stmt = select(LegacyReport.id).where(LegacyReport.email == address).limit(1)
-        return db.scalar(stmt) is not None
+        if db.scalar(stmt) is not None:
+            return True
     except Exception:  # table absente (migration pas encore jouée)
+        pass
+    # Une adresse contactée par la campagne de migration est tout aussi
+    # « connue », même sans rapport à restaurer : sur 42 destinataires, 25
+    # n'avaient rien produit et seraient restés dans le silence complet.
+    try:
+        from app.modules.emailing.models import EmailSend
+
+        stmt = select(EmailSend.id).where(EmailSend.email == address).limit(1)
+        return db.scalar(stmt) is not None
+    except Exception:
         return False
 
 
