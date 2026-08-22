@@ -1254,7 +1254,8 @@ function ResetPasswordPage({ token, onDone }) {
   };
 
   return (
-    <div className="auth-page">
+    <div className="page auth-shell">
+      <div className="bg-radial" />
       <div className="auth-card">
         <Lockup sub="Intelligence" />
         <h1 className="auth-hook">Choisis un nouveau mot de passe.</h1>
