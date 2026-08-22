@@ -2729,12 +2729,6 @@ function ReportsEditor({ data, onBack, openShare }) {
               <Icon name="file" size={14} />{envoi === 'notion' ? '…' : 'Notion'}
             </button>
           )}
-          {(outils.google && outils.google.connecte) && (
-            <button className="btn btn-secondary btn-sm" disabled={!!envoi}
-              onClick={() => livrer('google')}>
-              <Icon name="database" size={14} />{envoi === 'google' ? '…' : 'Drive'}
-            </button>
-          )}
           {envoiMsg && (
             <span style={{ fontSize: 12.5, color: envoiMsg.ok ? 'var(--success)' : 'var(--error, #e5484d)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <Icon name={envoiMsg.ok ? 'check' : 'alert'} size={12} />
@@ -3813,10 +3807,8 @@ function IntegrationsSettings({ lang, t }) {
       quoi: lang === 'fr'
         ? "Axial consulte ton espace pendant la rédaction d'un rapport, et peut y publier le résultat."
         : 'Axial reads your workspace while writing a report, and can publish results there.' },
-    { id: 'google', nom: 'Google Drive', icone: 'database',
-      quoi: lang === 'fr'
-        ? "Dépose le PDF de tes rapports dans ton Drive. Axial n'accède qu'aux fichiers qu'il y crée."
-        : 'Drops report PDFs into your Drive. Axial only accesses files it creates there.' },
+    // Google Drive : le backend est prêt (OAuth + dépôt du PDF), mais l'outil
+    // reste masqué tant que Miradie n'ouvre pas cette intégration.
   ];
 
   const connecter = async (id) => {
