@@ -83,6 +83,14 @@ def demander(db: Session, email: str) -> None:
 
     if not _compte_existe(db, address):
         db.commit()
+        # Cas particulier : une personne de l'ancienne plateforme qui n'a pas
+        # encore créé son compte ici. La laisser dans le silence après lui avoir
+        # écrit que ses rapports l'attendent serait une impasse ; on lui explique.
+        if _vient_de_l_ancienne_plateforme(db, address):
+            _envoyer_invitation(db, address)
+            logger.info("Réinitialisation demandée avant création du compte "
+                        "— invitation envoyée")
+            return
         logger.info("Demande de réinitialisation pour une adresse inconnue (ignorée)")
         return
 
@@ -93,10 +101,43 @@ def demander(db: Session, email: str) -> None:
     _envoyer_email(address, token)
 
 
-def _envoyer_email(email: str, token: str) -> None:
-    import httpx
+def _vient_de_l_ancienne_plateforme(db: Session, email: str) -> bool:
+    from app.modules.reports import legacy
 
-    settings = get_settings()
+    return legacy.is_known(db, email)
+
+
+def _envoyer_invitation(db: Session, email: str) -> None:
+    """Expliquer qu'il n'y a pas encore de compte — et comment en créer un."""
+    from app.modules.reports import legacy
+
+    n = legacy.pending_count(db, email)
+    if n > 1:
+        rappel = (f"Tes {n} rapports de la première version sont conservés : ils "
+                  "reviennent dans ton espace dès que le compte est créé avec cette "
+                  "même adresse.")
+    elif n == 1:
+        rappel = ("Ton rapport de la première version est conservé : il revient dans "
+                  "ton espace dès que le compte est créé avec cette même adresse.")
+    else:
+        rappel = ("Ton compte de la première version est reconnu : tes 50 crédits "
+                  "sont accordés automatiquement à la création.")
+
+    texte = (
+        "Bonjour,\n\n"
+        "Tu viens de demander à réinitialiser ton mot de passe Axial — mais il n'y a "
+        "pas encore de compte à cette adresse sur la nouvelle version.\n\n"
+        "C'est normal : la plateforme a été entièrement reconstruite, et les comptes "
+        "de la première version n'ont pas été transférés automatiquement.\n\n"
+        f"{rappel}\n\n"
+        "Créer ton compte : https://app.axial-ia.fr\n\n"
+        "Si tu n'es pas à l'origine de cette demande, ignore ce message.\n\n"
+        "Miradie\nAxial Intelligence"
+    )
+    _poster(email, "Ton compte Axial n'est pas encore créé", texte)
+
+
+def _envoyer_email(email: str, token: str) -> None:
     lien = f"https://app.axial-ia.fr/?reinit={token}"
     texte = (
         "Bonjour,\n\n"
@@ -107,21 +148,29 @@ def _envoyer_email(email: str, token: str) -> None:
         "ton mot de passe actuel reste valable.\n\n"
         "Axial Intelligence"
     )
+    _poster(email, "Réinitialiser ton mot de passe Axial", texte)
+
+
+def _poster(email: str, objet: str, texte: str) -> None:
+    """Envoi bas niveau. Un échec est journalisé, jamais remonté au visiteur."""
+    import httpx
+
+    settings = get_settings()
     if not settings.resend_api_key:
-        logger.warning("Resend non configuré : lien de réinitialisation non envoyé")
+        logger.warning("Resend non configuré : email « %s » non envoyé", objet)
         return
     try:
         httpx.post(
             "https://api.resend.com/emails",
             headers={"Authorization": f"Bearer {settings.resend_api_key}",
                      "Content-Type": "application/json"},
-            json={"from": settings.mail_from or "Axial <no-reply@axial-ia.fr>",
-                  "to": [email], "subject": "Réinitialiser ton mot de passe Axial",
-                  "text": texte},
+            json={"from": '"Miradie @Axial" <miradie.buranturu@axial-ia.fr>',
+                  "to": [email], "subject": objet, "text": texte,
+                  "reply_to": "miradie.buranturu@axial-ia.fr"},
             timeout=20.0,
         ).raise_for_status()
-    except Exception as e:  # noqa: BLE001 — ne jamais révéler l'échec au visiteur
-        logger.warning("Envoi du lien de réinitialisation échoué : %s", e)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Envoi de « %s » échoué : %s", objet, e)
 
 
 def reinitialiser(db: Session, token: str, nouveau_mot_de_passe: str) -> str:
