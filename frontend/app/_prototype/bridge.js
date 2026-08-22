@@ -90,6 +90,18 @@ export async function axLogin(email, password) {
   axSetToken(r.access_token, r.refresh_token);
   return r.user;
 }
+/** Demander un lien de réinitialisation (réponse identique si l'adresse est inconnue). */
+export async function axForgotPassword(email) {
+  return axFetch("/auth/forgot-password", { method: "POST", auth: false, body: { email } });
+}
+/** Appliquer un nouveau mot de passe via le jeton reçu par email, puis connecter. */
+export async function axResetPassword(token, password) {
+  const r = await axFetch("/auth/reset-password", {
+    method: "POST", auth: false, body: { token, password },
+  });
+  axSetToken(r.access_token, r.refresh_token);
+  return r.user;
+}
 export async function axMe() {
   return axFetch("/auth/me");
 }

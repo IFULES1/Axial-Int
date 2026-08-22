@@ -48,6 +48,42 @@ def _restore_legacy(db: Session, token: TokenResponse) -> None:
     legacy.grant_return_bonus(db, token.user.id, token.user.email)
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    password: str
+
+
+@router.post("/forgot-password")
+def forgot_password(payload: ForgotPasswordRequest,
+                    db: Session = Depends(get_db)) -> dict:
+    """Envoyer un lien de réinitialisation.
+
+    Répond toujours la même chose : un formulaire qui distingue « adresse
+    connue » de « adresse inconnue » devient un outil d'énumération de comptes.
+    """
+    from app.modules.auth import password_reset
+
+    password_reset.demander(db, payload.email)
+    return {"sent": True}
+
+
+@router.post("/reset-password", response_model=TokenResponse)
+def reset_password(payload: ResetPasswordRequest,
+                   db: Session = Depends(get_db)) -> TokenResponse:
+    """Appliquer le nouveau mot de passe puis connecter directement la personne."""
+    from app.modules.auth import password_reset
+    from app.modules.auth.schemas import LoginRequest
+
+    email = password_reset.reinitialiser(db, payload.token, payload.password)
+    token = service.login(LoginRequest(email=email, password=payload.password), db)
+    _restore_legacy(db, token)
+    return token
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str
 

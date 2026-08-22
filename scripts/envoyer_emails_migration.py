@@ -92,6 +92,14 @@ def destinataires() -> list[dict]:
              "n": counts.get(e["email"], 0)} for e in liste]
 
 
+def exclus() -> set[str]:
+    """Adresses désinscrites — vérifié à chaque envoi, jamais mis en cache."""
+    from app.modules.emailing.models import EmailSuppression
+
+    db = SessionLocal()
+    return {e for (e,) in db.execute(select(EmailSuppression.email))}
+
+
 def deja_envoyes() -> set[str]:
     if not JOURNAL.exists():
         return set()
@@ -217,7 +225,8 @@ def main() -> None:
     args = p.parse_args()
 
     cle = get_settings().resend_api_key
-    cibles = [d for d in destinataires() if d["email"] not in deja_envoyes()]
+    bloques = deja_envoyes() | exclus()
+    cibles = [d for d in destinataires() if d["email"] not in bloques]
     avec = sum(1 for d in cibles if d["n"])
     print(f"{len(cibles)} destinataire(s) — {avec} avec rapports, {len(cibles)-avec} sans")
 

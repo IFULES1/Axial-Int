@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -1233,6 +1233,58 @@ window.LandingPage = LandingPage;
 
 var { useState: useAuthState } = React;
 
+function ResetPasswordPage({ token, onDone }) {
+  const [pwd, setPwd] = React.useState('');
+  const [pwd2, setPwd2] = React.useState('');
+  const [busy, setBusy] = React.useState(false);
+  const [err, setErr] = React.useState('');
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (pwd !== pwd2) { setErr('Les deux mots de passe ne correspondent pas.'); return; }
+    if (pwd.length < 8) { setErr('8 caractères minimum.'); return; }
+    setBusy(true); setErr('');
+    try {
+      await axResetPassword(token, pwd);
+      onDone();
+    } catch (ex) {
+      setErr((ex && ex.message) || 'Ce lien n\'est plus valable.');
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="auth-page">
+      <div className="auth-card">
+        <Lockup sub="Intelligence" />
+        <h1 className="auth-hook">Choisis un nouveau mot de passe.</h1>
+        <p className="caption" style={{ marginTop: -16, marginBottom: 22 }}>
+          Tu seras connecté automatiquement juste après.
+        </p>
+        <form onSubmit={submit} className="auth-fields">
+          <div>
+            <label className="label">NOUVEAU MOT DE PASSE</label>
+            <input className="input" type="password" required minLength={8} autoFocus
+              placeholder="8 caractères minimum"
+              value={pwd} onChange={(e) => setPwd(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">CONFIRMATION</label>
+            <input className="input" type="password" required minLength={8}
+              placeholder="Retape le même"
+              value={pwd2} onChange={(e) => setPwd2(e.target.value)} />
+          </div>
+          {err && <p className="caption" style={{ color: 'var(--error, #f87171)', margin: '2px 0 0' }}>{err}</p>}
+          <button className="btn btn-primary btn-lg btn-block" type="submit" disabled={busy}>
+            {busy ? <><span className="spinner" /> Enregistrement…</>
+                  : <>Valider et me connecter <Icon name="arrow-right" size={14} /></>}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
   const [mode, setMode] = useAuthState(initialMode); // 'signup' | 'login'
   const [email, setEmail] = useAuthState('');
@@ -1254,6 +1306,22 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
       setBusy(null);
       setAuthErr((err && err.message) ? err.message : "Une erreur est survenue.");
     }
+  };
+
+  const [resetBusy, setResetBusy] = React.useState(false);
+  const [resetMsg, setResetMsg] = React.useState('');
+  // Le lien de réinitialisation part vers l'adresse saisie ; la réponse est
+  // volontairement identique que le compte existe ou non.
+  const askReset = async () => {
+    if (!email.trim()) { setResetMsg("Renseigne d'abord ton email ci-dessus."); return; }
+    setResetBusy(true); setResetMsg('');
+    try {
+      await axForgotPassword(email.trim());
+      setResetMsg("Si un compte existe pour cette adresse, un lien vient d'être envoyé. Vérifie ta boîte (et les indésirables).");
+    } catch (e) {
+      setResetMsg("Si un compte existe pour cette adresse, un lien vient d'être envoyé.");
+    }
+    setResetBusy(false);
   };
 
   const submit = (e) => {
@@ -1281,7 +1349,7 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
         </h1>
         <p className="caption" style={{ marginTop: -16, marginBottom: 22 }}>
           {mode === 'signup'
-            ? "Trois minutes pour configurer votre contexte. Pas de carte bancaire."
+            ? "Trois minutes pour configurer votre contexte, puis 14 jours d'essai."
             : "Reprenez vos analyses là où vous les avez laissées."}
         </p>
 
@@ -1324,9 +1392,15 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
               value={pwd} onChange={(e) => setPwd(e.target.value)} />
           </div>
           {mode === 'login' && (
-            <a href="#" style={{ fontSize: 12, color: 'var(--v-soft)', alignSelf: 'flex-end', marginTop: -6 }}>
-              Mot de passe oublié ?
-            </a>
+            <button type="button" onClick={askReset} disabled={resetBusy}
+              style={{ fontSize: 12, color: 'var(--v-soft)', alignSelf: 'flex-end',
+                       marginTop: -6, background: 'none', border: 'none',
+                       cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
+              {resetBusy ? 'Envoi…' : 'Mot de passe oublié ?'}
+            </button>
+          )}
+          {resetMsg && (
+            <p className="caption" style={{ color: 'var(--success)', margin: '2px 0 0' }}>{resetMsg}</p>
           )}
           {authErr && (
             <p className="caption" style={{ color: 'var(--error, #f87171)', margin: '2px 0 0' }}>{authErr}</p>
@@ -5214,10 +5288,20 @@ function App() {
   // Real credit balance from the backend (fetched when entering the app).
   const [axBal, setAxBal] = useState(null);
   const [axUser, setAxUser] = useState(null);
+  const [resetToken, setResetToken] = useState('');
   // Session persistence: if a valid token exists on load, resume into the app.
   // Handles the return from the onboarding Stripe checkout (?onb=done|cancel):
   // the card step is MANDATORY — until it's completed, resume lands on onb4.
   useEffect(() => {
+    // Lien de réinitialisation reçu par email : traité AVANT tout contrôle de
+    // session — la personne qui clique ce lien n'est précisément pas connectée.
+    const jeton = new URLSearchParams(window.location.search).get('reinit');
+    if (jeton) {
+      setResetToken(jeton);
+      try { window.history.replaceState({}, '', window.location.pathname); } catch (e) {}
+      go('reset');
+      return;
+    }
     let tok = null;
     try { tok = localStorage.getItem('axial_token'); } catch (e) {}
     if (!tok) return;
@@ -5425,6 +5509,10 @@ function App() {
     />;
   }
 
+  if (route === 'reset') {
+    return <ResetPasswordPage token={resetToken}
+      onDone={() => { setResetToken(''); go('app'); }} />;
+  }
   if (route === 'auth') {
     return <AuthPage
       initialMode={authMode}

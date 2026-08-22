@@ -29,3 +29,18 @@ class EmailSend(Base):
     )
     opened_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     open_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class EmailSuppression(Base):
+    """Adresses à ne plus jamais contacter, toutes campagnes confondues.
+
+    Une désinscription doit survivre aux campagnes : la vérifier au moment de
+    l'envoi est le seul endroit qui garantit qu'aucune liste future ne la perde.
+    """
+    __tablename__ = "email_suppressions"
+
+    email: Mapped[str] = mapped_column(String(320), primary_key=True)
+    reason: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc)
+    )
