@@ -296,6 +296,24 @@ export async function axMessages(cid) {
   return axFetch(`/intelligence/conversations/${cid}/messages`);
 }
 
+// --- intégrations (Notion, Google) ---
+export async function axIntegrations() { return axFetch("/integrations/status"); }
+/** Ouvre l'autorisation OAuth du fournisseur dans le navigateur. */
+export async function axConnectIntegration(provider) {
+  const r = await axFetch(`/integrations/${provider}/authorize`, { method: "POST", body: {} });
+  if (r.authorize_url) window.location.href = r.authorize_url;
+  return r;
+}
+export async function axDisconnectIntegration(provider) {
+  return axFetch(`/integrations/${provider}`, { method: "DELETE" });
+}
+/** Publie un rapport archivé dans Notion / Drive ; renvoie { url }. */
+export async function axDeliverReport(provider, reportId) {
+  return axFetch(`/integrations/${provider}/deliver`, {
+    method: "POST", body: { report_id: reportId },
+  });
+}
+
 // --- veille agents (watches) ---
 export async function axWatchSkills() { return axFetch("/watches/skills", { auth: false }); }
 export async function axListWatches() { return axFetch("/watches"); }

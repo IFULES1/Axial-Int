@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -2670,6 +2670,29 @@ function ReportsEditor({ data, onBack, openShare }) {
   const content = (data && data.content) || '';
   const sources = (data && data.sources) || [];
 
+  const [envoi, setEnvoi] = React.useState('');
+  const [envoiMsg, setEnvoiMsg] = React.useState(null);
+  const [outils, setOutils] = React.useState({});
+  React.useEffect(() => { axIntegrations().then(setOutils).catch(() => {}); }, []);
+
+  // La livraison exige un rapport archivé : on le sauvegarde d'abord si besoin.
+  const livrer = async (provider) => {
+    setEnvoi(provider); setEnvoiMsg(null);
+    try {
+      let id = savedId;
+      if (!id) {
+        const r = await axCreateReport({ title, content, analysis_type: (data && data.analysis_type) || 'synthese_executive', sources });
+        id = r.id; setSavedId(id);
+      }
+      const res = await axDeliverReport(provider, id);
+      setEnvoiMsg({ ok: true, url: res.url,
+                    texte: provider === 'notion' ? 'Page Notion créée' : 'Déposé dans ton Drive' });
+    } catch (e) {
+      setEnvoiMsg({ ok: false, texte: (e && e.message) || 'Envoi impossible.' });
+    }
+    setEnvoi('');
+  };
+
   const exportPdf = async () => {
     setSaving(true);
     try {
@@ -2700,6 +2723,26 @@ function ReportsEditor({ data, onBack, openShare }) {
           <button className="btn btn-primary btn-sm" onClick={exportPdf} disabled={saving}>
             <Icon name="download" size={14} />{saving ? (lang === 'fr' ? 'Export…' : 'Exporting…') : 'PDF'}
           </button>
+          {(outils.notion && outils.notion.connecte) && (
+            <button className="btn btn-secondary btn-sm" disabled={!!envoi}
+              onClick={() => livrer('notion')}>
+              <Icon name="file" size={14} />{envoi === 'notion' ? '…' : 'Notion'}
+            </button>
+          )}
+          {(outils.google && outils.google.connecte) && (
+            <button className="btn btn-secondary btn-sm" disabled={!!envoi}
+              onClick={() => livrer('google')}>
+              <Icon name="database" size={14} />{envoi === 'google' ? '…' : 'Drive'}
+            </button>
+          )}
+          {envoiMsg && (
+            <span style={{ fontSize: 12.5, color: envoiMsg.ok ? 'var(--success)' : 'var(--error, #e5484d)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Icon name={envoiMsg.ok ? 'check' : 'alert'} size={12} />
+              {envoiMsg.ok && envoiMsg.url
+                ? <a href={envoiMsg.url} target="_blank" rel="noreferrer" style={{ color: 'var(--success)' }}>{envoiMsg.texte} — ouvrir</a>
+                : envoiMsg.texte}
+            </span>
+          )}
           <TopControls />
         </div>
       </div>
@@ -3749,29 +3792,94 @@ function SettingsSurface() {
             </>
           )}
 
-          {tab === 'connections' && (
-            <>
-              <h2>{t('settings.connections')}</h2>
-              <p>{lang === 'fr' ? 'Sources internes connectées à Axial.' : 'Internal sources connected to Axial.'}</p>
-              {window.AXIAL_SURFACES.SETTINGS_CONNECTIONS.map((c) => (
-                <div key={c.id} className="connection-row">
-                  <div className="connection-icon">{c.icon}</div>
-                  <div className="connection-body">
-                    <div className="name">{c.name}</div>
-                    <div className="meta">{c.meta}</div>
-                  </div>
-                  <button className={c.connected ? 'btn btn-ghost btn-sm' : 'btn btn-secondary btn-sm'}>
-                    {c.connected ? (lang === 'fr' ? 'Configurer' : 'Configure') : (lang === 'fr' ? 'Connecter' : 'Connect')}
-                  </button>
-                </div>
-              ))}
-            </>
-          )}
+          {tab === 'connections' && <IntegrationsSettings lang={lang} t={t} />}
 
           {tab === 'billing' && <BillingSettings lang={lang} t={t} />}
         </div>
       </div>
     </div>
+  );
+}
+
+function IntegrationsSettings({ lang, t }) {
+  const [etat, setEtat] = React.useState(null);
+  const [busy, setBusy] = React.useState('');
+  const [err, setErr] = React.useState('');
+  const charger = () => axIntegrations().then(setEtat).catch(() => setEtat({}));
+  React.useEffect(() => { charger(); }, []);
+
+  const OUTILS = [
+    { id: 'notion', nom: 'Notion', icone: 'file',
+      quoi: lang === 'fr'
+        ? "Axial consulte ton espace pendant la rédaction d'un rapport, et peut y publier le résultat."
+        : 'Axial reads your workspace while writing a report, and can publish results there.' },
+    { id: 'google', nom: 'Google Drive', icone: 'database',
+      quoi: lang === 'fr'
+        ? "Dépose le PDF de tes rapports dans ton Drive. Axial n'accède qu'aux fichiers qu'il y crée."
+        : 'Drops report PDFs into your Drive. Axial only accesses files it creates there.' },
+  ];
+
+  const connecter = async (id) => {
+    setBusy(id); setErr('');
+    try { await axConnectIntegration(id); }
+    catch (e) { setErr((e && e.message) || 'Connexion impossible.'); setBusy(''); }
+  };
+  const deconnecter = async (id) => {
+    setBusy(id); setErr('');
+    try { await axDisconnectIntegration(id); await charger(); }
+    catch (e) { setErr((e && e.message) || 'Déconnexion impossible.'); }
+    setBusy('');
+  };
+
+  return (
+    <>
+      <h2>{t('settings.connections')}</h2>
+      <p>{lang === 'fr'
+        ? 'Connecte tes outils : Axial peut y puiser du contexte et y livrer ses rapports.'
+        : 'Connect your tools: Axial can draw context from them and deliver reports there.'}</p>
+
+      {OUTILS.map((o) => {
+        const s = (etat && etat[o.id]) || {};
+        return (
+          <div key={o.id} className="settings-row">
+            <div>
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon name={o.icone} size={14} /> {o.nom}
+                {s.connecte && (
+                  <span className="chip" style={{ background: 'var(--ok-soft, rgba(45,140,90,.14))', color: 'var(--success)', fontSize: 10.5 }}>
+                    {lang === 'fr' ? 'connecté' : 'connected'}
+                  </span>
+                )}
+              </h3>
+              <p>{o.quoi}</p>
+              {s.connecte && s.compte && s.compte.workspace && (
+                <p className="caption" style={{ margin: '4px 0 0', color: 'var(--fg-3)' }}>
+                  {lang === 'fr' ? 'Espace : ' : 'Workspace: '}{s.compte.workspace}
+                </p>
+              )}
+              {!s.configure && (
+                <p className="caption" style={{ margin: '4px 0 0', color: 'var(--fg-3)' }}>
+                  {lang === 'fr' ? 'Intégration pas encore activée côté Axial.' : 'Integration not enabled yet.'}
+                </p>
+              )}
+            </div>
+            <div className="control">
+              {s.connecte
+                ? <button className="btn btn-ghost btn-sm" disabled={busy === o.id}
+                    onClick={() => deconnecter(o.id)}>
+                    {lang === 'fr' ? 'Déconnecter' : 'Disconnect'}
+                  </button>
+                : <button className="btn btn-secondary btn-sm"
+                    disabled={!s.configure || busy === o.id}
+                    onClick={() => connecter(o.id)}>
+                    {busy === o.id ? '…' : (lang === 'fr' ? 'Connecter' : 'Connect')}
+                  </button>}
+            </div>
+          </div>
+        );
+      })}
+      {err && <p className="caption" style={{ color: 'var(--error, #e5484d)' }}>{err}</p>}
+    </>
   );
 }
 

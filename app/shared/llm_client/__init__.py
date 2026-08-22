@@ -34,7 +34,8 @@ def generation_available() -> bool:
 
 
 def generate(*, system: str, prompt: str, tier: str = "chat",
-             max_tokens: int = 4000) -> LLMResult:
+             max_tokens: int = 4000, mcp_servers: list | None = None,
+             mcp_tools: list | None = None) -> LLMResult:
     """Two-tier text generation with runtime failover.
 
     tier="report" → Claude first (premium, final reports); tier="chat"/"draft" →
@@ -54,6 +55,12 @@ def generate(*, system: str, prompt: str, tier: str = "chat",
         if not mod.available():
             continue
         try:
+            # Seul Claude sait joindre des serveurs MCP ; Gemini reste le repli
+            # sans outils plutôt que d'échouer.
+            if mcp_servers and name == "claude":
+                return mod.generate(system=system, prompt=prompt,
+                                    max_tokens=max_tokens,
+                                    mcp_servers=mcp_servers, mcp_tools=mcp_tools)
             return mod.generate(system=system, prompt=prompt, max_tokens=max_tokens)
         except Exception as e:  # noqa: BLE001 — try the next provider, whatever the cause
             last_err = e

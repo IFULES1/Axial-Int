@@ -97,3 +97,11 @@ Un compte externe concentre 114 rapports (gmail, connecté le 13/08) — **à co
 
 ## Noté le 22/08/2026
 - [ ] **Internationalisation de tout ce que l'app PRODUIT** : aujourd'hui le sélecteur FR/EN ne traduit que l'interface. Quand l'utilisateur passe en anglais, doivent aussi basculer : les **rapports** (prompts système + directives + section « Sources »), les **réponses de conversation**, les **veilles** (digests et emails), le bloc « AXIAL Recommande », les libellés de crédits et l'historique. Impose de faire descendre la langue depuis le profil utilisateur jusqu'aux prompts et aux emails — chantier transverse, pas un simple fichier de traductions.
+
+### Chantier ④ — Connexions MCP / outils du client (22/08)
+- [x] Module `app/modules/integrations/` : connexions OAuth par utilisateur, **jetons chiffrés au repos** (Fernet, clé `INTEGRATIONS_SECRET_KEY`), migration 0015.
+- [x] **Notion via son serveur MCP hébergé** : le jeton de l'utilisateur est transmis à l'API Claude (`mcp_servers` + `mcp_toolset`, beta `mcp-client-2025-11-20`) — Claude consulte l'espace Notion **pendant** la rédaction du rapport. Repli silencieux sur Gemini sans outils si Claude est indisponible.
+- [x] **Livraison** : `POST /integrations/notion/deliver` (crée une page Notion, markdown converti en blocs) et `/integrations/google/deliver` (dépose le PDF dans Drive). Envoi déterministe, pas confié au modèle.
+- [x] Onglet **Paramètres → Connexions** réel (la maquette est remplacée) + boutons « Notion » / « Drive » sur un rapport ouvert.
+- [ ] ⚠️ **ACTION MIRADIE** : créer les applications OAuth et poser les secrets Doppler (voir ci-dessous). Sans elles, `configure: false` et les boutons restent inactifs — l'app fonctionne normalement par ailleurs.
+- [ ] **Gmail : bloqué par Google.** La lecture d'emails (`gmail.readonly`) est une portée « restreinte » : elle exige une validation Google (plusieurs semaines) **et** un audit de sécurité annuel payant. Drive utilise `drive.file`, qui n'accède qu'aux fichiers créés par Axial et n'est pas soumis à cette validation.

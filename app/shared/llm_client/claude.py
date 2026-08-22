@@ -19,8 +19,14 @@ def available() -> bool:
 
 
 def generate(*, system: str, prompt: str, model: str | None = None,
-             max_tokens: int = 4000) -> LLMResult:
-    """General text generation (premium tier — final reports)."""
+             max_tokens: int = 4000, mcp_servers: list | None = None,
+             mcp_tools: list | None = None) -> LLMResult:
+    """General text generation (premium tier — final reports).
+
+    `mcp_servers` / `mcp_tools` branchent les outils du client (Notion…) :
+    Claude interroge alors son espace de travail pendant la rédaction. Les deux
+    listes vont ensemble — un serveur déclaré sans son `mcp_toolset` est rejeté.
+    """
     settings = get_settings()
     if not settings.anthropic_api_key:
         raise ProviderUnavailable("ANTHROPIC_API_KEY non configurée")
@@ -32,13 +38,18 @@ def generate(*, system: str, prompt: str, model: str | None = None,
         "model": model, "max_tokens": max_tokens, "system": system,
         "messages": [{"role": "user", "content": prompt}],
     }
+    if mcp_servers and mcp_tools:
+        kwargs["mcp_servers"] = mcp_servers
+        kwargs["tools"] = mcp_tools
+        kwargs["betas"] = ["mcp-client-2025-11-20"]
     # Au-delà de ~16k tokens de sortie, une requête bloquante expire côté HTTP :
     # le SDK impose le streaming. On agrège nous-mêmes le message final.
+    espace = client.beta.messages if "betas" in kwargs else client.messages
     if max_tokens > 16000:
-        with client.messages.stream(**kwargs) as stream:
+        with espace.stream(**kwargs) as stream:
             message = stream.get_final_message()
     else:
-        message = client.messages.create(**kwargs)
+        message = espace.create(**kwargs)
     text = "".join(b.text for b in message.content if getattr(b, "type", "") == "text")
     usage = getattr(message, "usage", None)
     tokens = 0

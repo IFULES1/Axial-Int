@@ -96,6 +96,13 @@ class Settings(BaseSettings):
     # --- PII sidecar ------------------------------------------------------
     # Base investisseurs (projet Supabase distinct, accès lecture seule) :
     # alimente la cartographie des investisseurs.
+    # Chiffrement des jetons OAuth des intégrations (Notion, Google).
+    integrations_secret_key: str = ""
+    notion_client_id: str = ""
+    notion_client_secret: str = ""
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
     investor_db_url: str = ""
     investor_db_key: str = ""
 
