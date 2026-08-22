@@ -46,6 +46,8 @@ Salut {prenom},
 
 👉 **app.axial-ia.fr** — crée ton compte avec cette adresse email, tes rapports et tes crédits t'y attendent.
 
+L'inscription prend deux minutes : tu décris ton entreprise, puis tu actives ton essai avec ta carte — 0 € débité aujourd'hui, 14 jours d'essai. Ensuite l'abonnement Pro est à 50 €/mois (120 crédits mensuels), et tu peux l'arrêter en un clic depuis ton espace avant la fin de l'essai.
+
 Si quelque chose coince ou ne te convient pas, réponds simplement à cet email : je lis tout.
 
 Miradie
