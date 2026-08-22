@@ -34,7 +34,7 @@ Salut {prenom},
 
 **Chaque affirmation est traçable.** Les citations dans le texte sont cliquables : un clic ouvre la source, son extrait et son lien d'origine. Tu peux vérifier, pas seulement lire.
 
-**Les rapports sont nettement plus profonds.** Une synthèse exécutive mobilise désormais jusqu'à 40 sources pour 8 000 à 10 000 mots, avec une structure de vrai rapport d'analyse — et un export PDF propre.
+**Les rapports sont nettement plus profonds.** Une synthèse exécutive mobilise désormais jusqu'à 40 sources, avec une structure de vrai rapport d'analyse — et un export PDF propre.
 
 **Tes documents nourrissent les réponses.** Glisse un pitch deck, une étude ou un business plan dans la conversation : il alimente directement la réponse qui suit, et reste disponible pour les analyses suivantes.
 
