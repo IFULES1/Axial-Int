@@ -114,15 +114,99 @@ def corps_pour(d: dict) -> str:
     return CORPS.format(prenom=salutation, bloc_rapports=bloc).replace("Salut ,", "Salut,")
 
 
+AMORCES = (
+    "Tes {n} rapports t'attendent.", "Ton rapport t'attend.",
+    "Ton compte de la première version est reconnu :",
+    "Et 50 crédits te sont offerts pour reprendre en main",
+    "Axial se souvient de toi.", "Les réponses s'écrivent sous tes yeux.",
+    "Chaque affirmation est traçable.", "Les rapports sont nettement plus profonds.",
+    "Tes documents nourrissent les réponses.",
+    "Des agents travaillent en continu.",
+    "Nouveau : la cartographie des investisseurs.",
+)
+
+
+CAMPAGNE = "migration_2026_08"
+BASE_PUBLIQUE = "https://app.axial-ia.fr/api"
+
+
+def jeton_pour(email: str) -> str:
+    """Jeton d'ouverture, créé une seule fois par destinataire et campagne."""
+    import secrets
+
+    from app.modules.emailing.models import EmailSend
+
+    db = SessionLocal()
+    existant = db.scalar(select(EmailSend).where(EmailSend.email == email,
+                                                 EmailSend.campaign == CAMPAGNE))
+    if existant:
+        return existant.token
+    jeton = secrets.token_urlsafe(24)
+    db.add(EmailSend(token=jeton, email=email, campaign=CAMPAGNE))
+    db.commit()
+    return jeton
+
+
+def en_html(texte: str, jeton: str = "") -> str:
+    """Version HTML volontairement dépouillée : mêmes mots, mêmes paragraphes.
+
+    Un pixel de suivi ne peut vivre que dans une partie HTML — mais une mise en
+    page riche (images, boutons, colonnes) ferait basculer le message en onglet
+    « Promotions ». On reste donc sur du texte enrichi.
+    """
+    import html as _h
+    import re
+
+    blocs = []
+    for para in texte.split("\n\n"):
+        para = para.strip()
+        if not para:
+            continue
+        if para in ("CE QUI A CHANGÉ", "POUR REPRENDRE"):
+            blocs.append(f'<p style="margin:26px 0 10px;font-weight:700;'
+                         f'letter-spacing:.04em;font-size:13px;color:#555">{para}</p>')
+            continue
+        if para.startswith("—"):
+            blocs.append(f'<p style="margin:26px 0 0;font-size:12px;color:#888">'
+                         f'{_h.escape(para.lstrip("— ").strip())}</p>')
+            continue
+        corps = _h.escape(para)
+        for amorce in AMORCES:
+            motif = re.escape(_h.escape(amorce.replace("{n}", ""))).replace(
+                r"\ ", r"\s*\d*\s*")
+            corps = re.sub(motif, lambda m: f"<strong>{m.group(0)}</strong>", corps, count=1)
+        corps = corps.replace(
+            "app.axial-ia.fr",
+            '<a href="https://app.axial-ia.fr" style="color:#4F46D6">app.axial-ia.fr</a>', 1)
+        blocs.append(f'<p style="margin:0 0 16px">{corps}</p>')
+    pixel = (f'<img src="{BASE_PUBLIQUE}/track/{jeton}.gif" width="1" height="1" '
+             'alt="" style="display:block;border:0" />') if jeton else ""
+    return ('<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,'
+            'Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#1b1d1e;'
+            'max-width:600px">' + "".join(blocs) + pixel + "</div>")
+
+
 def envoyer(d: dict, cle: str) -> tuple[bool, str]:
+    from app.modules.emailing.models import EmailSend
+
+    jeton = jeton_pour(d["email"])
     r = httpx.post(
         "https://api.resend.com/emails",
         headers={"Authorization": f"Bearer {cle}", "Content-Type": "application/json"},
         json={"from": EXPEDITEUR, "to": [d["email"]], "subject": OBJET,
-              "text": corps_pour(d), "reply_to": "miradie.buranturu@axial-ia.fr"},
+              "text": corps_pour(d), "html": en_html(corps_pour(d), jeton),
+              "reply_to": "miradie.buranturu@axial-ia.fr"},
         timeout=30.0,
     )
-    return r.status_code < 300, (r.json().get("id") if r.status_code < 300 else r.text)[:120]
+    ok = r.status_code < 300
+    info = (r.json().get("id") if ok else r.text)[:120]
+    if ok:
+        db = SessionLocal()
+        ligne = db.scalar(select(EmailSend).where(EmailSend.token == jeton))
+        if ligne is not None:
+            ligne.provider_id = info
+            db.commit()
+    return ok, info
 
 
 def main() -> None:
