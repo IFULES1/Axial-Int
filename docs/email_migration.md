@@ -20,7 +20,7 @@ dans la boîte de Miradie, ce que promet la dernière ligne du mail.*
 
 Salut {prenom},
 
-Ça fait un moment que tu n'es pas passé sur Axial. Il s'est passé beaucoup de choses entre-temps : on a **entièrement reconstruit la plateforme**, et elle est en ligne depuis quelques semaines à l'adresse **app.axial-ia.fr**.
+Ça fait un moment que tu n'as pas ouvert Axial. Il s'est passé beaucoup de choses entre-temps : on a **entièrement reconstruit la plateforme**, et elle est en ligne depuis quelques semaines à l'adresse **app.axial-ia.fr**.
 
 **Tes {n} rapports t'attendent.** Ils sont conservés et reviennent automatiquement dans ton espace dès que tu crées ton compte avec cette même adresse email. Rien à exporter, rien à réimporter.
 

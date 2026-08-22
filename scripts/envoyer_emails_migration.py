@@ -32,7 +32,7 @@ JOURNAL = pathlib.Path("/opt/axial-intelligence/var/emails_migration_envoyes.jso
 
 CORPS = """Salut {prenom},
 
-Ça fait un moment que tu n'es pas passé sur Axial. Il s'est passé beaucoup de choses entre-temps : on a entièrement reconstruit la plateforme, et elle est en ligne depuis quelques semaines à l'adresse app.axial-ia.fr.
+Ça fait un moment que tu n'as pas ouvert Axial. Il s'est passé beaucoup de choses entre-temps : on a entièrement reconstruit la plateforme, et elle est en ligne depuis quelques semaines à l'adresse app.axial-ia.fr.
 
 {bloc_rapports}
 
@@ -69,9 +69,13 @@ Axial Intelligence
 Tu reçois ce message parce que tu as créé un compte sur la première version d'Axial. Si tu ne souhaites plus être contacté, réponds « stop » et je te retire de la liste.
 """
 
-AVEC_RAPPORTS = ("Tes {n} rapports t'attendent. Ils sont conservés et reviennent "
-                 "automatiquement dans ton espace dès que tu crées ton compte avec "
-                 "cette même adresse email. Rien à exporter, rien à réimporter.")
+AVEC_RAPPORTS_PLURIEL = ("Tes {n} rapports t'attendent. Ils sont conservés et "
+                         "reviennent automatiquement dans ton espace dès que tu crées "
+                         "ton compte avec cette même adresse email. Rien à exporter, "
+                         "rien à réimporter.")
+AVEC_RAPPORT_UN = ("Ton rapport t'attend. Il est conservé et revient automatiquement "
+                   "dans ton espace dès que tu crées ton compte avec cette même "
+                   "adresse email. Rien à exporter, rien à réimporter.")
 SANS_RAPPORT = ("Ton compte de la première version est reconnu : crée le nouveau "
                 "avec cette même adresse email et tu retrouves ton espace "
                 "immédiatement.")
@@ -100,7 +104,12 @@ def noter(envoyes: set[str]) -> None:
 
 
 def corps_pour(d: dict) -> str:
-    bloc = AVEC_RAPPORTS.format(n=d["n"]) if d["n"] else SANS_RAPPORT
+    if d["n"] > 1:
+        bloc = AVEC_RAPPORTS_PLURIEL.format(n=d["n"])
+    elif d["n"] == 1:
+        bloc = AVEC_RAPPORT_UN
+    else:
+        bloc = SANS_RAPPORT
     salutation = d["prenom"].strip() or ""
     return CORPS.format(prenom=salutation, bloc_rapports=bloc).replace("Salut ,", "Salut,")
 
