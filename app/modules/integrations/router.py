@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 import logging
-import secrets
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.db import get_db
 from app.errors import AppError
 from app.modules.auth.schemas import AuthUser
@@ -18,9 +18,34 @@ from app.modules.integrations import service
 logger = logging.getLogger("axial.integrations")
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
-# `state` OAuth : lie le retour du fournisseur à l'utilisateur qui a lancé la
-# demande. En mémoire volontairement — sa durée de vie est de quelques secondes.
-_states: dict[str, str] = {}
+def _signer_state(user_id: str) -> str:
+    """`state` OAuth signé plutôt que stocké.
+
+    Il lie le retour du fournisseur à l'utilisateur qui a lancé la demande. Le
+    garder en mémoire le rendait fragile : un redémarrage du backend pendant
+    l'autorisation, ou un second processus web, et la connexion échouait sans
+    raison visible. Signé, il n'a besoin d'aucun stockage partagé.
+    """
+    import datetime as dt
+
+    import jwt
+
+    settings = get_settings()
+    return jwt.encode(
+        {"sub": user_id, "typ": "oauth_state",
+         "exp": dt.datetime.now(dt.timezone.utc) + dt.timedelta(minutes=10)},
+        settings.supabase_jwt_secret, algorithm="HS256")
+
+
+def _verifier_state(state: str) -> str | None:
+    import jwt
+
+    settings = get_settings()
+    try:
+        claims = jwt.decode(state, settings.supabase_jwt_secret, algorithms=["HS256"])
+    except jwt.InvalidTokenError:
+        return None
+    return claims.get("sub") if claims.get("typ") == "oauth_state" else None
 
 
 @router.get("/status")
@@ -33,8 +58,7 @@ def status(user: AuthUser = Depends(get_current_user),
 def authorize(provider: str, user: AuthUser = Depends(get_current_user)) -> dict:
     if provider not in ("notion", "google"):
         raise AppError("Outil inconnu.", 404, code="unknown_provider")
-    state = secrets.token_urlsafe(24)
-    _states[state] = user.id
+    state = _signer_state(user.id)
     return {"authorize_url": service.url_autorisation(provider, state)}
 
 
@@ -42,7 +66,7 @@ def authorize(provider: str, user: AuthUser = Depends(get_current_user)) -> dict
 def callback(provider: str, code: str = "", state: str = "",
              db: Session = Depends(get_db)) -> RedirectResponse:
     """Retour du fournisseur : on échange le code puis on renvoie dans l'app."""
-    user_id = _states.pop(state, None)
+    user_id = _verifier_state(state)
     if not user_id or not code:
         return RedirectResponse(f"{service.BASE_PUBLIQUE}/?integration=echec")
     try:
