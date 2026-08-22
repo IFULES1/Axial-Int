@@ -94,3 +94,6 @@ Dernier rapport créé le 13/06/2026 → l'ancienne app est silencieuse depuis ~
 Un compte externe concentre 114 rapports (gmail, connecté le 13/08) — **à confirmer avec Miradie** : usage personnel ou vrai utilisateur ?
 
 **Décision attendue de Miradie** : périmètre (les 47, les 20 actifs, ou les 6 récents), contenu repris (compte seul / + rapports), et message d'annonce.
+
+## Noté le 22/08/2026
+- [ ] **Internationalisation de tout ce que l'app PRODUIT** : aujourd'hui le sélecteur FR/EN ne traduit que l'interface. Quand l'utilisateur passe en anglais, doivent aussi basculer : les **rapports** (prompts système + directives + section « Sources »), les **réponses de conversation**, les **veilles** (digests et emails), le bloc « AXIAL Recommande », les libellés de crédits et l'historique. Impose de faire descendre la langue depuis le profil utilisateur jusqu'aux prompts et aux emails — chantier transverse, pas un simple fichier de traductions.
