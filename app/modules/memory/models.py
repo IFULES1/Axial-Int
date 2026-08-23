@@ -9,11 +9,14 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import Uuid as SAUuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
+
+JSONType = JSON().with_variant(JSONB(), "postgresql")
 
 
 def _now() -> dt.datetime:
@@ -38,6 +41,11 @@ class CompanyProfile(Base):
     main_challenge: Mapped[str | None] = mapped_column(Text)
     # Langue de production des contenus (rapports, réponses, veilles).
     language: Mapped[str | None] = mapped_column(String(5))
+    # Préférences personnelles saisies dans Paramètres (nom affiché,
+    # modèle par défaut, citations strictes…). Stockées ici plutôt que dans
+    # le navigateur : elles doivent suivre l'utilisateur d'un appareil à
+    # l'autre et être lisibles par le serveur qui produit les rapports.
+    preferences: Mapped[dict | None] = mapped_column(JSONType)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now

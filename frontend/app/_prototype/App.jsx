@@ -3700,33 +3700,7 @@ function SettingsSurface() {
         </aside>
 
         <div className="settings-pane">
-          {tab === 'account' && (
-            <>
-              <h2>{t('settings.account')}</h2>
-              <p>{lang === 'fr' ? 'Vos informations de compte.' : 'Your account information.'}</p>
-              <div className="settings-row">
-                <div><h3>{lang === 'fr' ? 'Nom' : 'Name'}</h3><p>{lang === 'fr' ? 'Votre nom affiché sur les rapports partagés.' : 'Your name shown on shared reports.'}</p></div>
-                <div className="control"><input type="text" defaultValue="Camille Verdun" style={inputStyle} /></div>
-              </div>
-              <div className="settings-row">
-                <div><h3>Email</h3><p>{lang === 'fr' ? 'Adresse principale.' : 'Primary address.'}</p></div>
-                <div className="control"><input type="email" defaultValue="camille@axial.intelligence" style={inputStyle} /></div>
-              </div>
-              <div className="settings-row">
-                <div><h3>{lang === 'fr' ? 'Langue' : 'Language'}</h3><p>{lang === 'fr' ? 'Affichage de l\'interface.' : 'Interface language.'}</p></div>
-                <div className="control">
-                  <select className="role-select" value={lang} onChange={(e) => window.setAxialLang(e.target.value)}>
-                    <option value="fr">Français</option>
-                    <option value="en">English</option>
-                  </select>
-                </div>
-              </div>
-              <div className="settings-row">
-                <div><h3>{lang === 'fr' ? 'Supprimer le compte' : 'Delete account'}</h3><p>{lang === 'fr' ? 'Action irréversible. Toutes les données sont supprimées sous 30 jours.' : 'Irreversible. All data is deleted within 30 days.'}</p></div>
-                <div className="control"><button className="btn btn-secondary" style={{ color: 'var(--error)' }}>{lang === 'fr' ? 'Supprimer' : 'Delete'}</button></div>
-              </div>
-            </>
-          )}
+          {tab === 'account' && <AccountSettings lang={lang} t={t} />}
 
           {tab === 'notifications' && (
             <>
@@ -3795,6 +3769,91 @@ function SettingsSurface() {
         </div>
       </div>
     </div>
+  );
+}
+
+function AccountSettings({ lang, t }) {
+  const [user, setUser] = React.useState(null);
+  const [nom, setNom] = React.useState('');
+  const [etat, setEtat] = React.useState('');   // '', 'saving', 'saved', 'error'
+  const [langue, setLangue] = React.useState(lang);
+
+  React.useEffect(() => {
+    axMe().then((u) => { setUser(u); setNom(u.full_name || ''); }).catch(() => {});
+    axGetProfile().then((p) => {
+      const prefs = (p && p.preferences) || {};
+      if (prefs.display_name) setNom(prefs.display_name);
+      if (p && p.language) setLangue(p.language);
+    }).catch(() => {});
+  }, []);
+
+  // Le nom est enregistré côté serveur : il apparaît sur les rapports partagés,
+  // il doit donc suivre l'utilisateur d'un appareil à l'autre.
+  const enregistrer = async () => {
+    setEtat('saving');
+    try {
+      await axSaveProfile({ preferences: { display_name: nom.trim() } });
+      setEtat('saved');
+      setTimeout(() => setEtat(''), 2500);
+    } catch (e) { setEtat('error'); }
+  };
+
+  const changerLangue = (l) => {
+    setLangue(l);
+    if (window.setAxialLang) window.setAxialLang(l);
+  };
+
+  return (
+    <>
+      <h2>{t('settings.account')}</h2>
+      <p>{lang === 'fr' ? 'Vos informations de compte.' : 'Your account information.'}</p>
+
+      <div className="settings-row">
+        <div>
+          <h3>{lang === 'fr' ? 'Nom' : 'Name'}</h3>
+          <p>{lang === 'fr' ? 'Votre nom affiché sur les rapports partagés.'
+                            : 'Your name shown on shared reports.'}</p>
+        </div>
+        <div className="control" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input type="text" value={nom} onChange={(e) => setNom(e.target.value)}
+            onBlur={enregistrer} style={inputStyle}
+            placeholder={lang === 'fr' ? 'Votre nom' : 'Your name'} />
+          {etat === 'saving' && <span className="caption">…</span>}
+          {etat === 'saved' && <Icon name="check" size={13} />}
+          {etat === 'error' && <span className="caption" style={{ color: 'var(--error, #e5484d)' }}>
+            {lang === 'fr' ? 'échec' : 'failed'}</span>}
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <h3>Email</h3>
+          <p>{lang === 'fr'
+            ? "Adresse de connexion. Elle ne se change pas ici : écris-nous pour la modifier."
+            : 'Sign-in address. It cannot be changed here — write to us to update it.'}</p>
+        </div>
+        <div className="control">
+          <input type="email" value={(user && user.email) || ''} readOnly
+            style={{ ...inputStyle, opacity: 0.65, cursor: 'not-allowed' }} />
+        </div>
+      </div>
+
+      <div className="settings-row">
+        <div>
+          <h3>{lang === 'fr' ? 'Langue' : 'Language'}</h3>
+          <p>{lang === 'fr'
+            ? "Langue de l'interface et des emails. Les rapports et les réponses suivent, eux, la langue de votre question."
+            : 'Interface and email language. Reports and answers follow the language of your question instead.'}</p>
+        </div>
+        <div className="control">
+          <select className="role-select" value={langue}
+            onChange={(e) => changerLangue(e.target.value)}>
+            <option value="fr">Français</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+      </div>
+    </>
   );
 }
 

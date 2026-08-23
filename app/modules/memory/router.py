@@ -27,6 +27,7 @@ class ProfileIn(BaseModel):
     known_competitors: str | None = None
     main_challenge: str | None = None
     language: str | None = None
+    preferences: dict | None = None
 
 
 class ProfileOut(ProfileIn):
