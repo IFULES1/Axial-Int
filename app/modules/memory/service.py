@@ -23,7 +23,10 @@ _CONTEXT_FIELDS: list[tuple[str, str]] = [
     ("main_challenge", "Défi principal"),
 ]
 
-_EDITABLE = {f for f, _ in _CONTEXT_FIELDS}
+# Champs modifiables : le contexte entreprise, plus les réglages personnels.
+# Sans ces deux ajouts, la langue et les préférences étaient acceptées par
+# l'API puis silencieusement jetées — un réglage qui ne s'enregistre jamais.
+_EDITABLE = {f for f, _ in _CONTEXT_FIELDS} | {"language", "preferences"}
 
 
 def get_profile(db: Session, user_id: str) -> CompanyProfile | None:
