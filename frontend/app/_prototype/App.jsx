@@ -1518,32 +1518,32 @@ function OnbStep1({ value, onChange, onNext }) {
         // s'il n'y a pas déjà un chip sélectionné.
         sector: v.sector || d.sector || '',
       });
-      setPrefillMsg('Pré-rempli depuis votre site — vérifiez et corrigez si besoin.');
+      setPrefillMsg(libelle('Pré-rempli depuis votre site — vérifiez et corrigez si besoin.'));
     } catch (e) {
-      setPrefillMsg((e && e.message) || 'Site injoignable — remplissez à la main.');
+      setPrefillMsg((e && e.message) || libelle('Site injoignable — remplissez à la main.'));
     }
     setPrefilling(false);
   };
 
   return (
     <OnbShell step={1}
-      title="Parlez-nous de votre startup."
-      sub="Axial calibre ses réponses sur votre entreprise — pas seulement votre secteur."
+      title={libelle("Parlez-nous de votre startup.")}
+      sub={libelle("Axial calibre ses réponses sur votre entreprise — pas seulement votre secteur.")}
       onNext={onNext} canNext={!!ready}>
       <div className="onb-form">
-        <Field label="VOTRE ENTREPRISE">
+        <Field label={libelle("VOTRE ENTREPRISE")}>
           <div style={{ display: 'grid', gap: 10 }}>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <input className="input" style={{ flex: '2 1 180px' }} value={v.companyName || ''}
                 placeholder="Nom de l'entreprise *"
                 onChange={(e) => onChange({ ...v, companyName: e.target.value })} />
               <input className="input" style={{ flex: '2 1 180px' }} value={v.website || ''}
-                placeholder="Site web (ex. axial-ia.fr)"
+                placeholder={libelle("Site web (ex. axial-ia.fr)")}
                 onChange={(e) => onChange({ ...v, website: e.target.value })}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); doPrefill(); } }} />
               <button type="button" className="btn btn-secondary" onClick={doPrefill}
                 disabled={!v.website || prefilling} style={{ flex: '0 0 auto' }}>
-                {prefilling ? 'Lecture du site…' : 'Pré-remplir depuis mon site'}
+                {prefilling ? 'Lecture du site…' : libelle('Pré-remplir depuis mon site')}
               </button>
             </div>
             <input className="input" value={v.positioning || ''}
@@ -1552,28 +1552,28 @@ function OnbStep1({ value, onChange, onNext }) {
             {prefillMsg && <p className="caption" style={{ margin: 0, color: 'var(--v-soft)' }}>{prefillMsg}</p>}
           </div>
         </Field>
-        <Field label="VOTRE SECTEUR">
+        <Field label={libelle("VOTRE SECTEUR")}>
           <ChipsRow value={v.sector} options={SECTORS} onChange={(o) => onChange({ ...v, sector: o })} />
         </Field>
-        <Field label="VOTRE STADE">
+        <Field label={libelle("VOTRE STADE")}>
           <ChipsRow value={v.stage} options={STAGES} onChange={(o) => onChange({ ...v, stage: o })} />
         </Field>
-        <Field label="VOTRE PRINCIPAL DÉFI">
+        <Field label={libelle("VOTRE PRINCIPAL DÉFI")}>
           <ChipsRow value={v.challenge} options={CHALLENGES} onChange={(o) => onChange({ ...v, challenge: o })} />
         </Field>
-        <Field label="VOTRE MARCHÉ">
+        <Field label={libelle("VOTRE MARCHÉ")}>
           <ChipsRow value={v.geo} options={GEOS} onChange={(o) => onChange({ ...v, geo: o })} />
         </Field>
         <Field label="PRÉCISIONS (OPTIONNEL — enrichissent la mémoire d'Axial)">
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <input className="input" style={{ flex: '1 1 130px' }} value={v.foundingYear || ''}
-              placeholder="Année de création" inputMode="numeric"
+              placeholder={libelle("Année de création")} inputMode="numeric"
               onChange={(e) => onChange({ ...v, foundingYear: e.target.value.replace(/[^0-9]/g, '').slice(0, 4) })} />
             <input className="input" style={{ flex: '1 1 130px' }} value={v.teamSize || ''}
               placeholder="Taille d'équipe (ex. 4)"
               onChange={(e) => onChange({ ...v, teamSize: e.target.value })} />
             <input className="input" style={{ flex: '1 1 130px' }} value={v.country || ''}
-              placeholder="Pays"
+              placeholder={libelle("Pays")}
               onChange={(e) => onChange({ ...v, country: e.target.value })} />
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
@@ -1581,7 +1581,7 @@ function OnbStep1({ value, onChange, onNext }) {
               placeholder="Segment client (ex. DRH de PME 50-500)"
               onChange={(e) => onChange({ ...v, clientSegment: e.target.value })} />
             <input className="input" style={{ flex: '1 1 200px' }} value={v.competitors || ''}
-              placeholder="Concurrents connus (séparés par des virgules)"
+              placeholder={libelle("Concurrents connus (séparés par des virgules)")}
               onChange={(e) => onChange({ ...v, competitors: e.target.value })} />
           </div>
         </Field>
@@ -1630,7 +1630,7 @@ function OnbDocUpload() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <button type="button" className="btn btn-secondary" disabled={busy}
           onClick={() => fileRef.current && fileRef.current.click()}>
-          <Icon name="plus" size={13} /> {busy ? 'Import…' : 'Ajouter un document'}
+          <Icon name="plus" size={13} /> {busy ? libelle('Import…') : libelle('Ajouter un document')}
         </button>
         {docs.map((n) => (
           <span key={n} className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
