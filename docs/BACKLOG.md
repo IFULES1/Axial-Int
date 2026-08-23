@@ -38,13 +38,13 @@
 - [x] **Sources consultables** *(fait 18/08 : citations [N] cliquables → panneau latéral avec titre, provenance, extrait, URL pour le web)*.
 - [x] **Rendu du texte dans le chat** *(fait 18/08 : MarkdownView appliqué aux messages — gras, titres, listes, avec streaming conservé)*.
 - [x] **Historique des conversations persistant** *(fait 18/08 : conversations rechargées à la connexion, messages chargés à l'ouverture, envois liés aux vrais ids backend)*.
-- [ ] **Vitesse des réponses** *(quick wins faits 18/08 : RAG + recherche web parallélisés, zéro recherche sur les messages triviaux en conversation libre. Levier suivant = streaming des réponses LLM — chantier à part)*.
+- [x] **Vitesse des réponses** *(streaming livré 20/08 : rapports et chat mot à mot)*
 
 ## Noté le 20/08/2026
-- [ ] **Migration des utilisateurs de l'ancienne version** : transférer comptes (+ données pertinentes : profils, historique si utile) de l'ancienne app (insight-map) vers app.axial-ia.fr, avec communication aux utilisateurs.
-- [ ] **Connexion DB-investisseur** : brancher la base investisseurs (Supabase DB-investisseur : fonds VC/PE, SGP, réseaux BA, crowdequity, partners) à l'app — activée à la demande pour produire une **cartographie des investisseurs** pertinents (secteur + stade + zone, cf. script `rechercher_investisseurs.py`).
-- [ ] **Connexions MCP (Notion, Google)** : intégrations Notion + Gmail + Drive côté app — (a) enrichir les rapports avec les données des outils du client, (b) livrer les réponses/rapports directement dans Notion, Drive, etc.
-- [ ] **Vérification du système de rapports vs ancienne app** — comparer le pipeline actuel (`app/modules/analysis/`) à l'audit de l'ancienne version (artifact « Anatomie des rapports » : https://claude.ai/code/artifact/f2368db0-3d36-4ad9-bc21-fe684e74641d). Écarts déjà identifiés : LLM principal (Perplexity `sonar-pro` + recherche web native vs Claude Sonnet 5 single-pass), volumes cibles (8000-10000 mots / 40 sources min pour la synthèse exécutive vs ~1800 mots / 8 sources aujourd'hui), enrichissements absents (Pappers, stats macro, Serper, APA), progression SSE réelle, garde PII (Presidio) avant envoi LLM.
+- [x] **Migration des utilisateurs** *(livré 22/08 : campagne 42 destinataires, restauration automatique des rapports, bonus 30 crédits, réinitialisation de mot de passe créée au passage)*
+- [x] **Connexion DB-investisseur** *(livré 20/08 : 6e type de rapport `cartographie_investisseurs`, scoring porté à l'identique, échelle d'élargissement)*
+- [x] **Connexions outils client** *(livré 22/08 : Notion via API REST — le MCP hébergé exige son propre OAuth ; Drive masqué ; Gmail bloqué par Google)*
+- [~] **Vérification des rapports** *(lot A livré 20/08 : 1 692 → 3 554 mots, 8 → 25 sources. RESTE : le retour de Miradie sur le FOND)*
 
 > **Chantiers du jour (20/08)** : ① streaming SSE · ② migration des utilisateurs · ③ connexion DB-investisseur · ④ connexions MCP Notion/Google · ⑤ vérification des rapports vs ancienne app.
   - ⏸ **Lot A déployé le 20/08 — chantier laissé OUVERT** : la forme est validée par Miradie (volumes, sources, progression). Retour sur le FOND (le rapport apprend-il vraiment quelque chose, ou meuble-t-il pour atteindre 10 000 mots ?) attendu plus tard → ajustements ensuite.
@@ -96,14 +96,14 @@ Un compte externe concentre 114 rapports (gmail, connecté le 13/08) — **à co
 **Décision attendue de Miradie** : périmètre (les 47, les 20 actifs, ou les 6 récents), contenu repris (compte seul / + rapports), et message d'annonce.
 
 ## Noté le 22/08/2026
-- [ ] **Internationalisation de tout ce que l'app PRODUIT** : aujourd'hui le sélecteur FR/EN ne traduit que l'interface. Quand l'utilisateur passe en anglais, doivent aussi basculer : les **rapports** (prompts système + directives + section « Sources »), les **réponses de conversation**, les **veilles** (digests et emails), le bloc « AXIAL Recommande », les libellés de crédits et l'historique. Impose de faire descendre la langue depuis le profil utilisateur jusqu'aux prompts et aux emails — chantier transverse, pas un simple fichier de traductions.
+- [x] **Internationalisation** *(livré 22/08 : miroir linguistique — la langue de la question commande la réponse)*
 
 ### Chantier ④ — Connexions MCP / outils du client (22/08)
 - [x] Module `app/modules/integrations/` : connexions OAuth par utilisateur, **jetons chiffrés au repos** (Fernet, clé `INTEGRATIONS_SECRET_KEY`), migration 0015.
 - [x] **Notion via son serveur MCP hébergé** : le jeton de l'utilisateur est transmis à l'API Claude (`mcp_servers` + `mcp_toolset`, beta `mcp-client-2025-11-20`) — Claude consulte l'espace Notion **pendant** la rédaction du rapport. Repli silencieux sur Gemini sans outils si Claude est indisponible.
 - [x] **Livraison** : `POST /integrations/notion/deliver` (crée une page Notion, markdown converti en blocs) et `/integrations/google/deliver` (dépose le PDF dans Drive). Envoi déterministe, pas confié au modèle.
 - [x] Onglet **Paramètres → Connexions** réel (la maquette est remplacée) + boutons « Notion » / « Drive » sur un rapport ouvert.
-- [ ] ⚠️ **ACTION MIRADIE — Notion uniquement (décision du 22/08)** : créer l'intégration Notion **publique** et poser `INTEGRATIONS_SECRET_KEY` + `NOTION_CLIENT_ID` + `NOTION_CLIENT_SECRET`. Google Drive : backend prêt et testé, **masqué dans l'interface** en attendant. Sans elles, `configure: false` et les boutons restent inactifs — l'app fonctionne normalement par ailleurs.
+- [x] **Secrets Notion posés** le 22/08 par Miradie ; connexion active et validée
 - [ ] **Gmail : bloqué par Google.** La lecture d'emails (`gmail.readonly`) est une portée « restreinte » : elle exige une validation Google (plusieurs semaines) **et** un audit de sécurité annuel payant. Drive utilise `drive.file`, qui n'accède qu'aux fichiers créés par Axial et n'est pas soumis à cette validation.
 
 ## Noté le 22/08/2026 (fin de journée)
