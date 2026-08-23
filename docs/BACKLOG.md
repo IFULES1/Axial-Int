@@ -115,3 +115,12 @@ Un compte externe concentre 114 rapports (gmail, connecté le 13/08) — **à co
 ### Décisions du 22/08 (soir)
 - **Renouvellements bloqués** dans Stripe (`cancel_at_period_end`) : `admin@axial.com` (01/09) et `christian@eqonx.com` (05/09) — accès conservé jusqu'à ces dates, aucun prélèvement ensuite.
 - **Registre FR : ce n'est PAS une incohérence** (décision Miradie). Les emails viennent de Miradie personnellement → tutoiement. L'app est impersonnelle → vouvoiement. Retiré de la liste des dettes.
+
+## Retours client du 23/08 (utilisateur anglophone)
+- [x] **« Upon launching the analysis it sends an error »** → c'était le crash `ReportsEditor is not defined`, **déjà corrigé le 22/08**. Vérifié : analyse complète relancée en anglais depuis le navigateur, rapport affiché sans erreur.
+- [x] **« Not possible to save name and email, it reverts to Camille's »** → l'onglet Compte affichait des **données de maquette codées en dur** (`defaultValue="Camille Verdun"`). Remplacé par l'identité réelle du compte ; nom persisté côté serveur, email en lecture seule.
+- [x] **« Default model choice is not saving »** → les sélecteurs étaient décoratifs et les noms de modèles (« Axial Reason 2.1 ») **inventés**. **Onglet Modèles supprimé** (décision Miradie 23/08) : l'app choisit son modèle selon la tâche.
+- [x] **Bug non signalé, plus grave** : `upsert_profile` filtrait les champs par une liste blanche ; `language` et `preferences` étaient acceptés par l'API puis **jetés silencieusement**. La persistance de langue livrée le 22/08 ne fonctionnait donc pas.
+- [x] **Balayage des maquettes** : bouton Partager retiré (aucun endpoint de partage n'existe, le modal montrait de faux collègues commentant une étude fictive) ; « Modèles récents » renommé « Exemples de questions » (laissait croire à un historique).
+- [x] **Onboarding traduit en anglais** — il était intégralement en français quelle que soit la langue. Les valeurs stockées restent canoniques (la cartographie investisseurs en dépend).
+- [ ] **Reste à traduire** : écran Conversations (titres et libellés du contenu), messages de progression envoyés par le serveur pendant une génération (« Rédaction en cours… »), et quelques mots français qui fuient dans les rapports anglais.
