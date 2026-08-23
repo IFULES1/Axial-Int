@@ -1487,6 +1487,10 @@ const LABELS_EN = {
   "Segment client (ex. DRH de PME 50-500)": "Customer segment (e.g. HR directors at 50-500 employee firms)",
   "CONTEXTE": "CONTEXT",
   "ÉTAPE": "STEP",
+  "Contexte": "Context",
+  "Démo": "Demo",
+  "Activation": "Activation",
+  "Première analyse": "First analysis",
 };
 
 // Traduit un libellé d'affichage sans jamais toucher à la valeur sous-jacente.
@@ -1866,7 +1870,7 @@ function OnbShell({ step, title, sub, children, onNext, onBack, canNext = true }
         <div className="onb-progress-track">
           <div className="onb-progress-fill" style={{ width: `${(step / 4) * 100}%` }} />
         </div>
-        <span className="onb-progress-label">ÉTAPE {step} / 4 · {labels[step - 1]}</span>
+        <span className="onb-progress-label">{libelle('ÉTAPE')} {step} / 4 · {libelle(labels[step - 1])}</span>
       </div>
 
       <main className="onb-stage">
