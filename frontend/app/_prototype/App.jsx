@@ -1479,6 +1479,14 @@ const LABELS_EN = {
   'Concurrents connus (séparés par des virgules)': 'Known competitors (comma-separated)',
   'Ajouter un document': 'Add a document',
   'Import…': 'Uploading…',
+  "Nom de l'entreprise *": "Company name *",
+  "Positionnement en une phrase — ex. « QKD pour sécuriser les communications de drones »": "Positioning in one sentence — e.g. QKD to secure drone communications",
+  "PRÉCISIONS (OPTIONNEL — enrichissent la mémoire d'Axial)": "DETAILS (OPTIONAL — they enrich Axial's memory)",
+  "VOS DOCUMENTS (OPTIONNEL — pitch deck, étude, business plan)": "YOUR DOCUMENTS (OPTIONAL — pitch deck, study, business plan)",
+  "Taille d'équipe (ex. 4)": "Team size (e.g. 4)",
+  "Segment client (ex. DRH de PME 50-500)": "Customer segment (e.g. HR directors at 50-500 employee firms)",
+  "CONTEXTE": "CONTEXT",
+  "ÉTAPE": "STEP",
 };
 
 // Traduit un libellé d'affichage sans jamais toucher à la valeur sous-jacente.
@@ -1535,7 +1543,7 @@ function OnbStep1({ value, onChange, onNext }) {
           <div style={{ display: 'grid', gap: 10 }}>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <input className="input" style={{ flex: '2 1 180px' }} value={v.companyName || ''}
-                placeholder="Nom de l'entreprise *"
+                placeholder={libelle("Nom de l'entreprise *")}
                 onChange={(e) => onChange({ ...v, companyName: e.target.value })} />
               <input className="input" style={{ flex: '2 1 180px' }} value={v.website || ''}
                 placeholder={libelle("Site web (ex. axial-ia.fr)")}
@@ -1547,7 +1555,7 @@ function OnbStep1({ value, onChange, onNext }) {
               </button>
             </div>
             <input className="input" value={v.positioning || ''}
-              placeholder="Positionnement en une phrase — ex. « QKD pour sécuriser les communications de drones »"
+              placeholder={libelle("Positionnement en une phrase — ex. « QKD pour sécuriser les communications de drones »")}
               onChange={(e) => onChange({ ...v, positioning: e.target.value })} />
             {prefillMsg && <p className="caption" style={{ margin: 0, color: 'var(--v-soft)' }}>{prefillMsg}</p>}
           </div>
@@ -1564,13 +1572,13 @@ function OnbStep1({ value, onChange, onNext }) {
         <Field label={libelle("VOTRE MARCHÉ")}>
           <ChipsRow value={v.geo} options={GEOS} onChange={(o) => onChange({ ...v, geo: o })} />
         </Field>
-        <Field label="PRÉCISIONS (OPTIONNEL — enrichissent la mémoire d'Axial)">
+        <Field label={libelle("PRÉCISIONS (OPTIONNEL — enrichissent la mémoire d'Axial)")}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <input className="input" style={{ flex: '1 1 130px' }} value={v.foundingYear || ''}
               placeholder={libelle("Année de création")} inputMode="numeric"
               onChange={(e) => onChange({ ...v, foundingYear: e.target.value.replace(/[^0-9]/g, '').slice(0, 4) })} />
             <input className="input" style={{ flex: '1 1 130px' }} value={v.teamSize || ''}
-              placeholder="Taille d'équipe (ex. 4)"
+              placeholder={libelle("Taille d'équipe (ex. 4)")}
               onChange={(e) => onChange({ ...v, teamSize: e.target.value })} />
             <input className="input" style={{ flex: '1 1 130px' }} value={v.country || ''}
               placeholder={libelle("Pays")}
@@ -1578,14 +1586,14 @@ function OnbStep1({ value, onChange, onNext }) {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
             <input className="input" style={{ flex: '1 1 200px' }} value={v.clientSegment || ''}
-              placeholder="Segment client (ex. DRH de PME 50-500)"
+              placeholder={libelle("Segment client (ex. DRH de PME 50-500)")}
               onChange={(e) => onChange({ ...v, clientSegment: e.target.value })} />
             <input className="input" style={{ flex: '1 1 200px' }} value={v.competitors || ''}
               placeholder={libelle("Concurrents connus (séparés par des virgules)")}
               onChange={(e) => onChange({ ...v, competitors: e.target.value })} />
           </div>
         </Field>
-        <Field label="VOS DOCUMENTS (OPTIONNEL — pitch deck, étude, business plan)">
+        <Field label={libelle("VOS DOCUMENTS (OPTIONNEL — pitch deck, étude, business plan)")}>
           <OnbDocUpload />
         </Field>
       </div>
