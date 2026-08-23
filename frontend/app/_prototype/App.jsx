@@ -365,6 +365,11 @@ const STRINGS = {
     'nav.credits': 'Crédits',
     'nav.settings': 'Paramètres',
     'nav.recent': 'RÉCENTES',
+    'conv.search': 'Rechercher une analyse…',
+    'conv.none': 'Aucun résultat.',
+    'conv.hook': "Quelle question stratégique aujourd'hui ?",
+    'conv.sub': 'Posez votre question en langage naturel. Axial reformule, cherche, raisonne, et cite chaque source.',
+    'conv.placeholder': 'Posez votre question stratégique… (Maj+Entrée pour aller à la ligne)',
     'nav.tools': 'OUTILS',
     'nav.docs': 'Documentation',
     'nav.new_analysis': 'Nouvelle analyse',
@@ -568,6 +573,11 @@ const STRINGS = {
     'nav.credits': 'Credits',
     'nav.settings': 'Settings',
     'nav.recent': 'RECENT',
+    'conv.search': 'Search an analysis…',
+    'conv.none': 'No result.',
+    'conv.hook': 'What strategic question today?',
+    'conv.sub': 'Ask in plain language. Axial reframes, searches, reasons, and cites every source.',
+    'conv.placeholder': 'Ask your strategic question… (Shift+Enter for a new line)',
     'nav.tools': 'TOOLS',
     'nav.docs': 'Documentation',
     'nav.new_analysis': 'New analysis',
@@ -2094,6 +2104,7 @@ function ConversationsRegion({
    Conversation list panel (middle column)
    ============================================================ */
 function ConvListPanel({ conversations, activeId, onPick, onNew }) {
+  const t = window.useT();
   const [q, setQ] = useConvState('');
   const filtered = conversations.filter((c) => c.title.toLowerCase().includes(q.toLowerCase()));
 
@@ -2102,14 +2113,14 @@ function ConvListPanel({ conversations, activeId, onPick, onNew }) {
       <div className="conv-search">
         <Icon name="search" size={14} className="conv-search-icon" />
         <input value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder="Rechercher une analyse…" />
+          placeholder={t('conv.search')} />
       </div>
 
       <button className="sidebar-newconv" onClick={onNew} style={{ marginBottom: 12 }}>
-        <Icon name="plus" size={14} /> Nouvelle analyse
+        <Icon name="plus" size={14} /> {t('nav.new_analysis')}
       </button>
 
-      <div className="sidebar-section-label">RÉCENTES</div>
+      <div className="sidebar-section-label">{t('nav.recent')}</div>
       <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
         {filtered.map((c) => (
           <li key={c.id}>
@@ -2124,7 +2135,7 @@ function ConvListPanel({ conversations, activeId, onPick, onNew }) {
         ))}
         {filtered.length === 0 && (
           <li className="caption" style={{ padding: '12px', color: 'var(--fg-3)' }}>
-            Aucun résultat.
+            {t('conv.none')}
           </li>
         )}
       </ul>
@@ -2136,6 +2147,7 @@ function ConvListPanel({ conversations, activeId, onPick, onNew }) {
    Empty state — no conversation selected
    ============================================================ */
 function EmptyConvState({ onSend, suggestedPrompts }) {
+  const t = window.useT();
   // La question suggérée de l'onboarding pré-remplit le composer (jamais
   // envoyée automatiquement — l'utilisateur garde la main).
   const [draft, setDraft] = useConvState(() => {
@@ -2160,10 +2172,10 @@ function EmptyConvState({ onSend, suggestedPrompts }) {
           }} />
         </div>
         <h2 style={{ fontSize: 26, margin: '0 0 12px', letterSpacing: '-0.015em' }}>
-          Quelle question stratégique aujourd'hui ?
+          {t('conv.hook')}
         </h2>
         <p>
-          Posez votre question en langage naturel. Axial reformule, cherche, raisonne, et cite chaque source.
+          {t('conv.sub')}
         </p>
 
         <div className="empty-prompt-chips">
@@ -2370,7 +2382,7 @@ function Composer({ value, onChange, onSend }) {
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKey}
-          placeholder="Posez votre question stratégique… (Maj+Entrée pour aller à la ligne)"
+          placeholder={t('conv.placeholder')}
         />
         <button className="composer-send" onClick={onSend} disabled={!value.trim()}
           aria-label="Envoyer">
@@ -2618,6 +2630,13 @@ function ReportsGenerating({ genMeta }) {
     ? ['Recherche des sources (web + vos documents)', 'Analyse et rédaction', 'Finalisation']
     : ['Gathering sources (web + your documents)', 'Analysis & writing', 'Finalizing'];
   const pct = genMeta && typeof genMeta.progress === 'number' ? genMeta.progress : null;
+  const ETATS = lang === 'fr'
+    ? { start: 'Démarrage', retrieve: 'Recherche documentaire', generate: 'Rédaction en cours',
+        finalize: 'Finalisation', done: 'Terminé' }
+    : { start: 'Starting', retrieve: 'Gathering sources', generate: 'Writing',
+        finalize: 'Finalizing', done: 'Done' };
+  const etatCourant = (genMeta && ETATS[genMeta.step])
+    || (lang === 'fr' ? 'Génération en cours' : 'Generating');
   const current = pct === null
     ? (elapsed < 15 ? 0 : elapsed < 35 ? 1 : 2)
     : (pct < 40 ? 0 : pct < 90 ? 1 : 2);
@@ -2639,7 +2658,7 @@ function ReportsGenerating({ genMeta }) {
           <h1 style={{ fontSize: 20 }}>{(genMeta && genMeta.prompt) || (lang === 'fr' ? 'Votre rapport' : 'Your report')}</h1>
           <div className="doc-meta mono" style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
             <span className="ax-thinking"><span className="dots"><i /><i /><i /></span></span>
-            <span>{(genMeta && genMeta.message) || (lang === 'fr' ? 'Génération en cours' : 'Generating')} · {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}{pct !== null ? ` · ${pct} %` : ''}</span>
+            <span>{etatCourant} · {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}{pct !== null ? ` · ${pct} %` : ''}</span>
           </div>
           {pct !== null && (
             <div style={{ height: 3, background: 'var(--surface-2)', borderRadius: 3, overflow: 'hidden', margin: '12px 0 0' }}>
