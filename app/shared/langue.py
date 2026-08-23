@@ -47,8 +47,10 @@ def consigne_miroir() -> str:
         "question en anglais, réponse entièrement en anglais. Cela vaut pour tout : "
         "titres, corps, listes, section des sources et recommandations. Les sources "
         "fournies peuvent être dans une autre langue : traduis ce que tu en reprends "
-        "plutôt que de recopier leurs phrases. Conserve tels quels les noms propres, "
-        "raisons sociales et intitulés officiels."
+        "plutôt que de recopier leurs phrases. AUCUN mot d'une autre langue ne doit "
+        "subsister dans le corps du texte — relis-toi sur ce point avant de conclure. "
+        "Seules exceptions : les noms propres, raisons sociales et intitulés officiels, "
+        "qui se conservent tels quels."
     )
 
 
