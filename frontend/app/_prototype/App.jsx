@@ -461,7 +461,7 @@ const STRINGS = {
     // memory
     'memory.title': 'Mémoire — la clé d\'Axial',
     'memory.subtitle': 'Voici ce qu\'Axial sait de vous. Chaque fait est révocable.',
-    'memory.privacy': 'Privé. Stocké chiffré. Jamais utilisé pour entraîner un modèle externe.',
+    'memory.privacy': 'Stocké chiffré. Jamais utilisé pour entraîner un modèle externe.',
     'memory.cat.you': 'Vous',
     'memory.cat.preferences': 'Préférences',
     'memory.cat.work': 'Contexte professionnel',
@@ -665,7 +665,7 @@ const STRINGS = {
 
     'memory.title': 'Memory — Axial\'s Key',
     'memory.subtitle': 'Here\'s what Axial knows about you. Every fact is revocable.',
-    'memory.privacy': 'Private. Stored encrypted. Never used to train an external model.',
+    'memory.privacy': 'Stored encrypted. Never used to train an external model.',
     'memory.cat.you': 'You',
     'memory.cat.preferences': 'Preferences',
     'memory.cat.work': 'Work context',
@@ -1501,6 +1501,18 @@ const LABELS_EN = {
   "Démo": "Demo",
   "Activation": "Activation",
   "Première analyse": "First analysis",
+  // Catalogue d'abonnements : ces libellés viennent du backend en français.
+  "Tout Pro": "Everything in Pro",
+  "jusqu'à 10 agents personnalisés": "up to 10 custom agents",
+  "mémoire avancée": "advanced memory",
+  "Workspace multi-startups": "Multi-startup workspace",
+  "signaux portefeuille": "portfolio signals",
+  "accès équipe": "team access",
+  "2 agents": "2 agents",
+  "templates (fundraising, ICP, GTM, mapping)": "templates (fundraising, ICP, GTM, mapping)",
+  "Starter — 50 crédits": "Starter — 50 credits",
+  "Boost — 100 crédits": "Boost — 100 credits",
+  "Scale — 200 crédits": "Scale — 200 credits",
 };
 
 // Traduit un libellé d'affichage sans jamais toucher à la valeur sous-jacente.
@@ -3152,7 +3164,7 @@ function AgentsLibrary({ onCreate, onOpenSession }) {
         })}
         {agents !== null && agents.length === 0 && (
           <div style={{ gridColumn: '1 / -1', textAlign: 'center', color: 'var(--fg-3)', padding: 20, fontSize: 13.5 }}>
-            {lang === 'fr' ? 'Aucun agent de veille pour l\'instant.' : 'No veille agent yet.'}
+            {lang === 'fr' ? 'Aucun agent de veille pour l\'instant.' : 'No monitoring agent yet.'}
           </div>
         )}
       </div>
@@ -3693,7 +3705,7 @@ function CreditsSurface() {
               {p.monthly_credits ? `${p.monthly_credits} ${lang === 'fr' ? 'crédits/mois' : 'credits/mo'} · ${p.seats} ${lang === 'fr' ? 'siège(s)' : 'seat(s)'}` : (lang === 'fr' ? 'Multi-startups, équipe' : 'Multi-startup, team')}
             </p>
             <ul style={{ margin: '6px 0 12px 16px', padding: 0, fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.5 }}>
-              {(p.features || []).slice(0, 3).map((f, i) => <li key={i}>{f}</li>)}
+              {(p.features || []).slice(0, 3).map((f, i) => <li key={i}>{libelle(f)}</li>)}
             </ul>
             {p.price_eur != null
               ? <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => subscribe(p.key)} disabled={busy === 'plan-' + p.key}>
@@ -3710,7 +3722,7 @@ function CreditsSurface() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 14, maxWidth: 760 }}>
         {packs.map((p) => (
           <div key={p.key} className="plan-card">
-            <h3 style={{ marginBottom: 6 }}>{p.label}</h3>
+            <h3 style={{ marginBottom: 6 }}>{libelle(p.label)}</h3>
             <div className="price">{(p.amount_cents / 100).toFixed(0)} €<small> · {p.credits} {lang === 'fr' ? 'crédits' : 'credits'}</small></div>
             <button className="btn btn-primary" style={{ width: '100%', marginTop: 14 }} onClick={() => buy(p.key)} disabled={busy === 'pack-' + p.key}>
               <Icon name="sparkle" size={13} />{busy === 'pack-' + p.key ? '…' : (lang === 'fr' ? 'Acheter' : 'Buy')}
@@ -4014,6 +4026,10 @@ function BillingSettings({ lang, t }) {
     analyse_concurrentielle: lang === 'fr' ? 'Analyse concurrentielle' : 'Competitive analysis',
     veille_technologique: lang === 'fr' ? 'Veille technologique' : 'Tech watch',
     analyse_risques: lang === 'fr' ? 'Analyse de risques' : 'Risk analysis',
+    cartographie_investisseurs: lang === 'fr' ? 'Cartographie investisseurs' : 'Investor mapping',
+    // Sans cette entrée, le bonus de retour s'affichait tel quel dans
+    // l'historique : le code technique « retour_migration », lisible par personne.
+    retour_migration: lang === 'fr' ? 'Bonus de retour' : 'Welcome-back bonus',
   };
   return (
     <>
