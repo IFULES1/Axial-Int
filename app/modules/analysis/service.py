@@ -163,8 +163,10 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
     try:
         # Sonnet 5 : le thinking adaptatif se décompte de max_tokens — un budget
         # trop court peut être entièrement consommé en réflexion (texte vide).
-        result = llm_client.generate(system=SYSTEM_PROMPT, prompt=prompt,
-                                     tier=tier, max_tokens=32000)
+        from app.shared import langue as lg
+
+        result = llm_client.generate(system=SYSTEM_PROMPT + lg.consigne_miroir(),
+                                     prompt=prompt, tier=tier, max_tokens=32000)
     except Exception as e:
         logger.warning("Generation failed: %s", e)
         return AnalysisResult(
@@ -279,6 +281,7 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
 
     company_context = memory.build_context(db, user_id)
     profile = _profile_dict(db, user_id)
+
 
     # La génération tourne dans un thread pendant que le flux continue d'émettre :
     # un rapport de fond prend plusieurs minutes, et une connexion silencieuse

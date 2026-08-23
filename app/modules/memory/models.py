@@ -36,6 +36,8 @@ class CompanyProfile(Base):
     client_segment: Mapped[str | None] = mapped_column(Text)
     known_competitors: Mapped[str | None] = mapped_column(Text)
     main_challenge: Mapped[str | None] = mapped_column(Text)
+    # Langue de production des contenus (rapports, réponses, veilles).
+    language: Mapped[str | None] = mapped_column(String(5))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=_now, onupdate=_now

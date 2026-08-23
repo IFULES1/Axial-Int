@@ -150,7 +150,8 @@ def run_watch(db: Session, watch: Watch) -> bool:
         company_context = memory.build_context(db, uid)
         veille = engine.generate_veille(
             skill=skill, subject=watch.query, rolling_state=watch.rolling_state,
-            rss_articles=articles, web_results=web_results, company_context=company_context,
+            rss_articles=articles, web_results=web_results,
+            company_context=company_context,
         )
 
         # 3. Archive the run + advance the rolling memory.

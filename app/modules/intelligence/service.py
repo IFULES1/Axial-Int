@@ -281,6 +281,12 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
     # long. Agents spécialisés : tier chat (comportement historique).
     tier = "report" if (free_chat and _wants_long_answer(content)) else "chat"
 
+    # La langue de la QUESTION commande celle de la réponse : quelqu'un qui écrit
+    # en anglais dans une interface française n'a pas à changer un réglage.
+    from app.shared import langue as lg
+
+    system += lg.consigne_miroir()
+
     # Quand des pages Notion sont dans les sources, le modèle doit les traiter
     # comme le matériau de l'utilisateur — pas comme une source publique.
     if any((getattr(p, "source", "") == "notion") for p in doc_passages):

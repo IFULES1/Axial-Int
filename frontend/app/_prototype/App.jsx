@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -759,6 +759,9 @@ window.setAxialLang = function (lang) {
   try { localStorage.setItem('axial:lang', lang); } catch (_) {}
   document.documentElement.setAttribute('lang', lang);
   window.dispatchEvent(new Event('axial:lang'));
+  // Le serveur doit connaître ce choix : c'est lui qui rédige les rapports et
+  // les veilles, et le worker qui envoie les emails n'a pas accès au navigateur.
+  if (window.__axSetLanguage) { try { window.__axSetLanguage(lang); } catch (_) {} }
 };
 
 (function init() {
@@ -5389,6 +5392,11 @@ function App() {
   // Real credit balance from the backend (fetched when entering the app).
   const [axBal, setAxBal] = useState(null);
   const [axUser, setAxUser] = useState(null);
+  // Expose l'enregistrement de langue au sélecteur, qui vit hors de React.
+  React.useEffect(() => {
+    window.__axSetLanguage = (l) => axSetLanguage(l).catch(() => {});
+    return () => { delete window.__axSetLanguage; };
+  }, []);
   const [resetToken, setResetToken] = useState('');
   // Session persistence: if a valid token exists on load, resume into the app.
   // Handles the return from the onboarding Stripe checkout (?onb=done|cancel):

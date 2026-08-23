@@ -114,8 +114,11 @@ def generate_veille(*, skill: VeilleSkill, subject: str, rolling_state: str | No
     ]
     prompt = guard_outbound("\n\n".join(p for p in parts if p))
 
-    result = llm_client.generate(system=skill.system_prompt, prompt=prompt,
-                                 tier="report", max_tokens=6000)
+    from app.shared import langue as lg
+
+    # Pas de question posée ici : c'est la langue du SUJET surveillé qui décide.
+    result = llm_client.generate(system=skill.system_prompt + lg.consigne_miroir(),
+                                 prompt=prompt, tier="report", max_tokens=6000)
     parsed = _parse(result.text)
     # Robustness: never let a run land with an empty full report. On the first
     # pass (or if the model under-fills one field), mirror delta ↔ full_report.

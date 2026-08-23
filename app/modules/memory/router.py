@@ -26,6 +26,7 @@ class ProfileIn(BaseModel):
     client_segment: str | None = None
     known_competitors: str | None = None
     main_challenge: str | None = None
+    language: str | None = None
 
 
 class ProfileOut(ProfileIn):
@@ -92,3 +93,22 @@ def get_notifications(user: AuthUser = Depends(get_current_user),
 def put_notifications(payload: NotifPrefsIn, user: AuthUser = Depends(get_current_user),
                       db: Session = Depends(get_db)) -> dict:
     return service.set_notification_prefs(db, user.id, payload.model_dump())
+
+
+class LangueIn(BaseModel):
+    language: str
+
+
+@router.put("/language")
+def put_language(payload: LangueIn, user: AuthUser = Depends(get_current_user),
+                 db: Session = Depends(get_db)) -> dict:
+    """Enregistrer la langue de production choisie par l'utilisateur.
+
+    Le sélecteur de l'interface ne peut pas se contenter du navigateur : le
+    worker qui envoie les veilles n'y a pas accès, et un rapport doit sortir
+    dans la bonne langue quel que soit l'appareil.
+    """
+    from app.shared import langue as lg
+
+    service.upsert_profile(db, user.id, {"language": lg.normaliser(payload.language)})
+    return {"language": lg.normaliser(payload.language)}
