@@ -105,3 +105,9 @@ Un compte externe concentre 114 rapports (gmail, connecté le 13/08) — **à co
 - [x] Onglet **Paramètres → Connexions** réel (la maquette est remplacée) + boutons « Notion » / « Drive » sur un rapport ouvert.
 - [ ] ⚠️ **ACTION MIRADIE — Notion uniquement (décision du 22/08)** : créer l'intégration Notion **publique** et poser `INTEGRATIONS_SECRET_KEY` + `NOTION_CLIENT_ID` + `NOTION_CLIENT_SECRET`. Google Drive : backend prêt et testé, **masqué dans l'interface** en attendant. Sans elles, `configure: false` et les boutons restent inactifs — l'app fonctionne normalement par ailleurs.
 - [ ] **Gmail : bloqué par Google.** La lecture d'emails (`gmail.readonly`) est une portée « restreinte » : elle exige une validation Google (plusieurs semaines) **et** un audit de sécurité annuel payant. Drive utilise `drive.file`, qui n'accède qu'aux fichiers créés par Axial et n'est pas soumis à cette validation.
+
+## Noté le 22/08/2026 (fin de journée)
+- [x] `andy@getmym.com` retiré de toute communication (liste d'exclusion, avec Isaia).
+- [ ] **Relance des lecteurs tièdes — à envoyer le 25/08** : 15 personnes ont ouvert l'email de migration **plusieurs fois** sans s'inscrire. Cibles prioritaires : `sarah.gebai@gmail.com` (6 ouvertures), `ahmed.mamdouh@ignot-estates.com` (4), `franz.vasseur@registregeneral.com` (4), `s.gorjux@skyted.io` (3), `calebmeinerad@gmail.com` (3). Message court et personnel, pas une newsletter — ils ont déjà lu l'argumentaire.
+- [ ] **Relance des deux inscrits bloqués** : `soumeya@optimpharma.fr` (profil non rempli) et `christian@eqonx.com` (carte posée, aucun usage — essai facturé le 05/09).
+- [x] **Internationalisation** : la langue de la question commande celle de la réponse (miroir linguistique dans rapports, conversations et veilles) ; la préférence de profil, enregistrée par le sélecteur FR/EN, ne sert qu'aux emails automatiques. Migration 0016.
