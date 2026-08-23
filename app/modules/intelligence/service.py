@@ -271,11 +271,14 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
     if company_context:
         system += (
             "\n\nUn bloc « Contexte entreprise (mémoire) » est fourni dans le "
-            "message. Ancre EXPLICITEMENT ta réponse dedans : ouvre par une "
-            "phrase du type « Dans votre contexte — [nom de l'entreprise], "
-            "[élément pertinent du profil]… », désigne l'entreprise par son nom, "
-            "et adapte chaque recommandation à SA situation (positionnement, "
-            "stade, défi) plutôt qu'à un acteur générique du secteur."
+            "message. Ancre EXPLICITEMENT ta réponse dedans : ouvre par une phrase "
+            "qui situe la réponse dans le contexte de cette entreprise — son nom "
+            "puis l'élément de profil pertinent pour la question (« Dans votre "
+            "contexte — [nom], [élément]… » en français, « In your context — "
+            "[name], [element]… » en anglais) — puis adapte chaque recommandation "
+            "à SA situation (positionnement, stade, défi) plutôt qu'à un acteur "
+            "générique du secteur. Cette phrase d'ouverture suit la langue de la "
+            "réponse, jamais celle de cette instruction."
         )
     # Conversation libre : Gemini (chat) pour le court, Sonnet (report) pour le
     # long. Agents spécialisés : tier chat (comportement historique).

@@ -16,10 +16,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 AXIAL_RECOMMENDE_INSTRUCTION = (
-    "\n\nTermine IMPÉRATIVEMENT ta réponse par un bloc intitulé exactement "
-    "'**AXIAL Recommande**' : 2-3 phrases qui ne se contentent pas de rapporter "
-    "les signaux, mais disent explicitement quoi en faire — quel mouvement de "
-    "positionnement, quoi surveiller, quoi éviter."
+    "\n\nTermine IMPÉRATIVEMENT ta réponse par un bloc de recommandation : "
+    "intitulé '**AXIAL Recommande**' si tu réponds en français, "
+    "'**AXIAL Recommends**' si tu réponds en anglais. 2-3 phrases qui ne se "
+    "contentent pas de rapporter les signaux, mais disent explicitement quoi en "
+    "faire — quel mouvement de positionnement, quoi surveiller, quoi éviter."
 )
 
 # Socle commun V4 (porté de l'ancienne plateforme) : rigueur, style, sources.
