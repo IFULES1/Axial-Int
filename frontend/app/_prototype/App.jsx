@@ -391,7 +391,7 @@ const STRINGS = {
     'reports.types.investors_desc': 'Fonds et réseaux BA correspondant à votre secteur et votre stade, avec stratégie d\'approche.',
     'reports.types.custom': 'Étude personnalisée',
     'reports.types.custom_desc': 'Question stratégique ouverte. Axial cadre.',
-    'reports.template_strip': 'Modèles récents',
+    'reports.template_strip': 'Exemples de questions',
     'reports.start': 'Lancer le rapport',
     'reports.estimate': 'Estimation',
     'reports.depth': 'Profondeur',
@@ -592,7 +592,7 @@ const STRINGS = {
     'reports.types.investors_desc': 'Funds and angel networks matching your sector and stage, with an approach strategy.',
     'reports.types.custom': 'Custom study',
     'reports.types.custom_desc': 'Open strategic question. Axial frames it.',
-    'reports.template_strip': 'Recent templates',
+    'reports.template_strip': 'Example questions',
     'reports.start': 'Run report',
     'reports.estimate': 'Estimate',
     'reports.depth': 'Depth',
@@ -2722,7 +2722,6 @@ function ReportsEditor({ data, onBack, openShare }) {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button className="btn btn-secondary btn-sm" onClick={openShare}><Icon name="share" size={14} />{t('common.share')}</button>
           <button className="btn btn-primary btn-sm" onClick={exportPdf} disabled={saving}>
             <Icon name="download" size={14} />{saving ? (lang === 'fr' ? 'Export…' : 'Exporting…') : 'PDF'}
           </button>
@@ -3669,7 +3668,6 @@ function SettingsSurface() {
       { id: 'appearance', label: t('settings.appearance'), icon: 'palette' },
     ]},
     { group: t('settings.workspace'), items: [
-      { id: 'models', label: t('settings.models'), icon: 'cpu' },
       { id: 'connections', label: t('settings.connections'), icon: 'plug' },
       { id: 'billing', label: t('settings.billing'), icon: 'zap' },
     ]},
@@ -3743,25 +3741,6 @@ function SettingsSurface() {
             </>
           )}
 
-
-          {tab === 'models' && (
-            <>
-              <h2>{t('settings.models')}</h2>
-              <p>{lang === 'fr' ? 'Modèles de raisonnement pilotés par Axial.' : 'Reasoning models driven by Axial.'}</p>
-              <div className="settings-row">
-                <div><h3>{lang === 'fr' ? 'Modèle par défaut' : 'Default model'}</h3><p>{lang === 'fr' ? 'Pour les conversations et les rapports standards.' : 'For conversations and standard reports.'}</p></div>
-                <div className="control"><select className="role-select"><option>Axial Reason 2.1 (équilibré)</option><option>Axial Reason 2.1 Pro (qualité)</option><option>Axial Speed 1.4 (rapide)</option></select></div>
-              </div>
-              <div className="settings-row">
-                <div><h3>{lang === 'fr' ? 'Modèle profondeur' : 'Deep model'}</h3><p>{lang === 'fr' ? 'Activé pour les rapports en mode Approfondi.' : 'Used for reports in Deep mode.'}</p></div>
-                <div className="control"><select className="role-select"><option>Axial Reason 2.1 Pro</option><option>Axial Reason 2.0 Long-context</option></select></div>
-              </div>
-              <div className="settings-row">
-                <div><h3>{lang === 'fr' ? 'Citations strictes' : 'Strict citations'}</h3><p>{lang === 'fr' ? 'Refuse de produire une affirmation chiffrée sans source primaire.' : 'Refuse to assert a numeric claim without a primary source.'}</p></div>
-                <div className="control" style={{ alignItems: 'flex-end' }}><div className="toggle on"></div></div>
-              </div>
-            </>
-          )}
 
           {tab === 'connections' && <IntegrationsSettings lang={lang} t={t} />}
 
