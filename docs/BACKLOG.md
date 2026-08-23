@@ -111,3 +111,7 @@ Un compte externe concentre 114 rapports (gmail, connecté le 13/08) — **à co
 - [ ] **Relance des lecteurs tièdes — à envoyer le 25/08** : 15 personnes ont ouvert l'email de migration **plusieurs fois** sans s'inscrire. Cibles prioritaires : `sarah.gebai@gmail.com` (6 ouvertures), `ahmed.mamdouh@ignot-estates.com` (4), `franz.vasseur@registregeneral.com` (4), `s.gorjux@skyted.io` (3), `calebmeinerad@gmail.com` (3). Message court et personnel, pas une newsletter — ils ont déjà lu l'argumentaire.
 - [ ] **Relance des deux inscrits bloqués** : `soumeya@optimpharma.fr` (profil non rempli) et `christian@eqonx.com` (carte posée, aucun usage — essai facturé le 05/09).
 - [x] **Internationalisation** : la langue de la question commande celle de la réponse (miroir linguistique dans rapports, conversations et veilles) ; la préférence de profil, enregistrée par le sélecteur FR/EN, ne sert qu'aux emails automatiques. Migration 0016.
+
+### Décisions du 22/08 (soir)
+- **Renouvellements bloqués** dans Stripe (`cancel_at_period_end`) : `admin@axial.com` (01/09) et `christian@eqonx.com` (05/09) — accès conservé jusqu'à ces dates, aucun prélèvement ensuite.
+- **Registre FR : ce n'est PAS une incohérence** (décision Miradie). Les emails viennent de Miradie personnellement → tutoiement. L'app est impersonnelle → vouvoiement. Retiré de la liste des dettes.
