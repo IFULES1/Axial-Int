@@ -2318,6 +2318,7 @@ const AGENT_MODES = [
 ];
 
 function Composer({ value, onChange, onSend }) {
+  const t = window.useT();
   const ref = useConvRef(null);
   const fileRef = useConvRef(null);
   const [uploading, setUploading] = React.useState(false);
@@ -5559,9 +5560,19 @@ function App() {
       // les génériques ne servent que de repli tant que le profil est vide.
       axGetProfile().then((pr) => {
         if (!pr || !(pr.company_name || pr.sector)) return;
-        const who = pr.company_name || `ma startup ${pr.sector || ''}`.trim();
+        const en = window.AXIAL_LANG === 'en';
+        const who = pr.company_name || (en ? `my ${pr.sector || ''} startup`.trim()
+                                           : `ma startup ${pr.sector || ''}`.trim());
         const stage = pr.funding_stage || 'Seed';
-        const qs = [
+        // Ces quatre questions sont la première chose qu'un nouvel utilisateur
+        // clique : les laisser en français rendait l'écran inutilisable en anglais.
+        const qs = en ? [
+          `Who are ${who}'s direct competitors, and how can we stand out?`,
+          `Which go-to-market lever should ${who} prioritise at ${stage}?`,
+          `How should ${who} prepare its next round: amount, timing, funds to target?`,
+          pr.main_challenge ? `Where do we start with: "${pr.main_challenge}"?`
+                            : `What risks should ${who} anticipate this year?`,
+        ] : [
           `Quels sont les concurrents directs de ${who} et comment se différencier ?`,
           `Quel levier GTM ${who} devrait-elle prioriser en ${stage} ?`,
           `Comment ${who} doit-elle préparer sa prochaine levée : montant, timing, fonds à cibler ?`,
