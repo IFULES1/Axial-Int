@@ -2331,6 +2331,7 @@ const AGENT_MODES = [
 
 function Composer({ value, onChange, onSend }) {
   const t = window.useT();
+  const en = window.AXIAL_LANG === 'en';
   const ref = useConvRef(null);
   const fileRef = useConvRef(null);
   const [uploading, setUploading] = React.useState(false);
@@ -2425,7 +2426,9 @@ function Composer({ value, onChange, onSend }) {
         <div style={{ display: 'inline-flex', gap: 4, padding: 3, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--bg-2, rgba(255,255,255,0.03))' }}>
           {AGENT_MODES.map((m) => (
             <button key={m.key} type="button" onClick={() => pickMode(m.key)}
-              title={m.key === 'auto' ? 'Discussion libre avec Axial, sans cadre imposé' : `Utiliser l'agent ${m.label}`}
+              title={m.key === 'auto'
+                ? (en ? 'Free discussion with Axial, no imposed framework' : 'Discussion libre avec Axial, sans cadre imposé')
+                : (en ? `Use the ${m.label} agent` : `Utiliser l'agent ${m.label}`)}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 5,
                 padding: '4px 10px', borderRadius: 999, border: 'none', cursor: 'pointer',
@@ -2439,8 +2442,10 @@ function Composer({ value, onChange, onSend }) {
         </div>
         <span style={{ color: 'var(--fg-3)', fontSize: 11.5 }}>
           {mode === 'auto'
-            ? 'Discussion libre — réponse rapide ou approfondie selon votre question.'
-            : 'Cet agent spécialisé répondra à toutes vos questions.'}
+            ? (en ? 'Free discussion — a quick or in-depth answer, depending on your question.'
+                  : 'Discussion libre — réponse rapide ou approfondie selon votre question.')
+            : (en ? 'This specialised agent will answer all your questions.'
+                  : 'Cet agent spécialisé répondra à toutes vos questions.')}
         </span>
       </div>
     </div>
