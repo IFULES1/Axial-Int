@@ -68,6 +68,28 @@ def weekly_recap() -> None:
                 logger.warning("Récap hebdo : échec pour %s", email, exc_info=True)
 
 
+def sequences_emails() -> None:
+    """Séquences de cycle de vie — toutes les heures.
+
+    Interrupteur `EMAIL_SEQUENCES_ACTIVES` : tant qu'il est à false, le passage
+    se fait en simulation et n'envoie rien. Un moteur d'emails qui s'allume
+    tout seul au premier déploiement écrirait à de vrais clients avant que
+    quiconque ait relu les textes.
+    """
+    import os
+
+    from app.modules.emailing.sequences import executer
+
+    actives = os.getenv("EMAIL_SEQUENCES_ACTIVES", "false").lower() in ("1", "true", "yes")
+    with SessionLocal() as db:
+        journal = executer(db, simulation=not actives)
+    envoyes = sum(1 for j in journal if j.get("envoye"))
+    if envoyes:
+        logger.info("Séquences email : %d envoi(s)", envoyes)
+    elif journal and not actives:
+        logger.info("Séquences email (simulation) : %d candidat(s)", len(journal))
+
+
 def main() -> None:
     logger.info("Axial worker starting (tick=%ss)", TICK_SECONDS)
     scheduler = BlockingScheduler(timezone="UTC")
@@ -77,6 +99,9 @@ def main() -> None:
                       next_run_time=dt.datetime.now(dt.timezone.utc))
     # Lundi 08:00 Paris ≈ 06:00 UTC (été) — récap hebdo.
     scheduler.add_job(weekly_recap, "cron", day_of_week="mon", hour=6, minute=0)
+    # Séquences de cycle de vie : toutes les heures à la minute 20, pour ne pas
+    # tomber en même temps que le récap hebdo.
+    scheduler.add_job(sequences_emails, "cron", minute=20)
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
