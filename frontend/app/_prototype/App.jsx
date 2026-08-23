@@ -1441,6 +1441,51 @@ window.AuthPage = AuthPage;
 
 var { useState: useOnbState, useEffect: useOnbEffect, useMemo: useOnbMemo } = React;
 
+// Libellés anglais des listes de choix ET des textes d'onboarding.
+// Les VALEURS des listes restent en français : elles sont écrites en base et
+// alimentent la correspondance secteur/stade de la cartographie investisseurs.
+// Traduire la valeur casserait ce lien côté serveur.
+const LABELS_EN = {
+  'Deeptech / IA': 'Deeptech / AI',
+  'Industrie / Hardware': 'Industry / Hardware',
+  'Services pro': 'Professional services',
+  'Idéation': 'Ideation',
+  'Série A': 'Series A',
+  'Série B+': 'Series B+',
+  'États-Unis': 'United States',
+  'Monde': 'Worldwide',
+  'Comprendre mon marché et mes concurrents': 'Understand my market and competitors',
+  'Définir ma stratégie GTM': 'Define my go-to-market strategy',
+  'Préparer une levée de fonds': 'Prepare a fundraise',
+  'Anticiper les risques réglementaires': 'Anticipate regulatory risks',
+  'Recruter et structurer mon équipe': 'Hire and structure my team',
+  // Onboarding — les quatre premiers écrans décident si quelqu'un reste.
+  'Parlez-nous de votre startup.': 'Tell us about your startup.',
+  'Axial calibre ses réponses sur votre entreprise — pas seulement votre secteur.':
+    'Axial tunes its answers to your company — not just your sector.',
+  'VOTRE ENTREPRISE': 'YOUR COMPANY',
+  'VOTRE SECTEUR': 'YOUR SECTOR',
+  'VOTRE STADE': 'YOUR STAGE',
+  'VOTRE PRINCIPAL DÉFI': 'YOUR MAIN CHALLENGE',
+  'VOTRE MARCHÉ': 'YOUR MARKET',
+  'Site web (ex. axial-ia.fr)': 'Website (e.g. axial-ia.fr)',
+  'Pré-remplir depuis mon site': 'Prefill from my website',
+  'Pré-remplissage…': 'Prefilling…',
+  'Pré-rempli depuis votre site — vérifiez et corrigez si besoin.':
+    'Prefilled from your website — check and correct if needed.',
+  'Site injoignable — remplissez à la main.': 'Website unreachable — fill it in manually.',
+  'Année de création': 'Founded in',
+  'Pays': 'Country',
+  'Concurrents connus (séparés par des virgules)': 'Known competitors (comma-separated)',
+  'Ajouter un document': 'Add a document',
+  'Import…': 'Uploading…',
+};
+
+// Traduit un libellé d'affichage sans jamais toucher à la valeur sous-jacente.
+function libelle(valeur) {
+  return (window.AXIAL_LANG === 'en' && LABELS_EN[valeur]) || valeur;
+}
+
 const SECTORS = ['SaaS B2B', 'SaaS B2C', 'Marketplace', 'Fintech', 'Deeptech / IA', 'Industrie / Hardware', 'Services pro', 'E-commerce'];
 const STAGES = ['Idéation', 'Pre-seed', 'Seed', 'Série A', 'Série B+', 'Profitable'];
 const CHALLENGES = [
@@ -1619,7 +1664,7 @@ function ChipsRow({ options, value, onChange }) {
             borderColor: 'var(--border-active)',
             color: 'var(--fg)',
           } : undefined}>
-          {o}
+          {libelle(o)}
         </button>
       ))}
     </div>
