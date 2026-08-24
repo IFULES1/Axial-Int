@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.db import SessionLocal  # noqa: E402
+from app.modules.emailing.envoi import deja_envoye, supprime  # noqa: E402
 from app.modules.emailing.sequences import SEQUENCES, eligibles, executer  # noqa: E402
 
 
@@ -62,9 +63,23 @@ def main() -> None:
                 except Exception as e:  # noqa: BLE001
                     print(f"{seq.cle:26} ERREUR {e}"[:160])
                     continue
-                print(f"{seq.cle:26} {len(cibles):3} éligible(s)  — {seq.description}")
+                # La simulation doit montrer EXACTEMENT ce que l'envoi ferait :
+                # une liste qui ignore les désinscrits et les envois déjà faits
+                # donne une fausse alerte à chaque relecture, et finit par ne
+                # plus être lue du tout.
+                retenus, ecartes = [], []
                 for c in cibles:
-                    print(f"    {c.email}  [{c.langue}]")
+                    if supprime(db, c.email):
+                        ecartes.append((c.email, "désinscrit"))
+                    elif deja_envoye(db, c.email, seq.cle):
+                        ecartes.append((c.email, "déjà envoyé"))
+                    else:
+                        retenus.append(c)
+                print(f"{seq.cle:26} {len(retenus):3} à envoyer  — {seq.description}")
+                for c in retenus:
+                    print(f"    → {c.email}  [{c.langue}]")
+                for email, motif in ecartes:
+                    print(f"      ({email} — {motif})")
             return
 
         journal = executer(db, simulation=False, seulement=args.sequence)
