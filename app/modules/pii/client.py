@@ -58,7 +58,17 @@ def guard_outbound(text: str) -> str:
 
     if mode == "shadow":
         if mapping:
-            logger.info("PII shadow: %d structured item(s) would be redacted", len(mapping))
+            # Le TYPE de donnée, jamais sa valeur : un journal qui recopie les
+            # emails qu'il prétend protéger déplace la fuite, il ne l'évite pas.
+            # Et un simple compteur ne permet de trancher ni le passage en
+            # enforce ni l'inverse — il faut savoir ce qui est détecté.
+            par_type: dict[str, int] = {}
+            for placeholder in mapping:
+                kind = placeholder.strip("[]").rsplit("_", 1)[0]
+                par_type[kind] = par_type.get(kind, 0) + 1
+            detail = ", ".join(f"{k}×{n}" for k, n in sorted(par_type.items()))
+            logger.info("PII shadow: %d élément(s) seraient masqués — %s",
+                        len(mapping), detail)
         return text  # send original in shadow mode
 
     # enforce: structured redaction + best-effort NER

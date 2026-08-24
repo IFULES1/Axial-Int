@@ -1279,7 +1279,7 @@ function ResetPasswordPage({ token, onDone }) {
           <div>
             <label className="label">NOUVEAU MOT DE PASSE</label>
             <input className="input" type="password" required minLength={8} autoFocus
-              placeholder="8 caractères minimum"
+              placeholder={libelle("8 caractères minimum")}
               value={pwd} onChange={(e) => setPwd(e.target.value)} />
           </div>
           <div>
@@ -1309,7 +1309,7 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
   const finish = async (kind) => {
     if (busy) return;
     if (kind === 'google') {
-      setAuthErr("Connexion Google bientôt disponible — utilise ton email professionnel.");
+      setAuthErr(libelle("Connexion Google bientôt disponible — utilise ton email professionnel."));
       return;
     }
     setAuthErr(null);
@@ -1350,7 +1350,7 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
 
       <button onClick={onBack} className="btn btn-ghost"
         style={{ position: 'absolute', top: 22, left: 22 }}>
-        <Icon name="arrow-left" size={14} /> Retour
+        <Icon name="arrow-left" size={14} /> {libelle("Retour")}
       </button>
 
       <div className="auth-card">
@@ -1358,22 +1358,22 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
 
         <h1 className="auth-hook">
           {mode === 'signup'
-            ? "Créez votre espace stratégique."
+            ? libelle("Créez votre espace stratégique.")
             : "Bon retour parmi nous."}
         </h1>
         <p className="caption" style={{ marginTop: -16, marginBottom: 22 }}>
           {mode === 'signup'
-            ? "Trois minutes pour configurer votre contexte, puis 14 jours d'essai."
-            : "Reprenez vos analyses là où vous les avez laissées."}
+            ? libelle("Trois minutes pour configurer votre contexte, puis 14 jours d'essai.")
+            : libelle("Reprenez vos analyses là où vous les avez laissées.")}
         </p>
 
         <div className="auth-tabs" role="tablist">
           <button role="tab" aria-selected={mode === 'signup'}
             className={`auth-tab ${mode === 'signup' ? 'active' : ''}`}
-            onClick={() => setMode('signup')}>Créer un compte</button>
+            onClick={() => setMode('signup')}>{libelle('Créer un compte')}</button>
           <button role="tab" aria-selected={mode === 'login'}
             className={`auth-tab ${mode === 'login' ? 'active' : ''}`}
-            onClick={() => setMode('login')}>Se connecter</button>
+            onClick={() => setMode('login')}>{libelle('Se connecter')}</button>
         </div>
 
         <button className="btn btn-secondary btn-block" type="button"
@@ -1383,26 +1383,26 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
           {busy === 'google'
             ? <><span className="spinner" /> Connexion en cours…</>
             : <><Icon name="google" size={18} />
-                {mode === 'signup' ? "Continuer avec Google" : "Se connecter avec Google"}</>}
+                {mode === 'signup' ? libelle("Continuer avec Google") : libelle("Se connecter avec Google")}</>}
         </button>
 
         <div className="auth-divider">
           <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-          <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 10, letterSpacing: '0.12em' }}>OU PAR EMAIL</span>
+          <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 10, letterSpacing: '0.12em' }}>{libelle('OU PAR EMAIL')}</span>
           <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
         </div>
 
         <form onSubmit={submit} className="auth-fields">
           <div>
-            <label className="label">EMAIL PROFESSIONNEL</label>
+            <label className="label">{libelle("EMAIL PROFESSIONNEL")}</label>
             <input className="input" type="email" required
-              placeholder="vous@votre-entreprise.com"
+              placeholder={libelle("vous@votre-entreprise.com")}
               value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
           <div>
-            <label className="label">MOT DE PASSE</label>
+            <label className="label">{libelle("MOT DE PASSE")}</label>
             <input className="input" type="password" required minLength={8}
-              placeholder={mode === 'signup' ? "8 caractères minimum" : "Votre mot de passe"}
+              placeholder={mode === 'signup' ? libelle("8 caractères minimum") : libelle("Votre mot de passe")}
               value={pwd} onChange={(e) => setPwd(e.target.value)} />
           </div>
           {mode === 'login' && (
@@ -1410,7 +1410,7 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
               style={{ fontSize: 12, color: 'var(--v-soft)', alignSelf: 'flex-end',
                        marginTop: -6, background: 'none', border: 'none',
                        cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
-              {resetBusy ? 'Envoi…' : 'Mot de passe oublié ?'}
+              {resetBusy ? 'Envoi…' : '{libelle("Mot de passe oublié ?")}'}
             </button>
           )}
           {resetMsg && (
@@ -1422,18 +1422,18 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
           <button className="btn btn-primary btn-lg btn-block" type="submit"
             style={{ marginTop: 6 }} disabled={!!busy}>
             {busy === 'email'
-              ? <><span className="spinner" /> {mode === 'signup' ? "Création du compte…" : "Connexion en cours…"}</>
-              : <>{mode === 'signup' ? "Créer mon compte" : "Se connecter"}
+              ? <><span className="spinner" /> {mode === 'signup' ? libelle("Création du compte…") : "Connexion en cours…"}</>
+              : <>{mode === 'signup' ? libelle("Créer mon compte") : libelle("Se connecter")}
                   <Icon name="arrow-right" size={14} /></>}
           </button>
         </form>
 
         <p className="auth-foot">
           {mode === 'signup' ? (
-            <>En créant un compte, vous acceptez nos <a href="/legal/cgu" target="_blank" rel="noopener" style={{ color: 'var(--v-soft)' }}>Conditions</a> et notre <a href="/legal/confidentialite" target="_blank" rel="noopener" style={{ color: 'var(--v-soft)' }}>Politique de confidentialité</a>.</>
+            <>{libelle("En créant un compte, vous acceptez nos")} <a href="/legal/cgu" target="_blank" rel="noopener" style={{ color: 'var(--v-soft)' }}>{libelle("Conditions")}</a> {libelle("et notre")} <a href="/legal/confidentialite" target="_blank" rel="noopener" style={{ color: 'var(--v-soft)' }}>{libelle("Politique de confidentialité")}</a>.</>
           ) : (
-            <>Pas encore de compte ? <a href="#" style={{ color: 'var(--v-soft)' }}
-              onClick={(e) => { e.preventDefault(); setMode('signup'); }}>Créer un compte</a></>
+            <>{libelle("Pas encore de compte ?")} <a href="#" style={{ color: 'var(--v-soft)' }}
+              onClick={(e) => { e.preventDefault(); setMode('signup'); }}>{libelle('Créer un compte')}</a></>
           )}
         </p>
       </div>
@@ -1501,6 +1501,76 @@ const LABELS_EN = {
   "Démo": "Demo",
   "Activation": "Activation",
   "Première analyse": "First analysis",
+  "SOURCES CITÉES": "SOURCES CITED",
+  "Retour": "Back",
+  "Continuer": "Continue",
+  "CE QU'AXIAL RETIENDRA": "WHAT AXIAL WILL REMEMBER",
+  "Vous pourrez modifier, supprimer ou ajouter des faits depuis votre mémoire.":
+    "You can edit, remove or add facts later from your memory.",
+  "entreprise": "company",
+  "positionnement": "positioning",
+  "Sources publiques + votre contexte privé": "Public sources + your private context",
+  "Réponses traçables, exportables": "Traceable, exportable answers",
+  "Mémoire qui apprend": "A memory that learns",
+  "Conditions": "Terms",
+  "Politique de confidentialité": "Privacy Policy",
+  "et notre": "and our",
+  "Pas encore de compte ?": "No account yet?",
+  "Créez votre espace stratégique.": "Create your strategic workspace.",
+  "Trois minutes pour configurer votre contexte, puis 14 jours d'essai.":
+    "Three minutes to set up your context, then a 14-day trial.",
+  "Reprenez vos analyses là où vous les avez laissées.":
+    "Pick your analyses up where you left them.",
+  "Créer un compte": "Create an account",
+  "Se connecter": "Sign in",
+  "Continuer avec Google": "Continue with Google",
+  "Se connecter avec Google": "Sign in with Google",
+  "Connexion Google bientôt disponible — utilise ton email professionnel.":
+    "Google sign-in is coming soon — use your work email for now.",
+  "OU PAR EMAIL": "OR WITH EMAIL",
+  "EMAIL PROFESSIONNEL": "WORK EMAIL",
+  "MOT DE PASSE": "PASSWORD",
+  "vous@votre-entreprise.com": "you@your-company.com",
+  "8 caractères minimum": "8 characters minimum",
+  "Votre mot de passe": "Your password",
+  "Mot de passe oublié ?": "Forgot your password?",
+  "Création du compte…": "Creating your account…",
+  "Créer mon compte": "Create my account",
+  "En créant un compte, vous acceptez nos": "By creating an account you accept our",
+  "Quels risques réglementaires si j'intègre des modèles GenAI ?":
+    "Which regulatory risks come with integrating GenAI models?",
+  "Doctrine CNIL durcie sur l'entraînement avec données personnelles":
+    "Tighter CNIL doctrine on training with personal data",
+  "Garanties contractuelles enterprise sur hallucinations en 2026":
+    "Enterprise contractual guarantees on hallucinations in 2026",
+  "Échec de l’import.": "Import failed.",
+  "Deux questions instruites en moins de trente secondes. Vous pourrez les rejouer après l'onboarding.":
+    "Two researched questions in under thirty seconds. You can re-run them after onboarding.",
+  "Échec de l'import.": "Import failed.",
+  "EU AI Act — obligations transparence août 2025 → août 2026":
+    "EU AI Act — transparency obligations, August 2025 → August 2026",
+  // Écrans 3 et 4 de l'onboarding : l'écran de la carte bancaire et l'écran
+  // final. Ils passaient leurs titres en dur et restaient en français même
+  // avec l'interface en anglais — au moment précis où l'on demande une carte.
+  "Activez votre essai.": "Activate your trial.",
+  "20 crédits offerts pendant 14 jours — aucun débit aujourd'hui.":
+    "20 free credits for 14 days — nothing charged today.",
+  "20 crédits offerts, utilisables dès maintenant": "20 free credits, usable right away",
+  "0 € débité aujourd'hui — votre carte sert uniquement à activer l'essai":
+    "€0 charged today — your card only activates the trial",
+  "Au bout de 14 jours, l'abonnement Pro démarre : 50 €/mois, 120 crédits":
+    "After 14 days the Pro plan starts: €50/month, 120 credits",
+  "Email de rappel avant le premier débit · annulation en 1 clic, à tout moment":
+    "Reminder email before the first charge · cancel in one click, any time",
+  "Ajouter ma carte et commencer": "Add my card and start",
+  "Redirection vers Stripe…": "Redirecting to Stripe…",
+  "Paiement sécurisé par Stripe — Axial ne voit jamais votre carte.":
+    "Payments secured by Stripe — Axial never sees your card.",
+  "Paiement momentanément indisponible. Réessayez dans un instant.":
+    "Payments are momentarily unavailable. Please try again shortly.",
+  "Prêt. Voici votre première analyse.": "All set. Here is your first analysis.",
+  "Lancez votre première analyse maintenant.": "Run your first analysis now.",
+  "QUESTION SUGGÉRÉE": "SUGGESTED QUESTION",
   // Catalogue d'abonnements : ces libellés viennent du backend en français.
   "Tout Pro": "Everything in Pro",
   "jusqu'à 10 agents personnalisés": "up to 10 custom agents",
@@ -1625,17 +1695,17 @@ function OnbStep1({ value, onChange, onNext }) {
       </div>
 
       <div className="onb-preview-card">
-        <div className="label" style={{ marginBottom: 10 }}>CE QU'AXIAL RETIENDRA</div>
+        <div className="label" style={{ marginBottom: 10 }}>{libelle("CE QU'AXIAL RETIENDRA")}</div>
         <div className="onb-preview-row">
-          <span className="onb-preview-tag"><span className="dim">entreprise:</span> {v.companyName || '—'}</span>
-          <span className="onb-preview-tag"><span className="dim">positionnement:</span> {(v.positioning || '—').slice(0, 60)}</span>
-          <span className="onb-preview-tag"><span className="dim">sector:</span> {v.sector || '—'}</span>
-          <span className="onb-preview-tag"><span className="dim">stage:</span> {v.stage || '—'}</span>
-          <span className="onb-preview-tag"><span className="dim">challenge:</span> {v.challenge || '—'}</span>
-          <span className="onb-preview-tag"><span className="dim">geography:</span> {v.geo || '—'}</span>
+          <span className="onb-preview-tag"><span className="dim">{libelle("entreprise")}:</span> {v.companyName || '—'}</span>
+          <span className="onb-preview-tag"><span className="dim">{libelle("positionnement")}:</span> {(v.positioning || '—').slice(0, 60)}</span>
+          <span className="onb-preview-tag"><span className="dim">sector:</span> {libelle(v.sector || '—')}</span>
+          <span className="onb-preview-tag"><span className="dim">stage:</span> {libelle(v.stage || '—')}</span>
+          <span className="onb-preview-tag"><span className="dim">challenge:</span> {libelle(v.challenge || '—')}</span>
+          <span className="onb-preview-tag"><span className="dim">geography:</span> {libelle(v.geo || '—')}</span>
         </div>
         <p className="caption" style={{ marginTop: 14, marginBottom: 0 }}>
-          Vous pourrez modifier, supprimer ou ajouter des faits depuis votre mémoire.
+          {libelle("Vous pourrez modifier, supprimer ou ajouter des faits depuis votre mémoire.")}
         </p>
       </div>
     </OnbShell>
@@ -1655,7 +1725,7 @@ function OnbDocUpload() {
     try {
       const d = await axUploadDocument(f);
       setDocs((ds) => [...ds, d.filename]);
-    } catch (ex) { setErr((ex && ex.message) || 'Échec de l\'import.'); }
+    } catch (ex) { setErr((ex && ex.message) || libelle('Échec de l\'import.')); }
     setBusy(false);
   };
   return (
@@ -1709,8 +1779,10 @@ function ChipsRow({ options, value, onChange }) {
 function OnbStep2({ ctx, onNext, onBack }) {
   return (
     <OnbShell step={2}
-      title={`Voici à quoi ressemblera une analyse pour ${ctx.companyName || ctx.sector || 'votre startup'}.`}
-      sub="Deux questions instruites en moins de trente secondes. Vous pourrez les rejouer après l'onboarding."
+      title={window.AXIAL_LANG === 'en'
+        ? `Here is what an analysis for ${ctx.companyName || ctx.sector || 'your startup'} will look like.`
+        : `Voici à quoi ressemblera une analyse pour ${ctx.companyName || ctx.sector || 'votre startup'}.`}
+      sub={libelle("Deux questions instruites en moins de trente secondes. Vous pourrez les rejouer après l'onboarding.")}
       onNext={onNext} onBack={onBack} canNext>
       <div className="value-cards">
         <DemoCard
@@ -1718,21 +1790,21 @@ function OnbStep2({ ctx, onNext, onBack }) {
           bullets={demo1(ctx).bullets}
           srcs={3} time="~12 s" />
         <DemoCard
-          q="Quels risques réglementaires si j'intègre des modèles GenAI ?"
+          q={libelle("Quels risques réglementaires si j'intègre des modèles GenAI ?")}
           bullets={[
-            "EU AI Act — obligations transparence août 2025 → août 2026",
-            "Doctrine CNIL durcie sur l'entraînement avec données personnelles",
-            "Garanties contractuelles enterprise sur hallucinations en 2026",
+            libelle("EU AI Act — obligations transparence août 2025 → août 2026"),
+            libelle("Doctrine CNIL durcie sur l'entraînement avec données personnelles"),
+            libelle("Garanties contractuelles enterprise sur hallucinations en 2026"),
           ]}
           srcs={3} time="~14 s" />
       </div>
 
       <div className="proof-strip">
-        <span><Icon name="database" size={12} /> Sources publiques + votre contexte privé</span>
+        <span><Icon name="database" size={12} /> {libelle("Sources publiques + votre contexte privé")}</span>
         <span style={{ opacity: 0.4 }}>·</span>
-        <span><Icon name="zap" size={12} /> Réponses traçables, exportables</span>
+        <span><Icon name="zap" size={12} /> {libelle("Réponses traçables, exportables")}</span>
         <span style={{ opacity: 0.4 }}>·</span>
-        <span><Icon name="cpu" size={12} /> Mémoire qui apprend</span>
+        <span><Icon name="cpu" size={12} /> {libelle("Mémoire qui apprend")}</span>
       </div>
     </OnbShell>
   );
@@ -1741,11 +1813,20 @@ function OnbStep2({ ctx, onNext, onBack }) {
 /* Carte 1 de la démo : personnalisée avec le NOM de l'entreprise + le DÉFI choisi,
    pour montrer dès l'onboarding qu'Axial parle de VOTRE startup (pas d'un secteur). */
 function demo1(ctx) {
-  const who = ctx.companyName || `votre ${ctx.sector || 'startup'}`;
+  const en = window.AXIAL_LANG === 'en';
+  const who = ctx.companyName || (en ? `your ${ctx.sector || 'startup'}`
+                                     : `votre ${ctx.sector || 'startup'}`);
   const stage = ctx.stage || 'Seed';
   const c = ctx.challenge || '';
   if (c.includes('levée')) {
-    return {
+    return en ? {
+      q: `How should ${who} prepare its next round at ${stage}?`,
+      bullets: [
+        'Metrics funds expect at this stage — 2026 benchmarks',
+        'Timing window and funds active in your segment',
+        'Narrative: lead with traction, not with the product',
+      ],
+    } : {
       q: `Comment ${who} devrait-elle préparer sa prochaine levée en ${stage} ?`,
       bullets: [
         'Métriques attendues par les fonds à ce stade — benchmarks 2026',
@@ -1755,8 +1836,16 @@ function demo1(ctx) {
     };
   }
   if (c.includes('marché')) {
-    return {
-      q: `Quels concurrents directs ${who} doit-elle surveiller en ${ctx.geo || 'France'} ?`,
+    const ou = ctx.geo || (en ? 'France' : 'France');
+    return en ? {
+      q: `Which direct competitors should ${who} watch in ${ou}?`,
+      bullets: [
+        'Map of established players vs recent entrants',
+        'Rounds and launches in the segment over the last 12 months',
+        'Differentiation angles still unoccupied',
+      ],
+    } : {
+      q: `Quels concurrents directs ${who} doit-elle surveiller en ${ou} ?`,
       bullets: [
         'Cartographie des acteurs établis vs entrants récents',
         'Levées et lancements des 12 derniers mois sur le segment',
@@ -1765,7 +1854,14 @@ function demo1(ctx) {
     };
   }
   if (c.includes('régle')) {
-    return {
+    return en ? {
+      q: `Which regulatory risks should ${who} anticipate in 2026?`,
+      bullets: [
+        'Frameworks applicable to your activity — 2026 deadlines',
+        'Obligations already in force vs still upcoming',
+        'Cost of compliance vs risk of penalty',
+      ],
+    } : {
       q: `Quels risques réglementaires ${who} doit-elle anticiper en 2026 ?`,
       bullets: [
         'Cadres applicables à votre activité — échéances 2026',
@@ -1774,7 +1870,14 @@ function demo1(ctx) {
       ],
     };
   }
-  return {
+  return en ? {
+    q: `Which go-to-market levers matter most for ${who} at ${stage}?`,
+    bullets: [
+      'Technical inbound on vertical niches — 9-month median payback',
+      'Founder-led LinkedIn outbound — 3.4× reply rate in DACH',
+      'Channel partnerships — 1.8× higher ACV, longer cycle',
+    ],
+  } : {
     q: `Quels sont les leviers GTM les plus pertinents pour ${who} en ${stage} ?`,
     bullets: [
       'Inbound technique sur niches verticales — payback médian 9 mois',
@@ -1807,7 +1910,7 @@ function DemoCard({ q, bullets, srcs, time }) {
         paddingTop: 12, borderTop: '1px solid var(--border)',
       }}>
         <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-          <Icon name="database" size={11} /> {srcs} SOURCES CITÉES
+          <Icon name="database" size={11} /> {srcs} {libelle("SOURCES CITÉES")}
         </span>
         <span>{time}</span>
       </div>
@@ -1819,24 +1922,38 @@ function DemoCard({ q, bullets, srcs, time }) {
 function OnbStep3({ ctx, onLaunch, onBack }) {
   const seedQ = useOnbMemo(() => {
     // Question construite avec le NOM + le DÉFI + le contexte — jamais générique.
-    const who = ctx.companyName || `ma startup ${ctx.sector || ''}`.trim();
+    const en = window.AXIAL_LANG === 'en';
+    const who = ctx.companyName || (en ? `my ${ctx.sector || ''} startup`.trim()
+                                       : `ma startup ${ctx.sector || ''}`.trim());
     const pos = ctx.positioning ? ` (${ctx.positioning})` : '';
     const c = ctx.challenge || '';
-    if (c.includes('marché')) return `Quels sont les concurrents directs de ${who}${pos} en ${ctx.geo || 'France'}, et comment se différencier ?`;
-    if (c.includes('GTM')) return `Quel levier GTM ${who}${pos} devrait-elle prioriser en ${ctx.stage || 'Seed'} ?`;
-    if (c.includes('levée')) return `Comment ${who}${pos} doit-elle préparer sa prochaine levée en ${ctx.stage || 'Seed'} : montant, timing, fonds à cibler ?`;
-    if (c.includes('régle')) return `Quels risques réglementaires ${who}${pos} doit-elle anticiper en 2026 ?`;
-    return `Quel est le risque #1 que ${who}${pos} doit instruire ce trimestre ?`;
+    const ou = ctx.geo || 'France';
+    const st = ctx.stage || 'Seed';
+    if (c.includes('marché')) return en
+      ? `Who are ${who}${pos}'s direct competitors in ${ou}, and how can we stand out?`
+      : `Quels sont les concurrents directs de ${who}${pos} en ${ou}, et comment se différencier ?`;
+    if (c.includes('GTM')) return en
+      ? `Which go-to-market lever should ${who}${pos} prioritise at ${st}?`
+      : `Quel levier GTM ${who}${pos} devrait-elle prioriser en ${st} ?`;
+    if (c.includes('levée')) return en
+      ? `How should ${who}${pos} prepare its next round at ${st}: amount, timing, funds to target?`
+      : `Comment ${who}${pos} doit-elle préparer sa prochaine levée en ${st} : montant, timing, fonds à cibler ?`;
+    if (c.includes('régle')) return en
+      ? `Which regulatory risks should ${who}${pos} anticipate in 2026?`
+      : `Quels risques réglementaires ${who}${pos} doit-elle anticiper en 2026 ?`;
+    return en
+      ? `What is the #1 risk ${who}${pos} should investigate this quarter?`
+      : `Quel est le risque #1 que ${who}${pos} doit instruire ce trimestre ?`;
   }, [ctx]);
 
   return (
     <OnbShell step={4}
-      title="Prêt. Voici votre première analyse."
-      sub="Lancez votre première analyse maintenant.">
+      title={libelle("Prêt. Voici votre première analyse.")}
+      sub={libelle("Lancez votre première analyse maintenant.")}>
       <article className="first-action-card">
         <div className="first-action-head">
           <span className="chip" style={{ background: 'rgba(121,118,247,0.10)' }}>
-            <Icon name="sparkle" size={12} /> QUESTION SUGGÉRÉE
+            <Icon name="sparkle" size={12} /> {libelle("QUESTION SUGGÉRÉE")}
           </span>
         </div>
         <p className="first-action-q">{seedQ}</p>
@@ -1903,12 +2020,12 @@ function OnbShell({ step, title, sub, children, onNext, onBack, canNext = true }
         <div className="onb-foot">
           {onBack && (
             <button className="btn btn-ghost" onClick={onBack}>
-              <Icon name="arrow-left" size={14} /> Retour
+              <Icon name="arrow-left" size={14} /> {libelle("Retour")}
             </button>
           )}
           {onNext && (
             <button className="btn btn-primary btn-lg" onClick={onNext} disabled={!canNext}>
-              Continuer <Icon name="arrow-right" size={14} />
+              {libelle("Continuer")} <Icon name="arrow-right" size={14} />
             </button>
           )}
         </div>
@@ -1931,22 +2048,22 @@ function OnbStep4({ onBack }) {
       if (r && r.checkout_url) { window.location.href = r.checkout_url; return; }
       throw new Error('no url');
     } catch (e) {
-      setErr("Paiement momentanément indisponible. Réessayez dans un instant.");
+      setErr(libelle("Paiement momentanément indisponible. Réessayez dans un instant."));
       setBusy(false);
     }
   };
 
   return (
     <OnbShell step={3} onBack={onBack}
-      title="Activez votre essai."
-      sub="20 crédits offerts pendant 14 jours — aucun débit aujourd'hui.">
+      title={libelle("Activez votre essai.")}
+      sub={libelle("20 crédits offerts pendant 14 jours — aucun débit aujourd'hui.")}>
       <article className="first-action-card">
         <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           {[
-            ['check', "20 crédits offerts, utilisables dès maintenant"],
-            ['check', "0 € débité aujourd'hui — votre carte sert uniquement à activer l'essai"],
-            ['check', "Au bout de 14 jours, l'abonnement Pro démarre : 50 €/mois, 120 crédits"],
-            ['check', "Email de rappel avant le premier débit · annulation en 1 clic, à tout moment"],
+            ['check', libelle("20 crédits offerts, utilisables dès maintenant")],
+            ['check', libelle("0 € débité aujourd'hui — votre carte sert uniquement à activer l'essai")],
+            ['check', libelle("Au bout de 14 jours, l'abonnement Pro démarre : 50 €/mois, 120 crédits")],
+            ['check', libelle("Email de rappel avant le premier débit · annulation en 1 clic, à tout moment")],
           ].map(([ic, txt], i) => (
             <li key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 14, color: 'var(--fg-2)', lineHeight: 1.5 }}>
               <span style={{ color: 'var(--success)', marginTop: 2 }}><Icon name={ic} size={14} /></span>
@@ -1956,10 +2073,10 @@ function OnbStep4({ onBack }) {
         </ul>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <button className="btn btn-primary btn-lg" onClick={start} disabled={busy}>
-            {busy ? 'Redirection vers Stripe…' : 'Ajouter ma carte et commencer'} <Icon name="arrow-right" size={14} />
+            {busy ? libelle('Redirection vers Stripe…') : libelle('Ajouter ma carte et commencer')} <Icon name="arrow-right" size={14} />
           </button>
           <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-            <Icon name="key" size={12} /> Paiement sécurisé par Stripe — Axial ne voit jamais votre carte.
+            <Icon name="key" size={12} /> {libelle("Paiement sécurisé par Stripe — Axial ne voit jamais votre carte.")}
           </span>
         </div>
         {err && <p style={{ color: 'var(--error, #e5484d)', fontSize: 13, marginTop: 14, marginBottom: 0 }}>{err}</p>}
@@ -2361,7 +2478,7 @@ function Composer({ value, onChange, onSend }) {
       window.AXIAL_PENDING_DOCS = [...(window.AXIAL_PENDING_DOCS || []), { id: d.id, filename: d.filename }];
       window.dispatchEvent(new Event('axial-pending-docs'));
     } catch (ex) {
-      setUploadMsg({ ok: false, text: (ex && ex.message) || 'Échec de l’import.' });
+      setUploadMsg({ ok: false, text: (ex && ex.message) || libelle('Échec de l’import.') });
     }
     setUploading(false);
   };
@@ -5530,7 +5647,15 @@ function App() {
   const [axUser, setAxUser] = useState(null);
   // Expose l'enregistrement de langue au sélecteur, qui vit hors de React.
   React.useEffect(() => {
-    window.__axSetLanguage = (l) => axSetLanguage(l).catch(() => {});
+    // Le sélecteur FR/EN existe aussi sur la page d'accueil, où personne n'est
+    // connecté : appeler l'API sans jeton produisait un 403 à chaque bascule.
+    // La langue d'un visiteur anonyme n'a rien à enregistrer — localStorage suffit.
+    window.__axSetLanguage = (l) => {
+      let connecte = false;
+      try { connecte = !!localStorage.getItem('axial_token'); } catch (_) {}
+      if (!connecte) return;
+      axSetLanguage(l).catch(() => {});
+    };
     return () => { delete window.__axSetLanguage; };
   }, []);
   const [resetToken, setResetToken] = useState('');
