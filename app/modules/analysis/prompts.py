@@ -161,6 +161,34 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
             "d'alerte à surveiller + première action de mitigation."
         ),
     },
+    # L'écran Rapports propose « Veille réglementaire » depuis l'origine, mais
+    # ce choix retombait sur analyse_risques : l'utilisateur demandait un
+    # calendrier de conformité et recevait une hiérarchie de risques. Les deux
+    # livrables n'ont ni le même destinataire ni le même usage.
+    "analyse_reglementaire": {
+        "target_words": "3000-4000",
+        "min_sources": 30,
+        "objective": ("Cartographie des cadres réglementaires applicables, de "
+                      "leurs échéances et des obligations concrètes qui en découlent"),
+        "key_angles": [
+            "Textes applicables par juridiction : intitulé exact, autorité, statut "
+            "(en vigueur, adopté, en discussion)",
+            "Calendrier d'entrée en vigueur et périodes transitoires, échéance par échéance",
+            "Obligations concrètes pour l'entreprise : ce qu'il faut produire, "
+            "documenter, notifier, et à qui",
+            "Sanctions encourues et pratique de contrôle observée de l'autorité",
+            "Angles morts : ce qui n'est pas encore tranché et sur quoi arbitrer",
+        ],
+        "special_instructions": (
+            "Nommer chaque texte par son intitulé officiel et son article quand il "
+            "est déterminant — « le RGPD » sans référence d'article n'aide personne. "
+            "Ordonner par échéance croissante : la première obligation qui tombe "
+            "passe en premier. Distinguer systématiquement ce qui est en vigueur de "
+            "ce qui est seulement adopté ou proposé, et dater chaque statut. "
+            "Terminer par ce qui reste incertain plutôt que de trancher à la place "
+            "du juriste : ce rapport prépare une décision, il ne remplace pas un avis."
+        ),
+    },
     "cartographie_investisseurs": {
         "target_words": "2500-3500",
         "min_sources": 10,
@@ -191,8 +219,12 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
         ),
     },
     "etude_marche": {
-        "target_words": "4500-6000",
-        "min_sources": 35,
+        # Porté au format long : à 40 crédits, l'étude de marché ne pouvait pas
+        # rester plus courte que l'étude personnalisée facturée 25. Les sources
+        # suivent le volume — 10 000 mots adossés à 35 sources se paient en
+        # délayage, pas en densité.
+        "target_words": "8000-10000",
+        "min_sources": 40,
         "objective": ("Dimensionnement et dynamique du marché : taille, segments, "
                       "demande, accès"),
         "key_angles": [
@@ -214,6 +246,7 @@ ANALYSIS_LABELS: dict[str, str] = {
     "analyse_concurrentielle": "Analyse concurrentielle",
     "veille_technologique": "Veille technologique",
     "analyse_risques": "Analyse des risques",
+    "analyse_reglementaire": "Veille réglementaire",
     "etude_marche": "Étude de marché",
     "cartographie_investisseurs": "Cartographie des investisseurs",
 }

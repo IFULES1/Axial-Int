@@ -12,6 +12,7 @@ CREDIT_COSTS: dict[str, int] = {
     "analyse_concurrentielle": 25,
     "veille_technologique": 25,
     "analyse_risques": 25,
+    "analyse_reglementaire": 25,
     "synthese_executive": 25,
     # Données propriétaires (base investisseurs Axial) + stratégie d'approche.
     "cartographie_investisseurs": 30,

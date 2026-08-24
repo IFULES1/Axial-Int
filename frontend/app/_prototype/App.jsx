@@ -31,7 +31,7 @@ window.AXIAL_DATA = { SUGGESTED_PROMPTS };
 const REPORT_TYPES = [
   { id: 'market', icon: 'trending', at: 'etude_marche', cost: 40 },
   { id: 'competitive', icon: 'users', at: 'analyse_concurrentielle', cost: 25 },
-  { id: 'regulatory', icon: 'shield', at: 'analyse_risques', cost: 25 },
+  { id: 'regulatory', icon: 'shield', at: 'analyse_reglementaire', cost: 25 },
   { id: 'risk', icon: 'alert', at: 'analyse_risques', cost: 25 },
   { id: 'investors', icon: 'briefcase', at: 'cartographie_investisseurs', cost: 30 },
   { id: 'custom', icon: 'sparkle', at: 'synthese_executive', cost: 25 },
