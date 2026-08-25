@@ -19,6 +19,7 @@ from app.modules.analysis.prompts import (
     SYSTEM_PROMPT,
     get_prompt_template,
     is_valid_type,
+    angles_de_recherche,
     sources_for,
 )
 from app.errors import AppError
@@ -83,7 +84,13 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
     from app.shared import search as web_search
 
     try:
-        web_results = web_search.search(query, top_k=top_k)
+        # Recherche multi-angles : la question de l'utilisateur, plus un angle
+        # par axe de la directive. Une requête unique ne ramenait qu'une facette
+        # du sujet, et ce que la recherche ne trouvait pas finissait comblé par
+        # extrapolation dans le rapport.
+        angles = angles_de_recherche(analysis_type, query)
+        web_results = web_search.search_multi(angles, top_k=top_k,
+                                              requete_de_rang=query)
     except Exception as e:
         logger.warning("Web search failed: %s", e)
         web_results = []

@@ -11,6 +11,8 @@ clés, instructions spéciales). Adaptations à la nouvelle plateforme :
 """
 from __future__ import annotations
 
+import re
+
 # ============================================================
 # MASTER PROMPT — blocs modulaires (V4)
 # ============================================================
@@ -64,7 +66,20 @@ RÈGLES ANTI-HALLUCINATION (NON NÉGOCIABLES)
 4. Fait connu sans source exacte → « selon les estimations du secteur », sans
    attribution à une organisation précise.
 5. Sujet pauvre en données → analyse par analogie ou extrapolation, signalée
-   [Extrapolation] avec la méthode ; jamais un simple « données non disponibles »."""
+   [Extrapolation] avec la méthode ; jamais un simple « données non disponibles ».
+6. Une ABSENCE de source est un TROU DE RECHERCHE, jamais un fait négatif sur le
+   marché. Ne convertis JAMAIS un « non confirmé dans les sources disponibles »
+   en décote, en risque ou en filtre à la baisse : ce que tu n'as pas trouvé ne
+   dit rien de ce qui existe. Déclare le trou explicitement — ce qu'il faudrait
+   vérifier, auprès de qui — et donne l'estimation SANS ce facteur. Si tu juges
+   qu'un facteur non vérifié pourrait peser, présente les deux chiffres : avec
+   et sans, en nommant l'hypothèse qui les sépare.
+7. Toute estimation en VOLUME (unités, clients, véhicules, postes) doit nommer
+   son dénominateur : le parc installé, le nombre d'acteurs ou la base de
+   remplacement dont elle est dérivée. Si ce dénominateur est introuvable dans
+   les sources, dis-le en tête de la section plutôt que de le laisser implicite
+   dans une extrapolation — un chiffre dérivé d'un CAGR de marché de services
+   n'est pas une estimation de volume de matériel."""
 
 CITATION_FORMAT = """\
 CITATIONS
@@ -295,6 +310,29 @@ def get_prompt_template(analysis_type: str) -> str:
         "Sources définis dans tes instructions système. Ancre l'analyse dans le "
         "contexte de l'entreprise quand il est fourni."
     )
+
+
+def angles_de_recherche(analysis_type: str, query: str) -> list[str]:
+    """Requêtes de recherche dérivées des axes de la directive.
+
+    La question de l'utilisateur ne couvre qu'une facette. Les `key_angles` de
+    chaque type de rapport décrivent ce que le livrable DOIT établir : les
+    transformer en requêtes fait chercher le parc installé, le cadre d'accès au
+    marché ou le calendrier réglementaire, au lieu de laisser le modèle combler
+    ces trous par extrapolation — ou pire, les traiter comme des contraintes.
+    """
+    d = ANALYSIS_DIRECTIVES.get(_canonical(analysis_type))
+    q = (query or "").strip()
+    if not d or not q:
+        return [q] if q else []
+    angles = [q]
+    for axe in d.get("key_angles", []):
+        # On garde la tête de l'axe : la partie avant le premier séparatif porte
+        # le concept ; ce qui suit détaille et bruiterait la requête.
+        tete = re.split(r"\s*[:—,]\s*", axe.strip(), maxsplit=1)[0]
+        if 8 <= len(tete) <= 90:
+            angles.append(f"{q} — {tete}")
+    return angles[:6]
 
 
 def sources_for(analysis_type: str) -> int:

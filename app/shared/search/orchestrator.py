@@ -67,6 +67,53 @@ def search(query: str, top_k: int | None = None) -> list[SearchResult]:
     return rerank.rerank(query, deduped, top_k)
 
 
+def search_multi(queries: list[str], top_k: int | None = None,
+                 requete_de_rang: str | None = None) -> list[SearchResult]:
+    """Plusieurs angles de recherche, un seul pool classé.
+
+    Une requête unique ne ramène qu'une facette du sujet. Une étude de marché
+    livrée le 24/08 sous-estimait un marché parce que la seule requête portait
+    sur le dimensionnement : rien n'avait cherché le parc installé ni la voie
+    d'homologation, et le modèle a traité ces absences comme des contraintes.
+
+    Les angles élargissent la collecte ; le reranker reste seul juge de ce qui
+    entre dans le contexte final, classé contre la question d'origine.
+    """
+    settings = get_settings()
+    top_k = top_k or settings.search_topk
+    angles = [q.strip() for q in queries if q and q.strip()]
+    if not angles:
+        return []
+    if len(angles) == 1:
+        return search(angles[0], top_k)
+
+    providers = [p for name in settings.search_provider_list
+                 if (p := get_provider(name)) and p.available()]
+    if not providers:
+        logger.info("No search provider configured/available.")
+        return []
+
+    # Chaque angle interroge chaque fournisseur. On demande moins par angle que
+    # le top_k final : le but est d'élargir la couverture, pas de noyer le
+    # reranker sous des variantes du même résultat.
+    par_angle = max(5, top_k // 2)
+    taches = [(p, q) for p in providers for q in angles]
+    merged: list[SearchResult] = []
+    with ThreadPoolExecutor(max_workers=min(len(taches), 12)) as pool:
+        futures = {pool.submit(p.search, q, par_angle): (p, q) for p, q in taches}
+        for fut in as_completed(futures):
+            try:
+                merged.extend(fut.result())
+            except Exception as e:
+                p, q = futures[fut]
+                logger.warning("Provider %s a échoué sur « %s » : %s", p.name, q[:60], e)
+
+    deduped = _dedupe(merged)
+    logger.info("Recherche multi-angles : %d angles, %d bruts → %d dédupliqués",
+                len(angles), len(merged), len(deduped))
+    return rerank.rerank(requete_de_rang or angles[0], deduped, top_k)
+
+
 def format_sources(results: list[SearchResult]) -> str:
     """Numbered, cited context block for prompt injection."""
     if not results:

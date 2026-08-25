@@ -98,3 +98,25 @@ def test_gemini_signale_la_troncature():
     """La normalisation de finishReason permet un seul cas côté appelant."""
     assert LLMResult(text="x", model="m", provider="gemini",
                      stop_reason="max_tokens").stop_reason == "max_tokens"
+
+
+def test_angles_couvrent_le_reglementaire():
+    """Une étude de marché doit interroger l'accès au marché, pas seulement sa taille.
+
+    Le rapport du 24/08 a décoté un marché de 35 à 50 % parce qu'aucune source
+    ne confirmait la voie d'homologation — alors que rien ne l'avait cherchée.
+    """
+    from app.modules.analysis.prompts import angles_de_recherche
+
+    angles = angles_de_recherche("etude_marche", "taille du marché des cargos électriques")
+    assert len(angles) > 1, "une seule requête ne couvre qu'une facette"
+    assert angles[0] == "taille du marché des cargos électriques"
+    assert any("églementaire" in a for a in angles), angles
+
+
+def test_angles_sans_type_connu():
+    """Type inconnu ou question vide : on retombe sur le comportement d'origine."""
+    from app.modules.analysis.prompts import angles_de_recherche
+
+    assert angles_de_recherche("inexistant", "ma question") == ["ma question"]
+    assert angles_de_recherche("etude_marche", "") == []
