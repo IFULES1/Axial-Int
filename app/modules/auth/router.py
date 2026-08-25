@@ -45,7 +45,6 @@ def _restore_legacy(db: Session, token: TokenResponse) -> None:
 
     legacy.restore_for(db, token.user.id, token.user.email)
     legacy.grant_return_bonus(db, token.user.id, token.user.email)
-    legacy.grant_return_bonus(db, token.user.id, token.user.email)
 
 
 class ForgotPasswordRequest(BaseModel):
