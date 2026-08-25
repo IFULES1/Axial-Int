@@ -120,3 +120,15 @@ def test_angles_sans_type_connu():
 
     assert angles_de_recherche("inexistant", "ma question") == ["ma question"]
     assert angles_de_recherche("etude_marche", "") == []
+
+
+def test_angles_suivent_la_langue_de_la_question():
+    """Un suffixe français sur une question anglaise dégrade les moteurs lexicaux."""
+    from app.modules.analysis.prompts import angles_de_recherche
+
+    en = angles_de_recherche("etude_marche", "What is the market size for electric cargo bikes?")
+    assert any("regulatory landscape" in a for a in en), en
+    assert not any("réglementaire" in a for a in en), en
+
+    fr = angles_de_recherche("etude_marche", "Quelle est la taille du marché des vélos cargo ?")
+    assert any("réglementaire" in a.lower() for a in fr), fr

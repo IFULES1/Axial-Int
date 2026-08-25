@@ -312,6 +312,49 @@ def get_prompt_template(analysis_type: str) -> str:
     )
 
 
+# Détection de langue volontairement grossière : on ne cherche pas à identifier
+# une langue, seulement à savoir s'il faut basculer les angles en anglais. Un
+# faux positif coûte une requête moins pertinente, jamais une erreur.
+_MOTS_FR = (" le ", " la ", " les ", " des ", " du ", " une ", " un ", " quels ",
+            " quelle ", " quel ", " mon ", " ma ", " mes ", " pour ", " dans ",
+            " sur ", " est-ce ", " comment ", " marché", " concurrent")
+_MOTS_EN = (" the ", " what ", " which ", " how ", " my ", " our ", " for ",
+            " market", " competitor", " should ", " who ", " and ")
+
+
+def _question_en_anglais(q: str) -> bool:
+    s = f" {q.lower()} "
+    return sum(m in s for m in _MOTS_EN) > sum(m in s for m in _MOTS_FR)
+
+
+# Traduction des têtes d'axes. Écrite à la main plutôt qu'appelée à un modèle :
+# le jeu est fermé, il tient sur un écran, et un appel LLM ajouterait une
+# latence et un point de panne à chaque recherche.
+ANGLES_EN: dict[str, str] = {
+    "Taille et croissance (TAM/SAM/SOM quand estimables)": "market size and growth TAM SAM SOM",
+    "Segments": "market segments",
+    "Canaux d'accès au marché et coûts d'acquisition observés": "market access channels and customer acquisition cost",
+    "Dynamique réglementaire et fenêtres d'opportunité": "regulatory landscape and market access requirements",
+    "Structure concurrentielle et parts de marché": "competitive structure and market share",
+    "Positionnement et différenciation des acteurs clés": "positioning and differentiation of key players",
+    "Barrières à l'entrée et pouvoir de négociation": "barriers to entry and bargaining power",
+    "Innovations et ruptures technologiques en cours": "technology innovations and disruptions",
+    "Maturité des technologies et calendrier d'adoption": "technology maturity and adoption timeline",
+    "Acteurs et brevets structurants": "key players and structural patents",
+    "Risques marché, concurrentiels, réglementaires, technologiques, d'exécution":
+        "market competitive regulatory technology and execution risks",
+    "Probabilité et impact estimés": "risk probability and impact",
+    "Mitigations concrètes et coût d'inaction": "risk mitigation and cost of inaction",
+    "Textes applicables par juridiction": "applicable regulations by jurisdiction",
+    "Calendrier d'entrée en vigueur et périodes transitoires":
+        "regulatory timeline entry into force and transition periods",
+    "Obligations concrètes pour l'entreprise": "concrete compliance obligations",
+    "Sanctions encourues et pratique de contrôle observée de l'autorité":
+        "penalties and enforcement practice",
+    "Angles morts": "unresolved regulatory questions",
+}
+
+
 def angles_de_recherche(analysis_type: str, query: str) -> list[str]:
     """Requêtes de recherche dérivées des axes de la directive.
 
@@ -325,13 +368,20 @@ def angles_de_recherche(analysis_type: str, query: str) -> list[str]:
     q = (query or "").strip()
     if not d or not q:
         return [q] if q else []
+    # Les axes sont rédigés en français. Accoler un suffixe français à une
+    # question anglaise dégrade les moteurs lexicaux (Tavily, Linkup), même si
+    # la recherche sémantique d'Exa s'en accommode : on traduit le concept.
+    en = _question_en_anglais(q)
     angles = [q]
     for axe in d.get("key_angles", []):
         # On garde la tête de l'axe : la partie avant le premier séparatif porte
         # le concept ; ce qui suit détaille et bruiterait la requête.
         tete = re.split(r"\s*[:—,]\s*", axe.strip(), maxsplit=1)[0]
-        if 8 <= len(tete) <= 90:
-            angles.append(f"{q} — {tete}")
+        if not (8 <= len(tete) <= 90):
+            continue
+        if en:
+            tete = ANGLES_EN.get(tete, tete)
+        angles.append(f"{q} — {tete}")
     return angles[:6]
 
 

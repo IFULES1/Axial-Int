@@ -1503,6 +1503,9 @@ const LABELS_EN = {
   "Première analyse": "First analysis",
   "SOURCES CITÉES": "SOURCES CITED",
   "Retour": "Back",
+  "Continuer sans carte": "Continue without a card",
+  "Tu gardes tes crédits offerts pour explorer l'app. Tu pourras activer l'essai plus tard, depuis Crédits.":
+    "You keep your free credits to explore the app. You can start the trial later, from Credits.",
   "Continuer": "Continue",
   "CE QU'AXIAL RETIENDRA": "WHAT AXIAL WILL REMEMBER",
   "Vous pourrez modifier, supprimer ou ajouter des faits depuis votre mémoire.":
@@ -2035,7 +2038,7 @@ function OnbShell({ step, title, sub, children, onNext, onBack, canNext = true }
 }
 
 /* ----- Step 4 — Activation (carte via Stripe, essai 14 jours) ----- */
-function OnbStep4({ onBack }) {
+function OnbStep4({ onBack, onSkip }) {
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState('');
 
@@ -2080,6 +2083,20 @@ function OnbStep4({ onBack }) {
           </span>
         </div>
         {err && <p style={{ color: 'var(--error, #e5484d)', fontSize: 13, marginTop: 14, marginBottom: 0 }}>{err}</p>}
+        {/* La carte était obligatoire pour franchir cet écran. Plusieurs
+            utilisateurs s'y sont arrêtés : on demandait un moyen de paiement
+            avant d'avoir rien montré. Elle reste proposée, elle n'est plus
+            un péage. */}
+        <div style={{ marginTop: 20, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
+          <button className="btn btn-ghost" onClick={onSkip}
+            style={{ padding: 0, background: 'none', border: 0, color: 'var(--v-soft)',
+                     cursor: 'pointer', font: 'inherit', fontSize: 14 }}>
+            {libelle("Continuer sans carte")} <Icon name="arrow-right" size={13} />
+          </button>
+          <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
+            {libelle("Tu gardes tes crédits offerts pour explorer l'app. Tu pourras activer l'essai plus tard, depuis Crédits.")}
+          </p>
+        </div>
       </article>
     </OnbShell>
   );
@@ -5949,7 +5966,7 @@ function App() {
     />;
   }
   if (route === 'onb4') {
-    return <OnbStep4 onBack={() => go('onb2')} />;
+    return <OnbStep4 onBack={() => go('onb2')} onSkip={() => go('onb3')} />;
   }
 
   if (route === 'recipient') {
