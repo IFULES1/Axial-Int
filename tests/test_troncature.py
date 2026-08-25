@@ -132,3 +132,18 @@ def test_angles_suivent_la_langue_de_la_question():
 
     fr = angles_de_recherche("etude_marche", "Quelle est la taille du marché des vélos cargo ?")
     assert any("réglementaire" in a.lower() for a in fr), fr
+
+
+def test_luhn_epargne_les_chiffres_de_marche():
+    """Sans clé de contrôle, un rapport de marché perdrait ses chiffres.
+
+    Détecté le 25/08 en mode shadow : la suite d'années « 2024 2025 … 2031 »
+    était comptée comme un numéro de carte.
+    """
+    from app.modules.pii.redaction import redact
+
+    _, faux = redact("Croissance 2024 2025 2026 2027 2028 2029 2030 2031 constante.")
+    assert faux == {}, faux
+
+    _, vrai = redact("Paiement par 4539 1488 0343 6467 accepté.")
+    assert any("4539" in v for v in vrai.values()), vrai

@@ -18,6 +18,37 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
 ]
 
 
+def _luhn(numero: str) -> bool:
+    """Clé de contrôle des numéros de carte bancaire.
+
+    Sans elle, le motif « 13 à 16 chiffres » attrape n'importe quelle suite de
+    nombres. Un rapport de marché en est plein : la suite d'années
+    « 2024 2025 2026 … 2031 » a été détectée comme une carte pendant la
+    génération d'une étude le 25/08. En mode enforce, ces chiffres auraient été
+    remplacés par un marqueur — le rapport aurait perdu ses données.
+
+    Un vrai numéro de carte satisfait Luhn ; une suite de nombres quelconque
+    n'a qu'une chance sur dix d'y parvenir par hasard.
+    """
+    chiffres = [int(c) for c in numero if c.isdigit()]
+    if not 13 <= len(chiffres) <= 19:
+        return False
+    total, pair = 0, False
+    for c in reversed(chiffres):
+        if pair:
+            c *= 2
+            if c > 9:
+                c -= 9
+        total += c
+        pair = not pair
+    return total % 10 == 0
+
+
+# Motifs dont la forme ne suffit pas à conclure : une validation supplémentaire
+# décide si la correspondance est réelle.
+_VALIDATEURS = {"CREDIT_CARD": _luhn}
+
+
 def redact(text: str) -> tuple[str, dict[str, str]]:
     """Return (redacted_text, mapping placeholder→original)."""
     mapping: dict[str, str] = {}
@@ -31,7 +62,13 @@ def redact(text: str) -> tuple[str, dict[str, str]]:
         return placeholder
 
     for kind, pattern in _PATTERNS:
-        text = pattern.sub(lambda m, k=kind: _sub(k, m), text)
+        if kind in _VALIDATEURS:
+            valide = _VALIDATEURS[kind]
+            text = pattern.sub(
+                lambda m, k=kind, v=valide: _sub(k, m) if v(m.group(0)) else m.group(0),
+                text)
+        else:
+            text = pattern.sub(lambda m, k=kind: _sub(k, m), text)
     return text, mapping
 
 
