@@ -18,6 +18,18 @@ def available() -> bool:
     return bool(get_settings().anthropic_api_key)
 
 
+# Nombre maximal de reprises après troncature. Trois suffisent : au-delà, le
+# problème n'est plus un plafond de sortie mais une consigne de volume absurde.
+MAX_REPRISES = 3
+
+SUITE_CONSIGNE = (
+    "Ta réponse a été coupée par la limite de sortie. Reprends EXACTEMENT là où "
+    "tu t'es arrêté, au caractère près — ne répète rien, ne réécris pas le début, "
+    "n'ajoute ni introduction ni rappel. Si la coupure tombe au milieu d'un mot, "
+    "commence par la fin de ce mot. Poursuis jusqu'à la conclusion du document."
+)
+
+
 def generate(*, system: str, prompt: str, model: str | None = None,
              max_tokens: int = 4000, mcp_servers: list | None = None,
              mcp_tools: list | None = None) -> LLMResult:
@@ -45,17 +57,52 @@ def generate(*, system: str, prompt: str, model: str | None = None,
     # Au-delà de ~16k tokens de sortie, une requête bloquante expire côté HTTP :
     # le SDK impose le streaming. On agrège nous-mêmes le message final.
     espace = client.beta.messages if "betas" in kwargs else client.messages
-    if max_tokens > 16000:
-        with espace.stream(**kwargs) as stream:
-            message = stream.get_final_message()
-    else:
-        message = espace.create(**kwargs)
-    text = "".join(b.text for b in message.content if getattr(b, "type", "") == "text")
-    usage = getattr(message, "usage", None)
-    tokens = 0
-    if usage is not None:
-        tokens = (getattr(usage, "input_tokens", 0) or 0) + (getattr(usage, "output_tokens", 0) or 0)
-    return LLMResult(text=text, model=model, provider="claude", tokens=tokens)
+
+    def _appel(msgs: list[dict]):
+        k = dict(kwargs, messages=msgs)
+        if max_tokens > 16000:
+            with espace.stream(**k) as stream:
+                return stream.get_final_message()
+        return espace.create(**k)
+
+    def _texte(msg) -> str:
+        return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+
+    def _tokens(msg) -> int:
+        u = getattr(msg, "usage", None)
+        if u is None:
+            return 0
+        return (getattr(u, "input_tokens", 0) or 0) + (getattr(u, "output_tokens", 0) or 0)
+
+    messages = list(kwargs["messages"])
+    message = _appel(messages)
+    texte, tokens = _texte(message), _tokens(message)
+    raison = getattr(message, "stop_reason", None)
+
+    # Reprise automatique. Un rapport long peut atteindre le plafond de sortie
+    # avant sa conclusion : le modèle s'arrête alors en plein mot. On lui rend
+    # ce qu'il a écrit et on lui demande de poursuivre exactement là où il s'est
+    # arrêté, plutôt que de livrer un document coupé — ce qui est arrivé en
+    # production le 24/08 sur une étude de marché.
+    reprises = 0
+    while raison == "max_tokens" and reprises < MAX_REPRISES and texte.strip():
+        reprises += 1
+        logger.info("Sortie tronquée (%s), reprise %d/%d", model, reprises, MAX_REPRISES)
+        messages = messages + [
+            {"role": "assistant", "content": texte},
+            {"role": "user", "content": SUITE_CONSIGNE},
+        ]
+        suite = _appel(messages)
+        morceau = _texte(suite)
+        if not morceau.strip():
+            break
+        # Recollage sans espace parasite : la coupure tombe souvent en plein mot.
+        texte += morceau
+        tokens += _tokens(suite)
+        raison = getattr(suite, "stop_reason", None)
+
+    return LLMResult(text=texte, model=model, provider="claude", tokens=tokens,
+                     stop_reason=raison)
 
 
 class ClaudeProvider:

@@ -13,7 +13,9 @@ CREDIT_COSTS: dict[str, int] = {
     "veille_technologique": 25,
     "analyse_risques": 25,
     "analyse_reglementaire": 25,
-    "synthese_executive": 25,
+    # Même format que l'étude de marché (8000-10000 mots, 40 sources) :
+    # la facturer moins cher rendait le bouton « Étude de marché » sans objet.
+    "synthese_executive": 40,
     # Données propriétaires (base investisseurs Axial) + stratégie d'approche.
     "cartographie_investisseurs": 30,
     "agent_message": 2,

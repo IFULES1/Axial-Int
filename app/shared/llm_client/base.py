@@ -17,6 +17,10 @@ class LLMResult:
     provider: str
     tokens: int = 0
     citations: list[dict] = field(default_factory=list)
+    # Pourquoi le modèle s'est arrêté. « max_tokens » signifie que le texte est
+    # tronqué, souvent en plein mot — sans cette information, un rapport coupé
+    # est indiscernable d'un rapport terminé, et il est facturé comme tel.
+    stop_reason: str | None = None
 
 
 @runtime_checkable

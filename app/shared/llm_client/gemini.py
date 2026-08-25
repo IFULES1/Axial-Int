@@ -48,11 +48,17 @@ def generate(*, system: str, prompt: str, model: str | None = None,
     data = r.json()
     candidates = data.get("candidates") or []
     text = ""
+    raison = None
     if candidates:
         parts = candidates[0].get("content", {}).get("parts", [])
         text = "".join(p.get("text", "") for p in parts)
+        # Gemini nomme « MAX_TOKENS » ce que Claude appelle « max_tokens ».
+        # On normalise pour que l'appelant n'ait qu'un seul cas à traiter.
+        if candidates[0].get("finishReason") == "MAX_TOKENS":
+            raison = "max_tokens"
     tokens = (data.get("usageMetadata") or {}).get("totalTokenCount", 0) or 0
-    return LLMResult(text=text, model=model, provider="gemini", tokens=tokens)
+    return LLMResult(text=text, model=model, provider="gemini", tokens=tokens,
+                     stop_reason=raison)
 
 
 def stream(*, system: str, prompt: str, model: str | None = None,

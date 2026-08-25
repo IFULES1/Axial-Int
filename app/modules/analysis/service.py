@@ -187,6 +187,24 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
             metadata={"passages": len(passages), "web_sources": len(web_results)},
         )
 
+    # Dernier filet : si le texte reste tronqué après les reprises automatiques,
+    # on ne livre pas un document coupé en plein mot comme s'il était terminé.
+    # Le crédit n'est pas débité — l'utilisateur n'a pas reçu ce qu'il a demandé.
+    if result.stop_reason == "max_tokens":
+        logger.warning("Rapport encore tronqué après reprises — type %s, modèle %s, "
+                       "%d caractères produits", analysis_type, result.model,
+                       len(result.text or ""))
+        return AnalysisResult(
+            analysis_type=analysis_type, title=label_title,
+            content=(result.text or "") + (
+                "\n\n---\n\n⚠️ **Ce rapport est incomplet.** La rédaction a atteint "
+                "la limite de sortie du modèle avant sa conclusion. Aucun crédit "
+                "n'a été débité — relance la génération."),
+            sources=citations, degraded=True, status_note="truncated_generation",
+            metadata={"passages": len(passages), "web_sources": len(web_results),
+                      "stop_reason": result.stop_reason},
+        )
+
     sources = citations
     return AnalysisResult(
         analysis_type=analysis_type,
