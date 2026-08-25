@@ -1508,6 +1508,12 @@ const LABELS_EN = {
   "Première analyse": "First analysis",
   "SOURCES CITÉES": "SOURCES CITED",
   "Retour": "Back",
+  "Tu gardes tes 40 crédits offerts. Cette option reste disponible jusqu'au":
+    "You keep your 40 free credits. This option stays available until",
+  "Tu gardes tes 40 crédits offerts — de quoi lancer une étude complète.":
+    "You keep your 40 free credits — enough for a full study.",
+  "Ta période d'essai est terminée. Ajoute une carte pour continuer à utiliser Axial — ou réponds à un de mes emails si tu as besoin de plus de temps.":
+    "Your trial period is over. Add a card to keep using Axial — or reply to one of my emails if you need more time.",
   "Pilotage": "Metrics",
   "Coûts de production, rentabilité par type de rapport, activité réelle.":
     "Production costs, profitability by report type, real activity.",
@@ -2116,6 +2122,24 @@ function OnbShell({ step, title, sub, children, onNext, onBack, canNext = true }
 function OnbStep4({ onBack, onSkip }) {
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState('');
+  // `null` tant qu'on ne sait pas : on n'affiche ni la sortie ni son absence
+  // avant d'avoir la réponse, plutôt que de faire clignoter le bouton.
+  const [essai, setEssai] = React.useState(null);
+  React.useEffect(() => {
+    axBalance()
+      .then((b) => setEssai({
+        actif: !!b.periode_essai_active,
+        // Sans date connue, on reste permissif : refuser l'accès sur une
+        // information manquante serait le pire des deux défauts.
+        fin: b.essai_expire_le || null,
+      }))
+      .catch(() => setEssai({ actif: true, fin: null }));
+  }, []);
+  const finLisible = (essai && essai.fin)
+    ? new Date(essai.fin).toLocaleDateString(
+        window.AXIAL_LANG === 'en' ? 'en-GB' : 'fr-FR',
+        { day: 'numeric', month: 'long' })
+    : null;
 
   const start = async () => {
     if (busy) return;
@@ -2162,16 +2186,27 @@ function OnbStep4({ onBack, onSkip }) {
             utilisateurs s'y sont arrêtés : on demandait un moyen de paiement
             avant d'avoir rien montré. Elle reste proposée, elle n'est plus
             un péage. */}
-        <div style={{ marginTop: 20, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
-          <button className="btn btn-ghost" onClick={onSkip}
-            style={{ padding: 0, background: 'none', border: 0, color: 'var(--v-soft)',
-                     cursor: 'pointer', font: 'inherit', fontSize: 14 }}>
-            {libelle("Continuer sans carte")} <Icon name="arrow-right" size={13} />
-          </button>
-          <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
-            {libelle("Tu gardes tes 40 crédits offerts — de quoi lancer une étude complète. Tu pourras activer l'essai plus tard, depuis Crédits.")}
-          </p>
-        </div>
+        {essai && essai.actif && (
+          <div style={{ marginTop: 20, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
+            <button className="btn btn-ghost" onClick={onSkip}
+              style={{ padding: 0, background: 'none', border: 0, color: 'var(--v-soft)',
+                       cursor: 'pointer', font: 'inherit', fontSize: 14 }}>
+              {libelle("Continuer sans carte")} <Icon name="arrow-right" size={13} />
+            </button>
+            <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
+              {finLisible
+                ? `${libelle("Tu gardes tes 40 crédits offerts. Cette option reste disponible jusqu'au")} ${finLisible}.`
+                : libelle("Tu gardes tes 40 crédits offerts — de quoi lancer une étude complète.")}
+            </p>
+          </div>
+        )}
+        {essai && !essai.actif && (
+          <div style={{ marginTop: 20, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
+            <p style={{ margin: 0, fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
+              {libelle("Ta période d'essai est terminée. Ajoute une carte pour continuer à utiliser Axial — ou réponds à un de mes emails si tu as besoin de plus de temps.")}
+            </p>
+          </div>
+        )}
       </article>
     </OnbShell>
   );
@@ -5997,12 +6032,15 @@ function App() {
     let cardPending = false;
     try { cardPending = localStorage.getItem('axial_onb_card_pending') === '1'; } catch (e) {}
     if (cardPending) { go('onb4'); return; }
-    // La carte n'est plus obligatoire : un compte au profil complet entre dans
-    // l'app, avec ou sans abonnement. Le renvoyer à l'écran carte à chaque
-    // connexion annulait le passage « Continuer sans carte » — il fonctionnait
-    // une fois, puis reprenait l'utilisateur au retour.
-    axMe().then((u) => {
-      go(u.onboarding_complete ? 'app' : 'onb1');
+    // L'écran carte revient à chaque connexion tant qu'aucun abonnement n'est
+    // actif. Il reste contournable PENDANT la période d'essai et seulement
+    // pendant : passé l'échéance, la carte devient la condition d'accès.
+    axMe().then(async (u) => {
+      if (!u.onboarding_complete) { go('onb1'); return; }
+      try {
+        const s = await axSubscription();
+        go(s && s.active ? 'app' : 'onb4');
+      } catch (e) { go('app'); /* API indisponible : ne pas bloquer l'accès */ }
     }).catch(() => axClearToken());
   }, []);
   const [suggested, setSuggested] = useState(window.AXIAL_DATA.SUGGESTED_PROMPTS);

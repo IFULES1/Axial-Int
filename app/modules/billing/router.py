@@ -21,6 +21,11 @@ class BalanceOut(BaseModel):
     free_credits: int
     purchased_credits: int
     trial_active: bool
+    # `trial_active` exige des crédits restants : quelqu'un qui a tout dépensé
+    # le jour 3 y serait « hors essai ». La PÉRIODE est une autre question, et
+    # c'est elle qui décide si la carte peut encore être remise à plus tard.
+    periode_essai_active: bool = False
+    essai_expire_le: str | None = None
 
 
 class CheckoutIn(BaseModel):
@@ -45,10 +50,13 @@ def plans() -> dict:
 @router.get("/balance", response_model=BalanceOut)
 def balance(user: AuthUser = Depends(get_current_user), db: Session = Depends(get_db)) -> BalanceOut:
     b = service.get_or_create_balance(db, user.id)
+    expire = service._as_aware(b.trial_expires_at)
     return BalanceOut(
         available=service.available_credits(b), trial_credits=b.trial_credits,
         free_credits=b.free_credits, purchased_credits=b.purchased_credits,
         trial_active=service._trial_active(b),
+        periode_essai_active=bool(expire and expire > service._now()),
+        essai_expire_le=expire.isoformat() if expire else None,
     )
 
 
