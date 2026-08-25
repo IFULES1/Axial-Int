@@ -70,6 +70,9 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
                  company_context: str = "", tier: str = "report",
                  profile: dict | None = None,
                  db_pour_notion=None) -> AnalysisResult:
+    import time as _time
+
+    _depart = _time.monotonic()
     if not is_valid_type(analysis_type):
         raise AppError(f"Type d'analyse inconnu : {analysis_type}", 400,
                        code="unknown_analysis_type")
@@ -212,6 +215,17 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
                       "stop_reason": result.stop_reason},
         )
 
+    from app.modules.billing.couts import cout_micro_eur
+
+    mesure = {
+        "tokens_entree": result.input_tokens or None,
+        "tokens_sortie": result.output_tokens or None,
+        "modele": result.model,
+        "cout_micro_eur": cout_micro_eur(result.model, result.input_tokens or 0,
+                                         result.output_tokens or 0) or None,
+        "duree_secondes": int(_time.monotonic() - _depart),
+    }
+
     sources = citations
     return AnalysisResult(
         analysis_type=analysis_type,
@@ -227,6 +241,7 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
             "provider": result.provider,
             "tier": tier,
             "tokens": result.tokens,
+            "cout": mesure,
             "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         },
     )
@@ -267,6 +282,7 @@ def finalize(db, user_id: str, analysis_type: str, result: AnalysisResult,
     report = reports.create_report(
         db, user_id, title=result.title, content=result.content,
         analysis_type=analysis_type, sources=result.sources,
+        cout=(result.metadata or {}).get("cout"),
     )
     analytics.increment_usage(user_id, analyses=1, credits=charged, reports=1)
 

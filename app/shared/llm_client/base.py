@@ -21,6 +21,10 @@ class LLMResult:
     # tronqué, souvent en plein mot — sans cette information, un rapport coupé
     # est indiscernable d'un rapport terminé, et il est facturé comme tel.
     stop_reason: str | None = None
+    # Entrée et sortie séparément : les tarifs diffèrent d'un facteur 5, un
+    # total agrégé ne permet pas de calculer un coût.
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 @runtime_checkable

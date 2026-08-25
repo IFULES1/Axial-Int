@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import JSON, DateTime, String, Text
+from sqlalchemy import Integer, JSON, DateTime, String, Text
 from sqlalchemy import Uuid as SAUuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -24,6 +24,14 @@ class Report(Base):
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     content: Mapped[str] = mapped_column(Text, default="")  # markdown
     sources: Mapped[list | None] = mapped_column(JSONType)
+    # Coût de production. Nullable : les rapports antérieurs au 25/08 n'ont
+    # jamais été mesurés, et un zéro les ferait passer pour gratuits dans les
+    # moyennes.
+    tokens_entree: Mapped[int | None] = mapped_column(Integer)
+    tokens_sortie: Mapped[int | None] = mapped_column(Integer)
+    cout_micro_eur: Mapped[int | None] = mapped_column(Integer)
+    modele: Mapped[str | None] = mapped_column(String(64))
+    duree_secondes: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc)
     )

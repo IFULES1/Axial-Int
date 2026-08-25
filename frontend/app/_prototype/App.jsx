@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axMetrics, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -1508,6 +1508,44 @@ const LABELS_EN = {
   "Première analyse": "First analysis",
   "SOURCES CITÉES": "SOURCES CITED",
   "Retour": "Back",
+  "Pilotage": "Metrics",
+  "Coûts de production, rentabilité par type de rapport, activité réelle.":
+    "Production costs, profitability by report type, real activity.",
+  "COÛTS DE PRODUCTION": "PRODUCTION COSTS",
+  "RENTABILITÉ PAR TYPE": "PROFITABILITY BY TYPE",
+  "REVENUS": "REVENUE",
+  "ACTIVITÉ": "ACTIVITY",
+  "Rapports produits": "Reports produced",
+  "Coût total": "Total cost",
+  "Coût moyen": "Average cost",
+  "Coût le plus élevé": "Highest cost",
+  "Durée moyenne": "Average duration",
+  "non mesurés": "not measured",
+  "La mesure des coûts date du 25/08 : les rapports antérieurs n'ont pas de coût connu et ne sont pas comptés dans les moyennes.":
+    "Cost measurement started on 25/08: earlier reports have no known cost and are excluded from the averages.",
+  "Produits": "Produced",
+  "Crédits": "Credits",
+  "Valeur": "Value",
+  "Marge": "Margin",
+  "Abonnés payants": "Paying subscribers",
+  "Essais en cours": "Trials running",
+  "annulés": "cancelled",
+  "MRR potentiel": "Potential MRR",
+  "si les essais convertissent": "if trials convert",
+  "Impayés": "Failed payments",
+  "Comptes clients": "Client accounts",
+  "hors comptes internes": "excluding internal accounts",
+  "Nouveaux": "New",
+  "Actifs": "Active",
+  "ont produit quelque chose": "have produced something",
+  "Taux d'activation": "Activation rate",
+  "Profils remplis": "Profiles filled",
+  "Délai 1er rapport": "Time to first report",
+  "sans aucun rapport": "with no report at all",
+  "Un crédit vaut": "One credit is worth",
+  "plan Pro : 50 € pour 120 crédits": "Pro plan: €50 for 120 credits",
+  "Les tarifs des modèles sont des ordres de grandeur configurables — vérifie-les avant d'en tirer une décision de prix.":
+    "Model prices are configurable estimates — check them before basing a pricing decision on them.",
   "Lancer cette analyse": "Run this analysis",
   "Lancement…": "Starting…",
   "Je préfère poser ma propre question": "I would rather ask my own question",
@@ -2187,6 +2225,12 @@ function AppShell({ user, conversations, activeId, onPickConv, onNewChat, onLogo
             <ToolBtn id="credits" icon="zap" label={t('nav.credits')} />
             <ToolBtn id="docs" icon="book" label={t('nav.docs')} />
             <ToolBtn id="settings" icon="settings" label={t('nav.settings')} />
+            {/* Coûts et chiffre d'affaires : hors du périmètre d'un client.
+                Le serveur refuse aussi l'endpoint aux non-administrateurs —
+                masquer l'entrée ne suffirait pas. */}
+            {user && user.is_admin && (
+              <ToolBtn id="pilotage" icon="trending" label={libelle('Pilotage')} />
+            )}
           </ul>
         </div>
 
@@ -2619,6 +2663,140 @@ function Composer({ value, onChange, onSend }) {
                   : 'Cet agent spécialisé répondra à toutes vos questions.')}
         </span>
       </div>
+    </div>
+  );
+}
+
+
+/* ============================================================
+   Pilotage — coûts, rentabilité, activité (administration)
+   ============================================================ */
+function PilotageSurface() {
+  const [jours, setJours] = React.useState(30);
+  const [d, setD] = React.useState(null);
+  const [err, setErr] = React.useState('');
+  React.useEffect(() => {
+    setD(null); setErr('');
+    axMetrics(jours).then(setD).catch((e) => setErr((e && e.message) || 'Erreur'));
+  }, [jours]);
+
+  const eur = (v) => (v == null ? '—' : `${Number(v).toFixed(2)} €`);
+  const eur4 = (v) => (v == null ? '—' : `${Number(v).toFixed(4)} €`);
+  const pct = (v) => (v == null ? '—' : `${Number(v).toFixed(1)} %`);
+
+  const Bloc = ({ titre, enfants }) => (
+    <section style={{ marginBottom: 28 }}>
+      <div className="label" style={{ marginBottom: 10 }}>{titre}</div>
+      {enfants}
+    </section>
+  );
+  const Chiffres = ({ items }) => (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))',
+                  gap: 1, background: 'var(--border)', border: '1px solid var(--border)',
+                  borderRadius: 8, overflow: 'hidden' }}>
+      {items.map(([l, v, note], i) => (
+        <div key={i} style={{ background: 'var(--surface-2)', padding: '13px 15px' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 21, color: 'var(--v-bright)', lineHeight: 1.2 }}>{v}</div>
+          <div style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: 4, lineHeight: 1.35 }}>{l}</div>
+          {note && <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 3, opacity: .75 }}>{note}</div>}
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div className="surface">
+      <div className="surface-head">
+        <div>
+          <h1>{libelle('Pilotage')}</h1>
+          <p>{libelle("Coûts de production, rentabilité par type de rapport, activité réelle.")}</p>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {[7, 30, 90].map((n) => (
+            <button key={n} className={'btn btn-sm ' + (jours === n ? 'btn-primary' : 'btn-secondary')}
+              onClick={() => setJours(n)}>{n} j</button>
+          ))}
+        </div>
+      </div>
+
+      {err && <p style={{ color: 'var(--error, #e5484d)', fontSize: 13 }}>{err}</p>}
+      {!d && !err && <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>…</p>}
+
+      {d && (
+        <>
+          <Bloc titre={libelle('COÛTS DE PRODUCTION')} enfants={
+            <>
+              <Chiffres items={[
+                [libelle('Rapports produits'), d.couts.rapports],
+                [libelle('Coût total'), eur(d.couts.cout_eur),
+                  d.couts.non_mesures ? `${d.couts.non_mesures} ${libelle('non mesurés')}` : null],
+                [libelle('Coût moyen'), eur4(d.couts.cout_moyen_eur)],
+                [libelle('Coût le plus élevé'), eur4(d.couts.cout_max_eur)],
+                [libelle('Durée moyenne'), `${d.couts.duree_moyenne} s`],
+              ]} />
+              {d.couts.non_mesures > 0 && (
+                <p style={{ fontSize: 12.5, color: 'var(--fg-3)', margin: '8px 0 0', lineHeight: 1.5 }}>
+                  {libelle("La mesure des coûts date du 25/08 : les rapports antérieurs n'ont pas de coût connu et ne sont pas comptés dans les moyennes.")}
+                </p>
+              )}
+            </>
+          } />
+
+          <Bloc titre={libelle('RENTABILITÉ PAR TYPE')} enfants={
+            <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+              <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13, background: 'var(--surface-2)' }}>
+                <thead>
+                  <tr>{[libelle('Type'), libelle('Produits'), libelle('Coût moyen'),
+                        libelle('Crédits'), libelle('Valeur'), libelle('Marge'), '%'].map((h, i) => (
+                    <th key={i} style={{ textAlign: i ? 'right' : 'left', padding: '9px 12px',
+                                         fontSize: 11, textTransform: 'uppercase', letterSpacing: '.05em',
+                                         color: 'var(--fg-3)', borderBottom: '1px solid var(--border)' }}>{h}</th>
+                  ))}</tr>
+                </thead>
+                <tbody>
+                  {d.par_type.map((r) => (
+                    <tr key={r.type}>
+                      <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)' }}>{libelle(r.type)}</td>
+                      {[r.n, eur4(r.cout_moyen_eur), r.credits, eur(r.revenu_eur), eur(r.marge_eur), pct(r.marge_pct)].map((v, i) => (
+                        <td key={i} style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)',
+                                             fontSize: 12, borderBottom: '1px solid var(--border)' }}>{v}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          } />
+
+          <Bloc titre={libelle('REVENUS')} enfants={
+            <Chiffres items={[
+              [libelle('MRR'), eur(d.revenus.mrr_eur)],
+              [libelle('Abonnés payants'), d.revenus.abonnes],
+              [libelle('Essais en cours'), d.revenus.essais,
+                d.revenus.essais_annules ? `${d.revenus.essais_annules} ${libelle('annulés')}` : null],
+              [libelle('MRR potentiel'), eur(d.revenus.mrr_potentiel_eur), libelle('si les essais convertissent')],
+              [libelle('Impayés'), d.revenus.impayes],
+            ]} />
+          } />
+
+          <Bloc titre={libelle('ACTIVITÉ')} enfants={
+            <Chiffres items={[
+              [libelle('Comptes clients'), d.activite.comptes, libelle('hors comptes internes')],
+              [libelle('Nouveaux'), d.activite.nouveaux],
+              [libelle('Actifs'), d.activite.actifs, libelle('ont produit quelque chose')],
+              [libelle('Taux d\'activation'), pct(d.activite.taux_activation)],
+              [libelle('Profils remplis'), d.activite.profils_remplis],
+              [libelle('Délai 1er rapport'), `${d.premier_rapport.moyenne_heures} h`,
+                `${d.premier_rapport.sans} ${libelle('sans aucun rapport')}`],
+            ]} />
+          } />
+
+          <p style={{ fontSize: 12, color: 'var(--fg-3)', lineHeight: 1.55, marginTop: 4 }}>
+            {libelle("Un crédit vaut")} {d.euro_par_credit} € ({libelle('plan Pro : 50 € pour 120 crédits')}).{' '}
+            {libelle("Les tarifs des modèles sont des ordres de grandeur configurables — vérifie-les avant d'en tirer une décision de prix.")}
+          </p>
+        </>
+      )}
     </div>
   );
 }
@@ -3141,13 +3319,28 @@ window.TopControls = TopControls;
 var { useState: useStateA, useEffect: useEffectA } = React;
 
 const SKILL_META = {
-  concurrentielle: { icon: 'users', label: 'Veille concurrentielle' },
-  reglementaire: { icon: 'shield', label: 'Veille réglementaire' },
-  financement: { icon: 'trending', label: 'Veille financement' },
-  produit_tech: { icon: 'sparkle', label: 'Veille produit & tech' },
-  marche: { icon: 'database', label: 'Veille marché' },
+  concurrentielle: { icon: 'users', label: 'Veille concurrentielle', en: 'Competitive watch' },
+  reglementaire: { icon: 'shield', label: 'Veille réglementaire', en: 'Regulatory watch' },
+  financement: { icon: 'trending', label: 'Veille financement', en: 'Funding watch' },
+  produit_tech: { icon: 'sparkle', label: 'Veille produit & tech', en: 'Product & tech watch' },
+  marche: { icon: 'database', label: 'Veille marché', en: 'Market watch' },
 };
-const skillMeta = (k) => SKILL_META[k] || { icon: 'search', label: k };
+
+// Nom par défaut d'une veille, dérivé du skill choisi. Le nom était figé sur
+// « Veille concurrentielle » à l'ouverture de l'assistant et ne suivait jamais
+// la sélection : toutes les veilles portaient ce libellé, quel que soit le
+// sujet réellement paramétré.
+function nomParDefautVeille(skill, sujet) {
+  const meta = SKILL_META[skill] || {};
+  const base = (window.AXIAL_LANG === 'en' ? meta.en : meta.label) || skill;
+  const s = (sujet || '').trim();
+  return s ? `${base} — ${s.slice(0, 60)}` : base;
+}
+const skillMeta = (k) => {
+  const m = SKILL_META[k];
+  if (!m) return { icon: 'search', label: k };
+  return { ...m, label: (window.AXIAL_LANG === 'en' && m.en) || m.label };
+};
 const watchStatusClass = (s) => (s === 'paused' ? 'paused' : s === 'active' ? 'running' : 'idle');
 const fmtWhen = (iso, lang) => (iso
   ? new Date(iso).toLocaleDateString(lang === 'en' ? 'en-US' : 'fr-FR', { day: '2-digit', month: 'short' })
@@ -3410,7 +3603,14 @@ function AgentWizard({ onClose, onCreate }) {
   const [subject, setSubject] = useStateA('');
   const [output, setOutput] = useStateA('digest');
   const [email, setEmail] = useStateA('');
-  const [name, setName] = useStateA(lang === 'fr' ? 'Veille concurrentielle' : 'Competitive watch');
+  const [name, setName] = useStateA(nomParDefautVeille('concurrentielle', ''));
+  // `nomPersonnalise` distingue « l'utilisateur a écrit son propre nom » de
+  // « le nom vient encore du défaut ». Sans ce drapeau, suivre le skill
+  // écraserait un nom saisi à la main.
+  const [nomPersonnalise, setNomPersonnalise] = useStateA(false);
+  useEffectA(() => {
+    if (!nomPersonnalise) setName(nomParDefautVeille(skill, subject));
+  }, [skill, subject, nomPersonnalise]);
   const [cadence, setCadence] = useStateA('daily');
   const [busy, setBusy] = useStateA(false);
 
@@ -3435,7 +3635,7 @@ function AgentWizard({ onClose, onCreate }) {
           <input
             type="text"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => { setNomPersonnalise(true); setName(e.target.value); }}
             style={{ width: '100%', background: 'transparent', border: 0, color: 'var(--fg)', fontSize: 15, fontWeight: 600, padding: '8px 0', outline: 'none' }}
             placeholder={lang === 'fr' ? 'Nom de l\'agent' : 'Agent name'}
           />
@@ -5797,14 +5997,12 @@ function App() {
     let cardPending = false;
     try { cardPending = localStorage.getItem('axial_onb_card_pending') === '1'; } catch (e) {}
     if (cardPending) { go('onb4'); return; }
-    // Gate serveur : l'app exige un abonnement (essai ou actif). Un compte au
-    // profil complet mais sans abonnement retourne à l'étape carte.
-    axMe().then(async (u) => {
-      if (!u.onboarding_complete) { go('onb1'); return; }
-      try {
-        const s = await axSubscription();
-        go(s && s.active ? 'app' : 'onb4');
-      } catch (e) { go('app'); /* API indisponible : ne pas bloquer l'accès */ }
+    // La carte n'est plus obligatoire : un compte au profil complet entre dans
+    // l'app, avec ou sans abonnement. Le renvoyer à l'écran carte à chaque
+    // connexion annulait le passage « Continuer sans carte » — il fonctionnait
+    // une fois, puis reprenait l'utilisateur au retour.
+    axMe().then((u) => {
+      go(u.onboarding_complete ? 'app' : 'onb1');
     }).catch(() => axClearToken());
   }, []);
   const [suggested, setSuggested] = useState(window.AXIAL_DATA.SUGGESTED_PROMPTS);
@@ -5852,7 +6050,9 @@ function App() {
       axMe().then((u) => {
         const nm = u.full_name || u.email;
         const initials = nm.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join('');
-        setAxUser({ name: nm, email: u.email, initials });
+        // is_admin conditionne l'écran de pilotage : sans lui, l'entrée de
+        // navigation n'apparaît jamais, même pour l'administration.
+        setAxUser({ name: nm, email: u.email, initials, is_admin: !!u.is_admin });
       }).catch(() => {});
     }
   }, [route]);
@@ -6157,6 +6357,7 @@ function App() {
 
         {subRoute === 'memory' && <MemorySurface />}
         {subRoute === 'credits' && <CreditsSurface />}
+        {subRoute === 'pilotage' && <PilotageSurface />}
         {subRoute === 'docs' && <DocsSurface />}
         {subRoute === 'settings' && <SettingsSurface />}
       </AppShell>

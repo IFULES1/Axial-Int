@@ -328,6 +328,7 @@ export async function axRunWatch(id) { return axFetch(`/watches/${id}/run`, { me
 export async function axPauseWatch(id) { return axFetch(`/watches/${id}/pause`, { method: "POST", body: {} }); }
 export async function axResumeWatch(id) { return axFetch(`/watches/${id}/resume`, { method: "POST", body: {} }); }
 export async function axDeleteWatch(id) { return axFetch(`/watches/${id}`, { method: "DELETE" }); }
+export async function axMetrics(jours = 30) { return axFetch(`/metrics/tableau?jours=${jours}`); }
 export async function axPremierRapport() { return axFetch("/analysis/premier-rapport", { method: "POST" }); }
 export async function axListFeeds() { return axFetch("/watches/feeds"); }
 export async function axFeedsCatalogue() { return axFetch("/watches/feeds/catalogue"); }

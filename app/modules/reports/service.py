@@ -13,9 +13,16 @@ from app.modules.reports.pdf import render_pdf
 
 def create_report(db: Session, user_id: str, *, title: str, content: str,
                   analysis_type: str = "synthese_executive",
-                  sources: list | None = None) -> Report:
+                  sources: list | None = None, cout: dict | None = None) -> Report:
+    """`cout` porte la mesure de production : tokens, modèle, prix, durée."""
+    c = cout or {}
     report = Report(id=uuid.uuid4(), user_id=uuid.UUID(user_id), title=title,
-                    content=content, analysis_type=analysis_type, sources=sources)
+                    content=content, analysis_type=analysis_type, sources=sources,
+                    tokens_entree=c.get("tokens_entree"),
+                    tokens_sortie=c.get("tokens_sortie"),
+                    cout_micro_eur=c.get("cout_micro_eur"),
+                    modele=c.get("modele"),
+                    duree_secondes=c.get("duree_secondes"))
     db.add(report)
     db.commit()
     db.refresh(report)

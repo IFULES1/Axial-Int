@@ -68,15 +68,20 @@ def generate(*, system: str, prompt: str, model: str | None = None,
     def _texte(msg) -> str:
         return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
 
-    def _tokens(msg) -> int:
+    def _usage(msg) -> tuple[int, int]:
         u = getattr(msg, "usage", None)
         if u is None:
-            return 0
-        return (getattr(u, "input_tokens", 0) or 0) + (getattr(u, "output_tokens", 0) or 0)
+            return 0, 0
+        return (getattr(u, "input_tokens", 0) or 0), (getattr(u, "output_tokens", 0) or 0)
+
+    def _tokens(msg) -> int:
+        e, s = _usage(msg)
+        return e + s
 
     messages = list(kwargs["messages"])
     message = _appel(messages)
     texte, tokens = _texte(message), _tokens(message)
+    entree, sortie = _usage(message)
     raison = getattr(message, "stop_reason", None)
 
     # Reprise automatique. Un rapport long peut atteindre le plafond de sortie
@@ -99,10 +104,13 @@ def generate(*, system: str, prompt: str, model: str | None = None,
         # Recollage sans espace parasite : la coupure tombe souvent en plein mot.
         texte += morceau
         tokens += _tokens(suite)
+        e2, s2 = _usage(suite)
+        entree += e2
+        sortie += s2
         raison = getattr(suite, "stop_reason", None)
 
     return LLMResult(text=texte, model=model, provider="claude", tokens=tokens,
-                     stop_reason=raison)
+                     stop_reason=raison, input_tokens=entree, output_tokens=sortie)
 
 
 class ClaudeProvider:

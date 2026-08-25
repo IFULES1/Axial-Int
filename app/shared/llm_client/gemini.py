@@ -56,9 +56,12 @@ def generate(*, system: str, prompt: str, model: str | None = None,
         # On normalise pour que l'appelant n'ait qu'un seul cas à traiter.
         if candidates[0].get("finishReason") == "MAX_TOKENS":
             raison = "max_tokens"
-    tokens = (data.get("usageMetadata") or {}).get("totalTokenCount", 0) or 0
+    usage = data.get("usageMetadata") or {}
+    tokens = usage.get("totalTokenCount", 0) or 0
     return LLMResult(text=text, model=model, provider="gemini", tokens=tokens,
-                     stop_reason=raison)
+                     stop_reason=raison,
+                     input_tokens=usage.get("promptTokenCount", 0) or 0,
+                     output_tokens=usage.get("candidatesTokenCount", 0) or 0)
 
 
 def stream(*, system: str, prompt: str, model: str | None = None,
