@@ -1,0 +1,57 @@
+id;categorie;metrique;definition;source_ou_formule;frequence;cible;mesurable_aujourdhui;ce_qui_manque;priorite
+C01;Coût;Coût variable par rapport;Prix réel des appels modèle pour produire un rapport;reports.cout_micro_eur / 1e6;hebdo;< 0,60 €;oui;—;1
+C02;Coût;Coût moyen par type de rapport;Coût variable moyen, ventilé par analysis_type;avg(reports.cout_micro_eur) GROUP BY analysis_type;hebdo;< 1 % du prix facturé;oui;—;1
+C03;Coût;Coût du rapport le plus cher;Maximum observé sur la fenêtre — révèle les générations qui dérapent;max(reports.cout_micro_eur);hebdo;< 3× la moyenne;oui;—;1
+C04;Coût;Coût des rapports offerts;Somme des coûts des premiers rapports offerts à l'inscription;reports joints à credit_events action=premier_rapport_offert;mensuel;suivre, pas de cible;partiel;lier le rapport à l'événement d'offre;1
+C05;Coût;Coût variable par message de chat;Prix des appels modèle pour une réponse conversationnelle;non stocké;hebdo;< 0,02 €;non;persister tokens+coût sur messages;2
+C06;Coût;Coût variable par exécution de veille;Prix d'un passage d'agent (RSS + web + modèle);non stocké;hebdo;< 0,30 €;non;ajouter les colonnes de coût à watch_runs;2
+C07;Coût;Coût des API de recherche;Dépense Exa + Tavily + Linkup + Serper;factures fournisseurs;mensuel;suivre — a été multiplié par ~4 le 25/08;non;compteur d'appels par fournisseur;1
+C08;Coût;Coût du rerank Cohere;Dépense de reclassement des sources;facture Cohere;mensuel;suivre;non;compteur d'appels;3
+C09;Coût;Coûts fixes mensuels;VPS + Supabase + Resend + domaine + Presidio;relevé manuel;mensuel;connaître le chiffre;non;une ligne à saisir une fois par mois;1
+C10;Coût;Coût total mensuel;Fixes + variables;C09 + somme des coûts variables;mensuel;< MRR;partiel;dépend de C05, C06, C07, C09;1
+C11;Coût;Coût par utilisateur actif;Coût total divisé par les actifs du mois;C10 / actifs 30j;mensuel;< 5 €;partiel;dépend de C10;2
+R01;Rentabilité;Marge brute par type de rapport;Valeur en euros du prix en crédits, moins le coût réel;(crédits × 0,4167) − coût réel;hebdo;> 90 %;oui;—;1
+R02;Rentabilité;Marge brute globale;Sur l'ensemble des rapports de la fenêtre;somme des marges / somme des revenus;mensuel;> 90 %;oui;—;1
+R03;Rentabilité;Valeur d'un crédit;Référence de conversion crédits → euros;50 € / 120 crédits = 0,4167 €;à chaque changement de prix;—;oui;—;1
+R04;Rentabilité;Revenu moyen par utilisateur actif;MRR divisé par les utilisateurs actifs;MRR / actifs 30j;mensuel;> 30 €;oui;—;2
+R05;Rentabilité;Coût d'acquisition;Rapport offert + coût des emails + temps fondatrice;C04 + valorisation du temps;mensuel;à établir;partiel;valoriser le temps passé;2
+R06;Rentabilité;Durée de vie moyenne d'un client;Mois d'abonnement avant résiliation;1 / taux de résiliation mensuel;trimestriel;> 12 mois;non;aucun client payant à ce jour;3
+R07;Rentabilité;Ratio valeur vie / coût d'acquisition;Rentabilité de l'acquisition;R06 × R04 / R05;trimestriel;> 3;non;dépend de R05 et R06;3
+R08;Rentabilité;Point mort;Nombre d'abonnés Pro couvrant les coûts fixes;C09 / 50 €;mensuel;connaître le chiffre;partiel;dépend de C09;1
+V01;Revenus;MRR;Revenu mensuel récurrent des abonnements actifs;abonnés actifs × 50 €;hebdo;croissance;oui;—;1
+V02;Revenus;MRR potentiel;Ce que rapporteraient les essais en cours non annulés;(essais − annulés) × 50 €;hebdo;suivre;oui;—;1
+V03;Revenus;Abonnés payants;Abonnements au statut actif;user_subscriptions.status = 'active';hebdo;croissance;oui;—;1
+V04;Revenus;Essais en cours;Abonnements au statut trialing;user_subscriptions.status = 'trialing';hebdo;suivre;oui;—;1
+V05;Revenus;Essais annulés avant terme;Essais avec cancel_at_period_end;status='trialing' AND cancel_at_period_end;hebdo;< 20 %;oui;—;1
+V06;Revenus;Taux de conversion essai → payant;Part des essais devenus abonnements;actifs / (actifs + essais terminés);mensuel;> 25 %;partiel;aucun essai arrivé à terme;1
+V07;Revenus;Revenus des recharges ponctuelles;Achats de packs hors abonnement;credit_events action='pack_credits';mensuel;suivre;oui;—;2
+V08;Revenus;Paiements en échec;Abonnements past_due;user_subscriptions.status='past_due';hebdo;0;oui;—;1
+A01;Activation;Personnes contactées;Destinataires d'une campagne;email_sends GROUP BY campaign;par campagne;—;oui;—;1
+A02;Activation;Taux de lecture réelle;Ouvertures répétées (≥3), hors préchargements automatiques;email_sends.open_count >= 3;par campagne;> 30 %;oui;—;1
+A03;Activation;Jamais ouverts;Destinataires sans aucune ouverture — problème d'objet ou de délivrabilité;email_sends.opened_at IS NULL;par campagne;< 20 %;oui;—;1
+A04;Activation;Désinscriptions;Retraits de la diffusion;email_suppressions;par campagne;< 5 %;oui;—;1
+A05;Activation;Comptes créés;Inscriptions, hors comptes internes;auth.users filtré;hebdo;croissance;oui;—;1
+A06;Activation;Taux d'inscription par campagne;Contactés devenus comptes;comptes créés / contactés;par campagne;> 5 %;oui;—;1
+A07;Activation;Profils complétés;Comptes ayant renseigné leur mémoire d'entreprise;company_profiles.company_name non nul;hebdo;> 80 % des comptes;oui;—;1
+A08;Activation;Taux d'activation;Comptes ayant produit un rapport ou posé une question;actifs / comptes;hebdo;> 50 %;oui;—;1
+A09;Activation;Délai inscription → premier rapport;Heures écoulées avant la première production réelle;min(reports.created_at) − users.created_at;hebdo;< 24 h;oui;—;1
+A10;Activation;Comptes sans aucun rapport;Inscrits n'ayant jamais rien produit;comptes sans reports non restaurés;hebdo;< 20 %;oui;—;1
+A11;Activation;Passage de l'écran carte;Part des inscrits ayant ajouté une carte;user_subscriptions non nul / comptes;hebdo;suivre;oui;—;1
+A12;Activation;Contournement de l'écran carte;Part ayant choisi Continuer sans carte;comptes actifs sans abonnement;hebdo;suivre;partiel;aucune trace du clic de contournement;2
+A13;Activation;Abandon par étape d'onboarding;Où les gens s'arrêtent dans les 4 écrans;non tracé;hebdo;identifier l'étape la plus coûteuse;non;événements de progression d'onboarding;2
+U01;Usage;Utilisateurs actifs 30 jours;Ont produit un rapport ou posé une question;reports ou messages sur 30 j;hebdo;croissance;oui;—;1
+U02;Usage;Utilisateurs récurrents;Actifs sur au moins 2 jours distincts;credit_events sur >= 2 jours;hebdo;> 40 % des actifs;oui;—;1
+U03;Usage;Rapports par utilisateur actif;Intensité d'usage du cœur du produit;rapports / actifs;hebdo;> 2;oui;—;1
+U04;Usage;Questions par utilisateur actif;Intensité d'usage conversationnel;messages role=user / actifs;hebdo;> 5;oui;—;2
+U05;Usage;Taux de retour à 7 jours;Reviennent dans la semaine suivant l'inscription;dernière connexion − inscription;hebdo;> 40 %;oui;—;2
+U06;Usage;Solde de crédits moyen;Détecte les utilisateurs bloqués faute de crédits;avg(credit_balances);hebdo;suivre;oui;—;1
+U07;Usage;Utilisateurs bloqués par les crédits;Solde inférieur au rapport le moins cher;solde < 25;hebdo;0;oui;—;1
+U08;Usage;Documents importés;Marqueur de profondeur d'engagement;documents GROUP BY user_id;mensuel;suivre;oui;—;2
+U09;Usage;Outils connectés;Comptes ayant branché Notion ou autre;user_connections;mensuel;suivre;oui;—;2
+U10;Usage;Veilles actives;Agents programmés en fonctionnement;watches.status actif;mensuel;suivre;oui;—;2
+Q01;Qualité;Rapports tronqués;Générations ayant atteint la limite de sortie malgré les reprises;status_note='truncated_generation';hebdo;0;partiel;non facturés donc non archivés — compter dans les journaux;1
+Q02;Qualité;Rapports dégradés;Générations échouées ou vides;AnalysisResult.degraded;hebdo;< 2 %;partiel;non archivés — compter dans les journaux;1
+Q03;Qualité;Durée moyenne de génération;Temps entre le lancement et le rapport livré;reports.duree_secondes;hebdo;< 300 s;oui;—;1
+Q04;Qualité;Sources par rapport;Nombre de sources réellement citées;longueur de reports.sources;hebdo;conforme à la directive;oui;—;1
+Q05;Qualité;Retours du formulaire;Avis déposés via le bouton Votre avis;Google Forms;hebdo;> 1 par rapport sur 5;non;dépouillement manuel du formulaire;1
+Q06;Qualité;Taux de régénération;Même sujet relancé — signe d'insatisfaction;titres proches par utilisateur;mensuel;< 10 %;non;comparaison de titres à implémenter;3
