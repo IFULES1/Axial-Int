@@ -90,6 +90,20 @@ def sequences_emails() -> None:
         logger.info("Séquences email (simulation) : %d candidat(s)", len(journal))
 
 
+def premiers_rapports() -> None:
+    """Filet de rattrapage du rapport offert à l'inscription.
+
+    La génération vit dans un thread de l'API : un redémarrage au mauvais
+    moment la perdrait, et l'utilisateur n'aurait jamais son premier rapport.
+    """
+    from app.modules.analysis import onboarding
+
+    with SessionLocal() as db:
+        faits = onboarding.rattraper(db)
+    if faits:
+        logger.info("Premiers rapports rattrapés : %d", faits)
+
+
 def main() -> None:
     logger.info("Axial worker starting (tick=%ss)", TICK_SECONDS)
     scheduler = BlockingScheduler(timezone="UTC")
@@ -102,6 +116,8 @@ def main() -> None:
     # Séquences de cycle de vie : toutes les heures à la minute 20, pour ne pas
     # tomber en même temps que le récap hebdo.
     scheduler.add_job(sequences_emails, "cron", minute=20)
+    # Rattrapage des premiers rapports, décalé des autres tâches horaires.
+    scheduler.add_job(premiers_rapports, "cron", minute=40)
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):

@@ -23,7 +23,10 @@ from app.errors import AppError
 from app.modules.billing.catalog import cost_for
 from app.modules.billing.models import CreditBalance, CreditEvent, UserSubscription
 
-FREE_BETA_CREDITS = 20
+# Un rapport coûte entre 25 et 40 crédits. À 20, un compte sans carte ne
+# pouvait produire aucun rapport — le cœur du produit restait fermé, et le
+# blocage de la carte était simplement déplacé de trois écrans.
+FREE_BETA_CREDITS = 40
 FREE_BETA_DAYS = 14
 
 

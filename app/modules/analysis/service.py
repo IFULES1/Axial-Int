@@ -335,8 +335,15 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
             )
             if res.degraded:
                 return res, {}
-            return res, (finalize(db_thread, user_id, analysis_type, res,
-                                  is_admin=is_admin) or {})
+            info = finalize(db_thread, user_id, analysis_type, res,
+                            is_admin=is_admin) or {}
+            # Prévenir maintenant, depuis le thread : c'est le seul endroit qui
+            # s'exécute que le navigateur soit encore là ou non.
+            from app.modules.reports import notification
+
+            notification.prevenir(db_thread, user_id, titre=res.title,
+                                  contenu=res.content, sources=res.sources)
+            return res, info
 
     with _cf.ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(_produire_et_archiver)

@@ -199,3 +199,28 @@ def test_rapport_survit_a_la_fermeture_du_navigateur(monkeypatch):
         gen.close()  # ce que fait FastAPI quand le navigateur part
 
     assert archives == ["T"], "le rapport a été perdu à la déconnexion"
+
+
+def test_premier_rapport_offert_une_seule_fois():
+    """La question vient du profil, jamais du client, et l'offre est unique."""
+    from app.modules.analysis.onboarding import question_pour
+
+    q = question_pour({"company_name": "Northwind", "sector": "SaaS B2B",
+                       "target_market": "Europe", "language": "fr"})
+    assert "Northwind" in q and "Europe" in q
+    assert question_pour({"sector": "Deeptech", "language": "en"}).startswith("Market study")
+
+
+def test_catalogue_de_flux_verifie():
+    """Le catalogue doit rester lisible et catégorisé — il pilote l'interface."""
+    from app.modules.watches.catalogue import LIBELLES, catalogue
+
+    c = catalogue()
+    assert len(c) >= 15, f"catalogue trop maigre : {len(c)}"
+    assert all(f["url"].startswith("http") for f in c)
+    inconnues = {f["category"] for f in c} - set(LIBELLES)
+    assert not inconnues, f"catégories sans libellé : {inconnues}"
+    # Les thèmes qui manquaient à la veille doivent être couverts.
+    couvertes = {f["category"] for f in c}
+    for attendue in ("reglementaire", "vc", "financement", "marche"):
+        assert attendue in couvertes, attendue

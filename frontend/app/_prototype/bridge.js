@@ -328,7 +328,9 @@ export async function axRunWatch(id) { return axFetch(`/watches/${id}/run`, { me
 export async function axPauseWatch(id) { return axFetch(`/watches/${id}/pause`, { method: "POST", body: {} }); }
 export async function axResumeWatch(id) { return axFetch(`/watches/${id}/resume`, { method: "POST", body: {} }); }
 export async function axDeleteWatch(id) { return axFetch(`/watches/${id}`, { method: "DELETE" }); }
+export async function axPremierRapport() { return axFetch("/analysis/premier-rapport", { method: "POST" }); }
 export async function axListFeeds() { return axFetch("/watches/feeds"); }
+export async function axFeedsCatalogue() { return axFetch("/watches/feeds/catalogue"); }
 export async function axAddFeed(body) { return axFetch("/watches/feeds", { method: "POST", body }); }
 export async function axDeleteFeed(id) { return axFetch(`/watches/feeds/${id}`, { method: "DELETE" }); }
 

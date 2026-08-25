@@ -41,7 +41,7 @@ def cost_for(action: str) -> int:
 # Plan catalog (display + entitlements). Amounts in EUR.
 PLANS: list[dict] = [
     {"key": "free_beta", "name": "Free Beta", "price_eur": 0, "period": "month",
-     "monthly_credits": 20, "seats": 1,
+     "monthly_credits": 40, "seats": 1,
      "features": ["Découverte", "export PDF"]},
     {"key": "pro", "name": "Pro", "price_eur": 50, "period": "month",
      "monthly_credits": 120, "seats": 1,

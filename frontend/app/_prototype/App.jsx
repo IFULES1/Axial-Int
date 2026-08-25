@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -28,6 +28,11 @@ window.AXIAL_DATA = { SUGGESTED_PROMPTS };
 
 // Coûts RÉELS (= CREDIT_COSTS backend) — les anciennes estimations étaient des
 // chiffres de maquette sans lien avec le débit effectif.
+// Formulaire de retour sur les rapports. URL PUBLIQUE (/viewform) : le lien
+// /edit donnerait aux utilisateurs le droit de modifier le formulaire.
+const FORMULAIRE_FEEDBACK =
+  'https://docs.google.com/forms/d/1KShH0-tTloNKOnw9sZ3uXM1OeXIdpIfVFLm0JpYy_BM/viewform';
+
 const REPORT_TYPES = [
   { id: 'market', icon: 'trending', at: 'etude_marche', cost: 40 },
   { id: 'competitive', icon: 'users', at: 'analyse_concurrentielle', cost: 25 },
@@ -1023,7 +1028,7 @@ function LandingPage({ onCTAStart, onCTASignIn }) {
   const isFR = (window.AXIAL_LANG || 'fr') === 'fr';
   const pricingPlans = [
     { name: 'Free Beta', price: '0 €', per: isFR ? '/mois' : '/mo',
-      credits: isFR ? '20 crédits / mois' : '20 credits / mo',
+      credits: isFR ? '40 crédits / mois' : '40 credits / mo',
       features: isFR ? ['Découverte', 'Export PDF', '1 siège'] : ['Discovery', 'PDF export', '1 seat'],
       tag: null, cta: 'start' },
     { name: 'Pro', price: '50 €', per: isFR ? '/mois' : '/mo',
@@ -1503,9 +1508,29 @@ const LABELS_EN = {
   "Première analyse": "First analysis",
   "SOURCES CITÉES": "SOURCES CITED",
   "Retour": "Back",
+  "Lancer cette analyse": "Run this analysis",
+  "Lancement…": "Starting…",
+  "Je préfère poser ma propre question": "I would rather ask my own question",
+  "Ce premier rapport est offert : il ne consomme aucun de tes crédits. Tu reçois un email dès qu'il est prêt.":
+    "This first report is on us — it uses none of your credits. You will get an email as soon as it is ready.",
+  "SOURCES PROPOSÉES": "SUGGESTED SOURCES",
+  "OU UNE AUTRE SOURCE": "OR ANOTHER SOURCE",
+  "Déjà suivi": "Already followed",
+  "Écosystème startup": "Startup ecosystem",
+  "Capital-risque": "Venture capital",
+  "Financement et levées": "Funding and rounds",
+  "Réglementaire": "Regulatory",
+  "Juridique": "Legal",
+  "Technologie": "Technology",
+  "Produit": "Product",
+  "Marché": "Market",
+  "Concurrence": "Competition",
+  "Généraliste": "General",
+  "Votre avis": "Your feedback",
+  "Dis-nous ce que vaut ce rapport": "Tell us what this report is worth",
   "Continuer sans carte": "Continue without a card",
-  "Tu gardes tes crédits offerts pour explorer l'app. Tu pourras activer l'essai plus tard, depuis Crédits.":
-    "You keep your free credits to explore the app. You can start the trial later, from Credits.",
+  "Tu gardes tes 40 crédits offerts — de quoi lancer une étude complète. Tu pourras activer l'essai plus tard, depuis Crédits.":
+    "You keep your 40 free credits — enough for a full study. You can start the trial later, from Credits.",
   "Continuer": "Continue",
   "CE QU'AXIAL RETIENDRA": "WHAT AXIAL WILL REMEMBER",
   "Vous pourrez modifier, supprimer ou ajouter des faits depuis votre mémoire.":
@@ -1556,9 +1581,9 @@ const LABELS_EN = {
   // final. Ils passaient leurs titres en dur et restaient en français même
   // avec l'interface en anglais — au moment précis où l'on demande une carte.
   "Activez votre essai.": "Activate your trial.",
-  "20 crédits offerts pendant 14 jours — aucun débit aujourd'hui.":
-    "20 free credits for 14 days — nothing charged today.",
-  "20 crédits offerts, utilisables dès maintenant": "20 free credits, usable right away",
+  "40 crédits offerts pendant 14 jours — aucun débit aujourd'hui.":
+    "40 free credits for 14 days — nothing charged today.",
+  "40 crédits offerts, utilisables dès maintenant": "40 free credits, usable right away",
   "0 € débité aujourd'hui — votre carte sert uniquement à activer l'essai":
     "€0 charged today — your card only activates the trial",
   "Au bout de 14 jours, l'abonnement Pro démarre : 50 €/mois, 120 crédits":
@@ -1923,6 +1948,7 @@ function DemoCard({ q, bullets, srcs, time }) {
 
 /* ----- Step 3 — First action ----- */
 function OnbStep3({ ctx, onLaunch, onBack }) {
+  const [lance, setLance] = React.useState(false);
   const seedQ = useOnbMemo(() => {
     // Question construite avec le NOM + le DÉFI + le contexte — jamais générique.
     const en = window.AXIAL_LANG === 'en';
@@ -1966,13 +1992,24 @@ function OnbStep3({ ctx, onLaunch, onBack }) {
           <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><Icon name="zap" size={11} /> ~30 S</span>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn btn-primary btn-lg" onClick={() => onLaunch(seedQ)}>
-            Lancer cette analyse <Icon name="arrow-right" size={14} />
+          <button className="btn btn-primary btn-lg" disabled={lance}
+            onClick={async () => {
+              // Le rapport est produit par le serveur, gratuitement, en
+              // arrière-plan : l'utilisateur n'attend pas sept minutes dans
+              // son onboarding, il entre dans l'app et reçoit un email.
+              setLance(true);
+              try { await axPremierRapport(); } catch (e) { /* le worker rattrapera */ }
+              onLaunch(null);
+            }}>
+            {lance ? libelle('Lancement…') : libelle('Lancer cette analyse')} <Icon name="arrow-right" size={14} />
           </button>
-          <button className="btn btn-ghost" onClick={() => onLaunch(null)}>
-            Je préfère poser ma propre question
+          <button className="btn btn-ghost" onClick={() => onLaunch(seedQ)}>
+            {libelle("Je préfère poser ma propre question")}
           </button>
         </div>
+        <p style={{ margin: '14px 0 0', fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
+          {libelle("Ce premier rapport est offert : il ne consomme aucun de tes crédits. Tu reçois un email dès qu'il est prêt.")}
+        </p>
       </article>
 
       <div className="checklist-strip">
@@ -2059,11 +2096,11 @@ function OnbStep4({ onBack, onSkip }) {
   return (
     <OnbShell step={3} onBack={onBack}
       title={libelle("Activez votre essai.")}
-      sub={libelle("20 crédits offerts pendant 14 jours — aucun débit aujourd'hui.")}>
+      sub={libelle("40 crédits offerts pendant 14 jours — aucun débit aujourd'hui.")}>
       <article className="first-action-card">
         <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           {[
-            ['check', libelle("20 crédits offerts, utilisables dès maintenant")],
+            ['check', libelle("40 crédits offerts, utilisables dès maintenant")],
             ['check', libelle("0 € débité aujourd'hui — votre carte sert uniquement à activer l'essai")],
             ['check', libelle("Au bout de 14 jours, l'abonnement Pro démarre : 50 €/mois, 120 crédits")],
             ['check', libelle("Email de rappel avant le premier débit · annulation en 1 clic, à tout moment")],
@@ -2094,7 +2131,7 @@ function OnbStep4({ onBack, onSkip }) {
             {libelle("Continuer sans carte")} <Icon name="arrow-right" size={13} />
           </button>
           <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
-            {libelle("Tu gardes tes crédits offerts pour explorer l'app. Tu pourras activer l'essai plus tard, depuis Crédits.")}
+            {libelle("Tu gardes tes 40 crédits offerts — de quoi lancer une étude complète. Tu pourras activer l'essai plus tard, depuis Crédits.")}
           </p>
         </div>
       </article>
@@ -2953,6 +2990,15 @@ function ReportsEditor({ data, onBack, openShare }) {
           <button className="btn btn-primary btn-sm" onClick={exportPdf} disabled={saving}>
             <Icon name="download" size={14} />{saving ? (lang === 'fr' ? 'Export…' : 'Exporting…') : 'PDF'}
           </button>
+          {/* Aucun moyen de dire ce qu'on pense d'un rapport n'existait dans
+              l'app : le seul retour produit jamais reçu est arrivé par
+              WhatsApp. Le bouton se trouve à côté du rapport lui-même, au
+              moment où l'utilisateur a un avis. */}
+          <a className="btn btn-secondary btn-sm" href={FORMULAIRE_FEEDBACK}
+            target="_blank" rel="noopener noreferrer"
+            title={libelle("Dis-nous ce que vaut ce rapport")}>
+            <Icon name="message-square" size={14} />{libelle("Votre avis")}
+          </a>
           {(outils.notion && outils.notion.connecte) && (
             <button className="btn btn-secondary btn-sm" disabled={!!envoi}
               onClick={() => livrer('notion')}>
@@ -3115,8 +3161,20 @@ function FeedsManager({ onClose }) {
   const [url, setUrl] = React.useState('');
   const [category, setCategory] = React.useState('startup');
   const [busy, setBusy] = React.useState(false);
-  const load = () => axListFeeds().then(setFeeds).catch(() => setFeeds([]));
+  const [cat, setCat] = React.useState(null);
+  const [ajout, setAjout] = React.useState('');
+  const load = () => {
+    axListFeeds().then(setFeeds).catch(() => setFeeds([]));
+    axFeedsCatalogue().then(setCat).catch(() => setCat([]));
+  };
   React.useEffect(() => { load(); }, []);
+  // Ajout depuis le catalogue : l'utilisateur choisit une source, pas une URL.
+  const ajouterDuCatalogue = async (f) => {
+    setAjout(f.url);
+    try { await axAddFeed({ url: f.url, category: f.category, title: f.title }); }
+    catch (e) { /* noop */ }
+    setAjout(''); load();
+  };
   const add = async () => {
     if (!url.trim()) return;
     setBusy(true);
@@ -3140,6 +3198,39 @@ function FeedsManager({ onClose }) {
           </p>
         </div>
         <div className="wizard-body">
+          {/* Un fondateur ne connaît pas l'URL RSS de Sifted ou de la CNIL.
+              Le catalogue vérifié se choisit en un clic ; le champ libre
+              reste pour les sources qu'il est seul à connaître. */}
+          {cat === null && <p style={{ color: 'var(--fg-3)', fontSize: 13, marginBottom: 12 }}>…</p>}
+          {cat !== null && cat.length > 0 && (
+            <div style={{ marginBottom: 18 }}>
+              <div className="label" style={{ marginBottom: 8 }}>
+                {libelle("SOURCES PROPOSÉES")}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: 250, overflowY: 'auto', paddingRight: 4 }}>
+                {[...new Set(cat.map((f) => f.category))].map((c) => (
+                  <div key={c}>
+                    <div style={{ fontSize: 11, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--fg-3)', marginBottom: 6 }}>
+                      {libelle((cat.find((x) => x.category === c) || {}).category_label || c)}
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {cat.filter((f) => f.category === c).map((f) => (
+                        <button key={f.url} className="btn btn-secondary btn-sm"
+                          disabled={f.suivi || ajout === f.url}
+                          onClick={() => ajouterDuCatalogue(f)}
+                          style={{ opacity: f.suivi ? 0.45 : 1 }}
+                          title={f.suivi ? libelle('Déjà suivi') : f.url}>
+                          <Icon name={f.suivi ? 'check' : 'plus'} size={12} />
+                          {ajout === f.url ? '…' : (f.title || f.url)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="label" style={{ marginBottom: 8 }}>{libelle("OU UNE AUTRE SOURCE")}</div>
           <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
             <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/feed"
               style={{ flex: 1, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--fg)', fontSize: 13, padding: '9px 11px', outline: 'none' }} />

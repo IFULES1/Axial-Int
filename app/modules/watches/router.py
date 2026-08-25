@@ -110,6 +110,13 @@ def activity(user: AuthUser = Depends(get_current_user),
 @router.post("/feeds", response_model=FeedOut)
 def add_feed(payload: FeedIn, user: AuthUser = Depends(get_current_user),
              db: Session = Depends(get_db)) -> FeedOut:
+    # Un même flux ajouté deux fois ferait remonter chaque article en double
+    # dans les veilles. On rend l'existant plutôt que d'en créer un second.
+    existant = db.scalar(select(RssFeed).where(
+        RssFeed.user_id == uuid.UUID(user.id), RssFeed.url == payload.url))
+    if existant is not None:
+        return FeedOut(id=str(existant.id), url=existant.url, title=existant.title,
+                       category=existant.category, active=existant.active)
     feed = RssFeed(id=uuid.uuid4(), user_id=uuid.UUID(user.id), url=payload.url,
                    title=payload.title, category=payload.category)
     db.add(feed)
@@ -117,6 +124,21 @@ def add_feed(payload: FeedIn, user: AuthUser = Depends(get_current_user),
     db.refresh(feed)
     return FeedOut(id=str(feed.id), url=feed.url, title=feed.title,
                    category=feed.category, active=feed.active)
+
+
+@router.get("/feeds/catalogue")
+def feeds_catalogue(user: AuthUser = Depends(get_current_user),
+                    db: Session = Depends(get_db)) -> list[dict]:
+    """Flux proposés, avec l'indication de ceux déjà suivis par l'utilisateur.
+
+    Renvoyer l'état d'abonnement évite au client de croiser deux listes, et
+    surtout d'afficher « Ajouter » sur un flux déjà présent.
+    """
+    from app.modules.watches.catalogue import catalogue
+
+    deja = {f.url for f in db.scalars(
+        select(RssFeed).where(RssFeed.user_id == uuid.UUID(user.id)))}
+    return [dict(f, suivi=f["url"] in deja) for f in catalogue()]
 
 
 @router.get("/feeds", response_model=list[FeedOut])

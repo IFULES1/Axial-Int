@@ -28,7 +28,9 @@ def test_free_beta_grant_matches_catalog():
     from app.modules.billing.service import FREE_BETA_CREDITS
 
     free_beta = next(p for p in PLANS if p["key"] == "free_beta")
-    assert FREE_BETA_CREDITS == free_beta["monthly_credits"] == 20
+    # 40 depuis le 25/08 : à 20 crédits, un compte sans carte ne pouvait
+    # produire aucun rapport (le moins cher en coûte 25).
+    assert FREE_BETA_CREDITS == free_beta["monthly_credits"] == 40
 
 
 def test_pdf_is_generated():
