@@ -1,0 +1,5 @@
+# Journal des relances manuelles (WhatsApp, email perso, téléphone).
+# Append-only : une entrée par échange, jamais modifiée après coup.
+# Alimenté par scripts/log_relance.py, lu par scripts/dashboard_relances.py.
+# Une ligne = un échange réel. La "prochaine_action"/"echeance" de l'entrée
+# la plus récente pour un email pilote les alertes du tableau de bord.

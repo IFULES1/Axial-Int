@@ -147,3 +147,55 @@ def test_luhn_epargne_les_chiffres_de_marche():
 
     _, vrai = redact("Paiement par 4539 1488 0343 6467 accepté.")
     assert any("4539" in v for v in vrai.values()), vrai
+
+
+def test_rapport_survit_a_la_fermeture_du_navigateur(monkeypatch):
+    """Un rapport doit être archivé même si le client se déconnecte.
+
+    L'archivage vivait après le dernier `yield` du générateur SSE : fermer
+    l'onglet pendant les minutes de rédaction faisait perdre le rapport, alors
+    que la génération était allée au bout et avait été payée. Reproduit le
+    25/08 avant correction.
+    """
+    import time
+    from unittest import mock
+
+    from app.modules.analysis import service
+
+    archives: list[str] = []
+
+    def faux_run(**kw):
+        time.sleep(2)
+        return service.AnalysisResult(analysis_type="analyse_risques",
+                                      title="T", content="contenu", degraded=False)
+
+    def faux_finalize(db, user_id, analysis_type, result, *, is_admin):
+        archives.append(result.title)
+        return {"report_id": "r1", "charged": 25}
+
+    class _Session:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, *a):
+            return False
+
+    import app.db as db_mod
+    import app.modules.memory.service as mem
+    with mock.patch.object(service, "run_analysis", faux_run), \
+         mock.patch.object(service, "finalize", faux_finalize), \
+         mock.patch.object(service, "precheck_credits", lambda *a, **k: None), \
+         mock.patch.object(service, "HEARTBEAT_SECONDS", 1), \
+         mock.patch.object(db_mod, "SessionLocal", _Session), \
+         mock.patch.object(mem, "build_context", lambda *a, **k: ""), \
+         mock.patch.object(service, "_profile_dict", lambda *a, **k: {}):
+        gen = service.stream_analysis(db=None, user_id="u", is_admin=False,
+                                      query="q", analysis_type="analyse_risques")
+        # Couper AVANT le premier battement reviendrait à tester une génération
+        # jamais démarrée. On attend d'être en pleine rédaction.
+        for evt in gen:
+            if "heartbeat" in evt:
+                break
+        gen.close()  # ce que fait FastAPI quand le navigateur part
+
+    assert archives == ["T"], "le rapport a été perdu à la déconnexion"

@@ -314,13 +314,32 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
     import concurrent.futures as _cf
     import time as _time
 
+    def _produire_et_archiver() -> tuple[AnalysisResult, dict]:
+        """Génère ET persiste, dans le thread, sur sa propre session.
+
+        L'archivage vivait dans le générateur, après le dernier `yield`. Quand
+        le navigateur se fermait pendant les minutes de rédaction, FastAPI
+        fermait le générateur : la génération allait au bout, le modèle était
+        payé, et le rapport était jeté. Reproduit le 25/08.
+
+        La session de la requête HTTP meurt avec elle : le thread ouvre la
+        sienne, sinon l'écriture se ferait sur une connexion déjà refermée.
+        """
+        from app.db import SessionLocal
+
+        with SessionLocal() as db_thread:
+            res = run_analysis(
+                query=query, analysis_type=analysis_type, user_id=user_id,
+                title=title, top_k=top_k, company_context=company_context,
+                profile=profile, db_pour_notion=db_thread,
+            )
+            if res.degraded:
+                return res, {}
+            return res, (finalize(db_thread, user_id, analysis_type, res,
+                                  is_admin=is_admin) or {})
+
     with _cf.ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(
-            run_analysis, query=query, analysis_type=analysis_type,
-            user_id=user_id, title=title, top_k=top_k,
-            company_context=company_context, profile=profile,
-            db_pour_notion=db,
-        )
+        future = pool.submit(_produire_et_archiver)
         waited, progress = 0, 40
         while not future.done():
             _time.sleep(1)
@@ -331,7 +350,7 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
             yield _sse({"progress": progress, "step": "generate", "heartbeat": True,
                         "message": f"Rédaction en cours… ({waited // 60} min {waited % 60:02d} s)"})
         try:
-            result = future.result()
+            result, info = future.result()
         except AppError as e:
             yield _sse({"step": "error", "done": True, "error": e.message})
             return
@@ -349,7 +368,6 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
         return
 
     yield _sse({"progress": 90, "step": "finalize", "message": "Finalisation…"})
-    info = finalize(db, user_id, analysis_type, result, is_admin=is_admin) or {}
     payload = _result_payload(result)
     payload["report_id"] = info.get("report_id")
     yield _sse({"progress": 100, "step": "done", "done": True, "data": payload})

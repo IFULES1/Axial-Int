@@ -32,6 +32,10 @@ venv/
 *.bak
 *.bak.*
 
+# Tableau de bord des relances : régénéré à chaque lancement, contient des
+# emails réels — pas versionné. crm/relances.yaml (le journal) reste, lui, versionné.
+crm/dashboard_relances.html
+
 # Base de connaissance : ignorer les documents (lourds/licence), garder la structure
 data/knowledge_base/**
 !data/knowledge_base/
