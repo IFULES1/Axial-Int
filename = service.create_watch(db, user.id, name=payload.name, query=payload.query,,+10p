@@ -1,8 +1,6 @@
 """Veille endpoints — agents (watches), run history, skills, and RSS feeds."""
 from __future__ import annotations
 
-import logging
-
 import datetime as dt
 import uuid
 
@@ -16,8 +14,6 @@ from app.modules.auth.schemas import AuthUser
 from app.modules.auth.security import get_current_user
 from app.modules.watches import service, skills
 from app.modules.watches.models import RssFeed
-
-logger = logging.getLogger("axial.watches.router")
 
 router = APIRouter(prefix="/watches", tags=["watches"])
 
@@ -173,13 +169,6 @@ def create(payload: WatchIn, user: AuthUser = Depends(get_current_user),
     w = service.create_watch(db, user.id, name=payload.name, query=payload.query,
                              analysis_type=payload.analysis_type, cadence=cadence,
                              skill=skill, email_recipients=payload.email_recipients)
-    # Une veille sans source ne lit rien. On attache les flux du catalogue
-    # correspondant au skill plutôt que de laisser l'utilisateur découvrir
-    # après coup que son agent tourne à vide.
-    try:
-        service.amorcer_flux(db, user.id, skill)
-    except Exception:  # noqa: BLE001 — l'agent existe, l'amorçage est un bonus
-        logger.warning("Amorçage des flux échoué pour %s", user.id, exc_info=True)
     return _out(w)
 
 

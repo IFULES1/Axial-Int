@@ -32,6 +32,46 @@ def _next_run(cadence: str, base: dt.datetime | None = None) -> dt.datetime | No
 
 # --- CRUD ------------------------------------------------------------------
 
+def amorcer_flux(db: Session, user_id: str, skill_key: str) -> int:
+    """Attache les flux du catalogue correspondant au skill, s'il en manque.
+
+    Une veille réglementaire créée par quelqu'un qui n'a aucun flux ne lit
+    rien : elle tourne, consomme des crédits, et ne remonte que la recherche
+    web. L'utilisateur ne peut pas deviner qu'il devait d'abord ajouter des
+    sources — on les lui pose.
+
+    On n'ajoute que ce qui manque : un flux déjà suivi n'est pas dupliqué, et
+    un utilisateur qui a délibérément retiré une source ne la voit pas revenir
+    dans une catégorie qu'il alimente déjà autrement.
+    """
+    from app.modules.watches import skills
+    from app.modules.watches.catalogue import catalogue
+
+    skill = skills.get_skill(skill_key)
+    if not skill:
+        return 0
+    categories = [c for c in skill.rss_categories if c != "general"]
+    deja = {f.url for f in db.scalars(
+        select(RssFeed).where(RssFeed.user_id == uuid.UUID(user_id)))}
+    couvertes = {f.category for f in db.scalars(
+        select(RssFeed).where(RssFeed.user_id == uuid.UUID(user_id)))}
+    ajoutes = 0
+    for f in catalogue():
+        if f["category"] not in categories or f["category"] in couvertes:
+            continue
+        if f["url"] in deja:
+            continue
+        db.add(RssFeed(id=uuid.uuid4(), user_id=uuid.UUID(user_id), url=f["url"],
+                       title=f["title"], category=f["category"]))
+        deja.add(f["url"])
+        ajoutes += 1
+    if ajoutes:
+        db.commit()
+        logger.info("Veille : %d flux du catalogue attachés à %s (%s)",
+                    ajoutes, user_id, skill_key)
+    return ajoutes
+
+
 def create_watch(db: Session, user_id: str, *, name: str, query: str,
                  analysis_type: str, cadence: str, skill: str = "concurrentielle",
                  email_recipients: list[str] | None) -> Watch:
@@ -141,7 +181,11 @@ def run_watch(db: Session, watch: Watch) -> bool:
             feeds, since=watch.last_run_at, seen_urls=_prior_seen_urls(db, watch.id))
         try:
             query = skill.web_query_template.format(subject=watch.query)
-            web_results = web_search.search(query, top_k=6)
+            # Six résultats sur un angle unique, c'était le même défaut que les
+            # rapports : ce que la recherche ne trouve pas, le modèle le comble.
+            angles = [query] + [f"{watch.query} — {a}" for a in skill.angles_web()]
+            web_results = web_search.search_multi(angles, top_k=12,
+                                                  requete_de_rang=query)
         except Exception as e:  # noqa: BLE001 — web is optional, RSS may carry the run
             logger.warning("Watch %s web search failed: %s", watch.id, e)
             web_results = []

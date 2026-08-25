@@ -19,6 +19,13 @@ class VeilleSkill:
     system_prompt: str               # what this agent hunts for
     rss_categories: list[str] = field(default_factory=list)
     web_query_template: str = "{subject} actualité récente"
+    # Angles de recherche complémentaires. Une requête unique ne ramène qu'une
+    # facette : la veille financement doit chercher les levées ET les
+    # valorisations ET les investisseurs actifs, pas une moyenne des trois.
+    angles: list[str] = field(default_factory=list)
+
+    def angles_web(self) -> list[str]:
+        return list(self.angles)
 
 
 _INTRO = (
@@ -44,6 +51,7 @@ CONCURRENTIELLE = VeilleSkill(
     # tech et les levées → l'agent lit large et filtre sous l'angle concurrentiel.
     rss_categories=["concurrence", "produit", "tech", "financement", "startup", "general"],
     web_query_template="{subject} concurrents actualité levée lancement produit",
+    angles=["nouveaux entrants", "lancements produit récents", "positionnement tarifaire"],
 )
 
 REGLEMENTAIRE = VeilleSkill(
@@ -59,6 +67,7 @@ REGLEMENTAIRE = VeilleSkill(
     ),
     rss_categories=["reglementaire", "juridique", "general"],
     web_query_template="{subject} réglementation loi conformité évolution récente",
+    angles=["nouveau texte adopté", "calendrier entrée en vigueur", "sanctions et contrôles"],
 )
 
 FINANCEMENT = VeilleSkill(
@@ -73,6 +82,7 @@ FINANCEMENT = VeilleSkill(
     ),
     rss_categories=["financement", "vc", "startup", "general"],
     web_query_template="{subject} levée de fonds financement valorisation investisseurs",
+    angles=["tours de table récents", "valorisations observées", "fonds actifs sur le segment"],
 )
 
 PRODUIT_TECH = VeilleSkill(
@@ -88,6 +98,7 @@ PRODUIT_TECH = VeilleSkill(
     ),
     rss_categories=["produit", "tech", "marche", "general"],
     web_query_template="{subject} tendances produit innovation technologie marché",
+    angles=["innovations annoncées", "adoption et usages", "ruptures technologiques"],
 )
 
 
@@ -104,6 +115,8 @@ MARCHE = VeilleSkill(
     ),
     rss_categories=["marche", "financement", "general"],
     web_query_template="{subject} marché taille tendances macroéconomie demande",
+    angles=["taille et croissance du marché", "évolution de la demande",
+            "signaux macroéconomiques du secteur"],
 )
 
 
