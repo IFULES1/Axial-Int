@@ -124,7 +124,17 @@ def rattraper(db, limite: int = 5) -> int:
           AND (cp.company_name IS NOT NULL OR cp.sector IS NOT NULL)
           AND NOT EXISTS (SELECT 1 FROM credit_events e
                           WHERE e.user_id = u.id AND e.action = :a)
-          AND NOT EXISTS (SELECT 1 FROM reports r WHERE r.user_id = u.id)
+          -- Les rapports RESTAURÉS de l'ancienne plateforme ne comptent pas :
+          -- ils ont été copiés à l'inscription, leur propriétaire n'a jamais vu
+          -- Axial produire quoi que ce soit. Les compter excluait de l'offre
+          -- exactement les personnes qu'elle vise — Soumeya (22 restaurés,
+          -- 0 produit) et Gorjux (5 restaurés, 0 produit) le 26/08.
+          AND NOT EXISTS (
+                SELECT 1 FROM reports r
+                WHERE r.user_id = u.id
+                  AND NOT EXISTS (SELECT 1 FROM legacy_reports l
+                                  WHERE l.imported_for = u.id
+                                    AND l.title = left(r.title, 500)))
         LIMIT :n
     """), {"a": ACTION, "n": limite}).scalars().all()
     faits = 0
