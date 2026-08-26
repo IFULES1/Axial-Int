@@ -31,6 +31,9 @@ class Report(Base):
     tokens_sortie: Mapped[int | None] = mapped_column(Integer)
     cout_micro_eur: Mapped[int | None] = mapped_column(Integer)
     modele: Mapped[str | None] = mapped_column(String(64))
+    # Séparé du coût modèle : autre cause (angles × fournisseurs), autre courbe.
+    cout_recherche_micro_eur: Mapped[int | None] = mapped_column(Integer)
+    appels_recherche: Mapped[int | None] = mapped_column(Integer)
     duree_secondes: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc)

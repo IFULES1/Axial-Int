@@ -22,7 +22,9 @@ def create_report(db: Session, user_id: str, *, title: str, content: str,
                     tokens_sortie=c.get("tokens_sortie"),
                     cout_micro_eur=c.get("cout_micro_eur"),
                     modele=c.get("modele"),
-                    duree_secondes=c.get("duree_secondes"))
+                    duree_secondes=c.get("duree_secondes"),
+                    cout_recherche_micro_eur=c.get("cout_recherche_micro_eur"),
+                    appels_recherche=c.get("appels_recherche"))
     db.add(report)
     db.commit()
     db.refresh(report)

@@ -73,6 +73,9 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
     import time as _time
 
     _depart = _time.monotonic()
+    # Rempli par l'orchestrateur : le coût de recherche n'apparaît sur aucune
+    # facture ventilée par rapport, il faut le compter à la source.
+    appels_recherche: dict[str, int] = {}
     if not is_valid_type(analysis_type):
         raise AppError(f"Type d'analyse inconnu : {analysis_type}", 400,
                        code="unknown_analysis_type")
@@ -93,7 +96,8 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
         # extrapolation dans le rapport.
         angles = angles_de_recherche(analysis_type, query)
         web_results = web_search.search_multi(angles, top_k=top_k,
-                                              requete_de_rang=query)
+                                              requete_de_rang=query,
+                                              compteur=appels_recherche)
     except Exception as e:
         logger.warning("Web search failed: %s", e)
         web_results = []
@@ -215,9 +219,11 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
                       "stop_reason": result.stop_reason},
         )
 
-    from app.modules.billing.couts import cout_micro_eur
+    from app.modules.billing.couts import cout_micro_eur, cout_recherche_micro_eur
 
     mesure = {
+        "appels_recherche": sum(appels_recherche.values()) or None,
+        "cout_recherche_micro_eur": cout_recherche_micro_eur(appels_recherche) or None,
         "tokens_entree": result.input_tokens or None,
         "tokens_sortie": result.output_tokens or None,
         "modele": result.model,

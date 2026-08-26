@@ -41,8 +41,14 @@ def _dedupe(results: list[SearchResult]) -> list[SearchResult]:
     return list(seen.values())
 
 
-def search(query: str, top_k: int | None = None) -> list[SearchResult]:
-    """Run all enabled providers, merge, dedupe, rerank; return top-K results."""
+def search(query: str, top_k: int | None = None,
+           compteur: dict[str, int] | None = None) -> list[SearchResult]:
+    """Run all enabled providers, merge, dedupe, rerank; return top-K results.
+
+    `compteur` — dictionnaire fourni par l'appelant, rempli du nombre d'appels
+    par fournisseur. C'est ce qui rend le coût de recherche mesurable : il
+    n'apparaît sur aucune facture ventilée par rapport.
+    """
     settings = get_settings()
     top_k = top_k or settings.search_topk
     providers = [p for name in settings.search_provider_list
@@ -50,6 +56,9 @@ def search(query: str, top_k: int | None = None) -> list[SearchResult]:
     if not providers:
         logger.info("No search provider configured/available.")
         return []
+    if compteur is not None:
+        for p in providers:
+            compteur[p.name] = compteur.get(p.name, 0) + 1
 
     # Fan-out in parallel; each provider returns up to top_k.
     merged: list[SearchResult] = []
@@ -68,7 +77,8 @@ def search(query: str, top_k: int | None = None) -> list[SearchResult]:
 
 
 def search_multi(queries: list[str], top_k: int | None = None,
-                 requete_de_rang: str | None = None) -> list[SearchResult]:
+                 requete_de_rang: str | None = None,
+                 compteur: dict[str, int] | None = None) -> list[SearchResult]:
     """Plusieurs angles de recherche, un seul pool classé.
 
     Une requête unique ne ramène qu'une facette du sujet. Une étude de marché
@@ -85,7 +95,7 @@ def search_multi(queries: list[str], top_k: int | None = None,
     if not angles:
         return []
     if len(angles) == 1:
-        return search(angles[0], top_k)
+        return search(angles[0], top_k, compteur=compteur)
 
     providers = [p for name in settings.search_provider_list
                  if (p := get_provider(name)) and p.available()]
@@ -98,6 +108,9 @@ def search_multi(queries: list[str], top_k: int | None = None,
     # reranker sous des variantes du même résultat.
     par_angle = max(5, top_k // 2)
     taches = [(p, q) for p in providers for q in angles]
+    if compteur is not None:
+        for p, _ in taches:
+            compteur[p.name] = compteur.get(p.name, 0) + 1
     merged: list[SearchResult] = []
     with ThreadPoolExecutor(max_workers=min(len(taches), 12)) as pool:
         futures = {pool.submit(p.search, q, par_angle): (p, q) for p, q in taches}

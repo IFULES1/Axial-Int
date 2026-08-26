@@ -107,6 +107,13 @@ class Settings(BaseSettings):
     investor_db_key: str = ""
 
     presidio_url: str = "http://localhost:8010"
+    # Coûts fixes mensuels en euros (VPS + Supabase + Resend + domaine…).
+    # Saisis à la main, une fois par mois : ils n'apparaissent dans aucune base
+    # de l'application. Sans eux, ni le coût total ni le point mort ne sont
+    # calculables — le tableau de bord affiche « non renseigné » plutôt qu'un
+    # zéro qui ferait croire à une structure gratuite.
+    couts_fixes_mensuels_eur: float = 0.0
+
     pii_guard_mode: Literal["off", "shadow", "enforce"] = "shadow"
     pii_mapping_key: str = ""
 

@@ -127,4 +127,7 @@ def generate_veille(*, skill: VeilleSkill, subject: str, rolling_state: str | No
     parsed["full_report"] = full or delta
     parsed["delta"] = delta or full
     parsed["sources"] = citations
+    # Le LLMResult remonte avec le contenu : sans lui, le coût d'une exécution
+    # de veille reste invisible côté service.
+    parsed["mesure"] = result
     return parsed

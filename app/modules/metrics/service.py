@@ -157,10 +157,58 @@ def delai_premier_rapport(db) -> dict:
     return d
 
 
+def couts_totaux(db, jours: int = 30) -> dict:
+    """Coût complet : rapports + conversations + veilles + structure.
+
+    Chaque poste porte son nombre de lignes mesurées : un total calculé sur
+    une base partiellement instrumentée doit dire sur quoi il porte, sinon il
+    se lit comme un total réel.
+    """
+    from app.config import get_settings
+
+    postes = {}
+    for nom, table in (("rapports", "reports"), ("conversations", "messages"),
+                       ("veilles", "watch_runs")):
+        r = db.execute(text(f"""
+            SELECT count(*) AS lignes,
+                   count(cout_micro_eur) AS mesurees,
+                   COALESCE(sum(cout_micro_eur), 0) AS modele_micro,
+                   COALESCE(sum({'cout_recherche_micro_eur'
+                                 if table != 'messages' else '0'}), 0) AS recherche_micro
+            FROM {table}
+            WHERE created_at > now() - make_interval(days => :j)
+        """), {"j": jours}).mappings().first()
+        modele = float(r["modele_micro"] or 0)
+        recherche = float(r["recherche_micro"] or 0)
+        postes[nom] = {
+            "lignes": int(r["lignes"]), "mesurees": int(r["mesurees"] or 0),
+            "cout_modele_eur": round(modele / 1_000_000, 4),
+            "cout_recherche_eur": round(recherche / 1_000_000, 4),
+            "cout_eur": round((modele + recherche) / 1_000_000, 4),
+        }
+
+    variable = round(sum(p["cout_eur"] for p in postes.values()), 4)
+    fixe = get_settings().couts_fixes_mensuels_eur or 0.0
+    # Ramené à la fenêtre : comparer un coût fixe mensuel à 7 jours de coût
+    # variable donnerait un total qui ne veut rien dire.
+    fixe_fenetre = round(fixe * jours / 30, 2) if fixe else None
+    return {
+        "postes": postes,
+        "variable_eur": variable,
+        "fixe_mensuel_eur": fixe or None,
+        "fixe_sur_fenetre_eur": fixe_fenetre,
+        "total_eur": round(variable + (fixe_fenetre or 0), 2) if fixe else None,
+        "point_mort_abonnes": (int(-(-fixe // 50)) if fixe else None),
+        "instrumentation_complete": all(
+            p["lignes"] == p["mesurees"] for p in postes.values()),
+    }
+
+
 def tableau(db, jours: int = 30) -> dict:
     return {
         "fenetre_jours": jours,
         "couts": couts(db, jours),
+        "couts_totaux": couts_totaux(db, jours),
         "par_type": par_type(db, jours),
         "revenus": revenus(db),
         "activite": activite(db, jours),

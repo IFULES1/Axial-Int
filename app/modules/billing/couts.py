@@ -53,3 +53,34 @@ def cout_micro_eur(modele: str, entree: int, sortie: int) -> int:
 
 def en_euros(micro: int | None) -> float:
     return round((micro or 0) / 1_000_000, 4)
+
+
+# --- Recherche web ---------------------------------------------------------
+# Micro-euros par appel. Un « appel » = une requête envoyée à un fournisseur ;
+# la recherche multi-angles en fait `angles × fournisseurs` par rapport, ce qui
+# a multiplié ce poste par ~4 le 25/08.
+#
+# ⚠️ Ordres de grandeur, à confirmer sur les grilles officielles.
+_RECHERCHE = {
+    "exa": 4_600,       # ~5 $ / 1000 recherches
+    "tavily": 7_400,    # ~8 $ / 1000 recherches (mode approfondi)
+    "linkup": 4_600,
+    "serper": 920,      # ~1 $ / 1000 recherches
+}
+_RECHERCHE_REPLI = 4_600
+
+
+def cout_recherche_micro_eur(appels: dict[str, int] | None) -> int:
+    """Coût d'un ensemble d'appels de recherche, par fournisseur."""
+    if not appels:
+        return 0
+    total = 0
+    for fournisseur, n in appels.items():
+        surcharge = os.getenv(f"TARIF_RECHERCHE_{fournisseur.upper()}")
+        try:
+            unitaire = int(surcharge) if surcharge else _RECHERCHE.get(
+                fournisseur.lower(), _RECHERCHE_REPLI)
+        except ValueError:
+            unitaire = _RECHERCHE.get(fournisseur.lower(), _RECHERCHE_REPLI)
+        total += unitaire * max(0, int(n or 0))
+    return total

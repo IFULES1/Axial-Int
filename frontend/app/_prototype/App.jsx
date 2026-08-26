@@ -1508,6 +1508,24 @@ const LABELS_EN = {
   "Première analyse": "First analysis",
   "SOURCES CITÉES": "SOURCES CITED",
   "Retour": "Back",
+  "COÛT TOTAL": "TOTAL COST",
+  "Poste": "Item",
+  "Lignes": "Rows",
+  "Mesurées": "Measured",
+  "Modèle": "Model",
+  "Recherche": "Search",
+  "Total": "Total",
+  "rapports": "reports",
+  "conversations": "conversations",
+  "veilles": "watches",
+  "Coût variable": "Variable cost",
+  "Coûts fixes / mois": "Fixed costs / month",
+  "non renseigné": "not set",
+  "variable COUTS_FIXES_MENSUELS_EUR": "set COUTS_FIXES_MENSUELS_EUR",
+  "Point mort": "Break-even",
+  "abonnés Pro": "Pro subscribers",
+  "Toutes les lignes ne portent pas encore leur coût : ce total ne couvre que celles mesurées. La colonne « Mesurées » dit sur quoi il porte.":
+    "Not every row carries its cost yet: this total covers only the measured ones. The \"Measured\" column says what it is based on.",
   "Tu gardes tes 40 crédits offerts. Cette option reste disponible jusqu'au":
     "You keep your 40 free credits. This option stays available until",
   "Tu gardes tes 40 crédits offerts — de quoi lancer une étude complète.":
@@ -2772,6 +2790,47 @@ function PilotageSurface() {
               {d.couts.non_mesures > 0 && (
                 <p style={{ fontSize: 12.5, color: 'var(--fg-3)', margin: '8px 0 0', lineHeight: 1.5 }}>
                   {libelle("La mesure des coûts date du 25/08 : les rapports antérieurs n'ont pas de coût connu et ne sont pas comptés dans les moyennes.")}
+                </p>
+              )}
+            </>
+          } />
+
+          <Bloc titre={libelle('COÛT TOTAL')} enfants={
+            <>
+              <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13, background: 'var(--surface-2)' }}>
+                  <thead><tr>{[libelle('Poste'), libelle('Lignes'), libelle('Mesurées'),
+                               libelle('Modèle'), libelle('Recherche'), libelle('Total')].map((h, i) => (
+                    <th key={i} style={{ textAlign: i ? 'right' : 'left', padding: '9px 12px', fontSize: 11,
+                                         textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--fg-3)',
+                                         borderBottom: '1px solid var(--border)' }}>{h}</th>))}</tr></thead>
+                  <tbody>
+                    {Object.entries(d.couts_totaux.postes).map(([nom, p]) => (
+                      <tr key={nom}>
+                        <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)' }}>{libelle(nom)}</td>
+                        {[p.lignes, `${p.mesurees}/${p.lignes}`, eur4(p.cout_modele_eur),
+                          eur4(p.cout_recherche_eur), eur4(p.cout_eur)].map((v, i) => (
+                          <td key={i} style={{ padding: '9px 12px', textAlign: 'right', fontFamily: 'var(--font-mono)',
+                                               fontSize: 12, borderBottom: '1px solid var(--border)' }}>{v}</td>))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ marginTop: 12 }}>
+                <Chiffres items={[
+                  [libelle('Coût variable'), eur(d.couts_totaux.variable_eur)],
+                  [libelle('Coûts fixes / mois'), d.couts_totaux.fixe_mensuel_eur == null
+                    ? libelle('non renseigné') : eur(d.couts_totaux.fixe_mensuel_eur),
+                    d.couts_totaux.fixe_mensuel_eur == null ? libelle('variable COUTS_FIXES_MENSUELS_EUR') : null],
+                  [libelle('Coût total'), d.couts_totaux.total_eur == null ? '—' : eur(d.couts_totaux.total_eur)],
+                  [libelle('Point mort'), d.couts_totaux.point_mort_abonnes == null
+                    ? '—' : `${d.couts_totaux.point_mort_abonnes} ${libelle('abonnés Pro')}`],
+                ]} />
+              </div>
+              {!d.couts_totaux.instrumentation_complete && (
+                <p style={{ fontSize: 12.5, color: 'var(--fg-3)', margin: '8px 0 0', lineHeight: 1.5 }}>
+                  {libelle("Toutes les lignes ne portent pas encore leur coût : ce total ne couvre que celles mesurées. La colonne « Mesurées » dit sur quoi il porte.")}
                 </p>
               )}
             </>

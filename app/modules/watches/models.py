@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Integer, JSON, Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy import Uuid as SAUuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -58,6 +58,14 @@ class WatchRun(Base):
     delta_content: Mapped[str] = mapped_column(Text, default="")   # what's NEW since last run
     full_content: Mapped[str] = mapped_column(Text, default="")    # refreshed full report
     rolling_state: Mapped[str | None] = mapped_column(Text)        # memory snapshot after this run
+    # Coût de production. Nullable : les exécutions antérieures au 25/08 n'ont
+    # jamais été mesurées, et un zéro les ferait passer pour gratuites.
+    tokens_entree: Mapped[int | None] = mapped_column(Integer)
+    tokens_sortie: Mapped[int | None] = mapped_column(Integer)
+    cout_micro_eur: Mapped[int | None] = mapped_column(Integer)
+    modele: Mapped[str | None] = mapped_column(String(64))
+    cout_recherche_micro_eur: Mapped[int | None] = mapped_column(Integer)
+    appels_recherche: Mapped[int | None] = mapped_column(Integer)
     sources: Mapped[list | None] = mapped_column(JSONType)         # web + rss sources used
     new_article_urls: Mapped[list | None] = mapped_column(JSONType)  # RSS urls consumed (dedupe)
     had_changes: Mapped[bool] = mapped_column(Boolean, default=True)

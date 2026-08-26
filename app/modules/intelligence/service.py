@@ -306,16 +306,30 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
 
 
 def _finalize_turn(db: Session, user_id: str, turn: _Turn, answer: str, *,
-                   is_admin: bool, degraded: bool) -> Message:
-    """Persist the assistant turn, update the conversation, bill on success."""
+                   is_admin: bool, degraded: bool, mesure=None) -> Message:
+    """Persist the assistant turn, update the conversation, bill on success.
+
+    `mesure` — le LLMResult de la génération. Sans lui, le coût des
+    conversations reste invisible et le coût total mensuel incalculable : seuls
+    les rapports étaient instrumentés.
+    """
     from app.modules.billing import service as billing
+    from app.modules.billing.couts import cout_micro_eur
 
     if turn.redirect_note:
         answer = f"> ℹ️ {turn.redirect_note}\n\n{answer}"
 
+    entree = getattr(mesure, "input_tokens", 0) or 0
+    sortie = getattr(mesure, "output_tokens", 0) or 0
+    modele = getattr(mesure, "model", None)
     assistant_msg = Message(id=uuid.uuid4(), conversation_id=turn.conv.id,
                             role="assistant", agent=turn.agent_key, content=answer,
-                            citations=turn.citations or None)
+                            citations=turn.citations or None,
+                            tokens_entree=entree or None,
+                            tokens_sortie=sortie or None,
+                            modele=modele,
+                            cout_micro_eur=(cout_micro_eur(modele, entree, sortie)
+                                            if modele else None) or None)
     db.add(assistant_msg)
 
     turn.conv.message_count += 2
@@ -343,6 +357,7 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
     if turn.blocked_answer:
         return _finalize_turn(db, user_id, turn, turn.blocked_answer,
                               is_admin=is_admin, degraded=True)
+    result = None
     try:
         result = llm_client.generate(system=turn.system, prompt=turn.prompt,
                                      tier=turn.tier, max_tokens=turn.max_tokens)
@@ -351,7 +366,7 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
         logger.warning("Agent generation failed: %s", e)
         answer, degraded = "⚠️ La génération a échoué. Réessaie dans un instant.", True
     return _finalize_turn(db, user_id, turn, answer, is_admin=is_admin,
-                          degraded=degraded)
+                          degraded=degraded, mesure=result)
 
 
 # --- Flux temps réel du chat ------------------------------------------------

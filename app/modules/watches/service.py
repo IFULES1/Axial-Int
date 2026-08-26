@@ -173,6 +173,9 @@ def run_watch(db: Session, watch: Watch) -> bool:
             _reschedule(db, watch, produced=False)
             return False
 
+        # Rempli par l'orchestrateur : le coût de recherche d'une veille suit le
+        # nombre d'angles du skill, pas le nombre d'exécutions.
+        appels_recherche: dict[str, int] = {}
         skill = skills.get_skill(watch.skill)
 
         # 1. Sources: fresh RSS (new since last run) + web search on the skill's angle.
@@ -185,7 +188,8 @@ def run_watch(db: Session, watch: Watch) -> bool:
             # rapports : ce que la recherche ne trouve pas, le modèle le comble.
             angles = [query] + [f"{watch.query} — {a}" for a in skill.angles_web()]
             web_results = web_search.search_multi(angles, top_k=12,
-                                                  requete_de_rang=query)
+                                                  requete_de_rang=query,
+                                                  compteur=appels_recherche)
         except Exception as e:  # noqa: BLE001 — web is optional, RSS may carry the run
             logger.warning("Watch %s web search failed: %s", watch.id, e)
             web_results = []
@@ -199,8 +203,19 @@ def run_watch(db: Session, watch: Watch) -> bool:
         )
 
         # 3. Archive the run + advance the rolling memory.
+        from app.modules.billing.couts import cout_micro_eur, cout_recherche_micro_eur
+
+        mesure = veille.get("mesure")
+        entree = getattr(mesure, "input_tokens", 0) or 0
+        sortie = getattr(mesure, "output_tokens", 0) or 0
+        modele = getattr(mesure, "model", None)
         db.add(WatchRun(
             id=uuid.uuid4(), watch_id=watch.id,
+            tokens_entree=entree or None, tokens_sortie=sortie or None,
+            modele=modele,
+            cout_micro_eur=(cout_micro_eur(modele, entree, sortie) if modele else None) or None,
+            appels_recherche=sum(appels_recherche.values()) or None,
+            cout_recherche_micro_eur=cout_recherche_micro_eur(appels_recherche) or None,
             delta_content=veille.get("delta") or "",
             full_content=veille.get("full_report") or "",
             rolling_state=veille.get("rolling_state"),

@@ -3,13 +3,13 @@ C01;Coût;Coût variable par rapport;Prix réel des appels modèle pour produire
 C02;Coût;Coût moyen par type de rapport;Coût variable moyen, ventilé par analysis_type;avg(reports.cout_micro_eur) GROUP BY analysis_type;hebdo;< 1 % du prix facturé;oui;—;1
 C03;Coût;Coût du rapport le plus cher;Maximum observé sur la fenêtre — révèle les générations qui dérapent;max(reports.cout_micro_eur);hebdo;< 3× la moyenne;oui;—;1
 C04;Coût;Coût des rapports offerts;Somme des coûts des premiers rapports offerts à l'inscription;reports joints à credit_events action=premier_rapport_offert;mensuel;suivre, pas de cible;partiel;lier le rapport à l'événement d'offre;1
-C05;Coût;Coût variable par message de chat;Prix des appels modèle pour une réponse conversationnelle;non stocké;hebdo;< 0,02 €;non;persister tokens+coût sur messages;2
-C06;Coût;Coût variable par exécution de veille;Prix d'un passage d'agent (RSS + web + modèle);non stocké;hebdo;< 0,30 €;non;ajouter les colonnes de coût à watch_runs;2
-C07;Coût;Coût des API de recherche;Dépense Exa + Tavily + Linkup + Serper;factures fournisseurs;mensuel;suivre — a été multiplié par ~4 le 25/08;non;compteur d'appels par fournisseur;1
+C05;Coût;Coût variable par message de chat;Prix des appels modèle pour une réponse conversationnelle;non stocké;hebdo;< 0,02 €;oui;—;2
+C06;Coût;Coût variable par exécution de veille;Prix d'un passage d'agent (RSS + web + modèle);non stocké;hebdo;< 0,30 €;oui;—;2
+C07;Coût;Coût des API de recherche;Dépense Exa + Tavily + Linkup + Serper;factures fournisseurs;mensuel;suivre — a été multiplié par ~4 le 25/08;oui;—;1
 C08;Coût;Coût du rerank Cohere;Dépense de reclassement des sources;facture Cohere;mensuel;suivre;non;compteur d'appels;3
-C09;Coût;Coûts fixes mensuels;VPS + Supabase + Resend + domaine + Presidio;relevé manuel;mensuel;connaître le chiffre;non;une ligne à saisir une fois par mois;1
-C10;Coût;Coût total mensuel;Fixes + variables;C09 + somme des coûts variables;mensuel;< MRR;partiel;dépend de C05, C06, C07, C09;1
-C11;Coût;Coût par utilisateur actif;Coût total divisé par les actifs du mois;C10 / actifs 30j;mensuel;< 5 €;partiel;dépend de C10;2
+C09;Coût;Coûts fixes mensuels;VPS + Supabase + Resend + domaine + Presidio;relevé manuel;mensuel;connaître le chiffre;partiel;un montant à saisir dans COUTS_FIXES_MENSUELS_EUR;1
+C10;Coût;Coût total mensuel;Fixes + variables;C09 + somme des coûts variables;mensuel;< MRR;oui;—;1
+C11;Coût;Coût par utilisateur actif;Coût total divisé par les actifs du mois;C10 / actifs 30j;mensuel;< 5 €;oui;—;2
 R01;Rentabilité;Marge brute par type de rapport;Valeur en euros du prix en crédits, moins le coût réel;(crédits × 0,4167) − coût réel;hebdo;> 90 %;oui;—;1
 R02;Rentabilité;Marge brute globale;Sur l'ensemble des rapports de la fenêtre;somme des marges / somme des revenus;mensuel;> 90 %;oui;—;1
 R03;Rentabilité;Valeur d'un crédit;Référence de conversion crédits → euros;50 € / 120 crédits = 0,4167 €;à chaque changement de prix;—;oui;—;1
