@@ -114,6 +114,11 @@ class Settings(BaseSettings):
     # zéro qui ferait croire à une structure gratuite.
     couts_fixes_mensuels_eur: float = 0.0
 
+    # Jeton de lecture seule pour l'export vers Google Sheets. Distinct des
+    # jetons de session : un script planifié ne peut pas se reconnecter, et un
+    # JWT d'administration expire. Vide = endpoint fermé.
+    metrics_export_token: str = ""
+
     pii_guard_mode: Literal["off", "shadow", "enforce"] = "shadow"
     pii_mapping_key: str = ""
 
