@@ -224,3 +224,54 @@ def test_catalogue_de_flux_verifie():
     couvertes = {f["category"] for f in c}
     for attendue in ("reglementaire", "vc", "financement", "marche"):
         assert attendue in couvertes, attendue
+
+
+def test_reponse_de_chat_vide_non_facturee(monkeypatch):
+    """Un flux qui se termine sans erreur ET sans texte ne doit rien facturer.
+
+    Le 03/09, Gemini est tombé en 503, le basculement vers Claude a réussi
+    (HTTP 200) mais Claude a consommé ses 2 500 tokens en réflexion sans
+    produire un seul bloc de texte. `text_stream` n'a rien rendu, aucune
+    exception n'a été levée : la réponse vide a été archivée et facturée.
+    """
+    from unittest import mock
+
+    from app.modules.intelligence import service
+
+    factures: list[bool] = []
+
+    class _Msg:
+        id = "m1"
+        role = "assistant"
+        agent = "conseiller"
+        content = ""
+        citations = None
+        created_at = __import__("datetime").datetime.now()
+
+    def faux_finalize(db, user_id, turn, answer, *, is_admin, degraded, mesure=None):
+        factures.append(not degraded)
+        m = _Msg()
+        m.content = answer
+        return m
+
+    class _Turn:
+        conv = types.SimpleNamespace(id="c1")
+        agent_key = "conseiller"
+        redirect_note = None
+        system = "s"
+        prompt = "p"
+        citations = []
+        tier = "chat"
+        max_tokens = 8000
+        blocked_answer = None
+
+    # Le flux se termine sans erreur et sans produire un seul morceau.
+    with mock.patch.object(service, "_prepare_turn", lambda *a, **k: _Turn()), \
+         mock.patch.object(service, "_finalize_turn", faux_finalize), \
+         mock.patch.object(service.llm_client, "stream_text", lambda **k: iter(())):
+        evts = list(service.stream_message(db=None, user_id="u",
+                                           conversation_id="c1", content="q",
+                                           is_admin=False))
+
+    assert factures == [False], "une réponse vide a été facturée"
+    assert any('"degraded": true' in e for e in evts), evts
