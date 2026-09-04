@@ -137,6 +137,47 @@ def _envoyer_invitation(db: Session, email: str) -> None:
     _poster(email, "Ton compte Axial n'est pas encore créé", texte)
 
 
+# Violet de la marque, repris de l'interface. Le corps de l'email reste clair :
+# un email sombre s'affiche mal dans la moitié des clients de messagerie.
+_VIOLET = "#4F46D6"
+
+
+def _gabarit(titre: str, corps_html: str, bouton: tuple[str, str] | None = None,
+             pied: str = "") -> str:
+    """Gabarit HTML des emails transactionnels d'Axial.
+
+    Mise en page par tableaux plutôt que par flexbox : Outlook ignore la
+    seconde, et un email de réinitialisation cassé est un utilisateur perdu.
+    """
+    action = ""
+    if bouton:
+        libelle, lien = bouton
+        action = (
+            f'<table role="presentation" cellpadding="0" cellspacing="0" '
+            f'style="margin:26px 0"><tr><td style="border-radius:8px;'
+            f'background:{_VIOLET}">'
+            f'<a href="{lien}" style="display:inline-block;padding:13px 26px;'
+            f'font-size:15px;font-weight:600;color:#FFFFFF;text-decoration:none">'
+            f'{libelle}</a></td></tr></table>'
+        )
+    return (
+        '<div style="margin:0;padding:28px 16px;background:#F5F5F7">'
+        '<div style="max-width:560px;margin:0 auto;background:#FFFFFF;'
+        'border-radius:12px;padding:34px 32px;font-family:-apple-system,'
+        'BlinkMacSystemFont,Segoe UI,Helvetica,Arial,sans-serif;'
+        'font-size:15px;line-height:1.6;color:#1B1D1E">'
+        f'<div style="font-size:19px;font-weight:700;color:{_VIOLET};'
+        'letter-spacing:-.01em;margin-bottom:4px">Axial</div>'
+        '<div style="font-size:12px;letter-spacing:.14em;text-transform:uppercase;'
+        'color:#8A8F98;margin-bottom:26px">Intelligence</div>'
+        f'<h1 style="font-size:20px;font-weight:600;margin:0 0 16px">{titre}</h1>'
+        f'{corps_html}{action}'
+        f'<p style="margin:26px 0 0;padding-top:18px;border-top:1px solid #E8E8ED;'
+        f'font-size:12.5px;color:#8A8F98">{pied}</p>'
+        '</div></div>'
+    )
+
+
 def _envoyer_email(email: str, token: str) -> None:
     lien = f"https://app.axial-ia.fr/?reinit={token}"
     texte = (
@@ -148,10 +189,22 @@ def _envoyer_email(email: str, token: str) -> None:
         "ton mot de passe actuel reste valable.\n\n"
         "Axial Intelligence"
     )
-    _poster(email, "Réinitialiser ton mot de passe Axial", texte)
+    html = _gabarit(
+        "Réinitialiser ton mot de passe",
+        "<p style='margin:0 0 14px'>Tu as demandé à changer ton mot de passe Axial. "
+        "Clique sur le bouton ci-dessous pour en choisir un nouveau.</p>"
+        "<p style='margin:0'>Ce lien est valable <strong>une heure</strong> et ne "
+        "fonctionne qu'une seule fois.</p>",
+        bouton=("Choisir un nouveau mot de passe", lien),
+        pied=("Si tu n'es pas à l'origine de cette demande, ignore ce message : "
+              "ton mot de passe actuel reste valable.<br><br>"
+              f"Le bouton ne fonctionne pas ? Copie ce lien :<br>"
+              f"<span style='color:#5A5F68;word-break:break-all'>{lien}</span>"),
+    )
+    _poster(email, "Réinitialiser ton mot de passe Axial", texte, html)
 
 
-def _poster(email: str, objet: str, texte: str) -> None:
+def _poster(email: str, objet: str, texte: str, html: str | None = None) -> None:
     """Envoi bas niveau. Un échec est journalisé, jamais remonté au visiteur."""
     import httpx
 
@@ -166,6 +219,7 @@ def _poster(email: str, objet: str, texte: str) -> None:
                      "Content-Type": "application/json"},
             json={"from": '"Miradie @Axial" <miradie.buranturu@axial-ia.fr>',
                   "to": [email], "subject": objet, "text": texte,
+                  **({"html": html} if html else {}),
                   "reply_to": "miradie.buranturu@axial-ia.fr"},
             timeout=20.0,
         ).raise_for_status()

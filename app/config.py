@@ -49,7 +49,11 @@ class Settings(BaseSettings):
     refresh_ttl_seconds: int = 60 * 60 * 24 * 30
     # Registration policy (kept from the current product).
     require_invitation_code: bool = False
-    allow_freemail: bool = False
+    # Toute adresse est acceptée, y compris Gmail et consorts (décision du
+    # 04/09). Refuser une adresse personnelle bloquait des fondateurs qui n'ont
+    # souvent pas d'autre boîte, sans rien filtrer d'utile : une inscription
+    # sur deux était rejetée.
+    allow_freemail: bool = True
 
     # --- Analytics (separate Supabase ANALYTICS project) -----------------
     analytics_database_url: str = ""

@@ -1313,10 +1313,6 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
 
   const finish = async (kind) => {
     if (busy) return;
-    if (kind === 'google') {
-      setAuthErr(libelle("Connexion Google bientôt disponible — utilise ton email professionnel."));
-      return;
-    }
     setAuthErr(null);
     setBusy(kind);
     try {
@@ -1381,27 +1377,11 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
             onClick={() => setMode('login')}>{libelle('Se connecter')}</button>
         </div>
 
-        <button className="btn btn-secondary btn-block" type="button"
-          style={{ marginBottom: 4 }}
-          disabled={!!busy}
-          onClick={() => finish('google')}>
-          {busy === 'google'
-            ? <><span className="spinner" /> Connexion en cours…</>
-            : <><Icon name="google" size={18} />
-                {mode === 'signup' ? libelle("Continuer avec Google") : libelle("Se connecter avec Google")}</>}
-        </button>
-
-        <div className="auth-divider">
-          <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-          <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 10, letterSpacing: '0.12em' }}>{libelle('OU PAR EMAIL')}</span>
-          <span style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-        </div>
-
         <form onSubmit={submit} className="auth-fields">
           <div>
-            <label className="label">{libelle("EMAIL PROFESSIONNEL")}</label>
+            <label className="label">{libelle("EMAIL")}</label>
             <input className="input" type="email" required
-              placeholder={libelle("vous@votre-entreprise.com")}
+              placeholder={libelle("ton@email.com")}
               value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
           <div>
@@ -1618,7 +1598,8 @@ const LABELS_EN = {
   "Connexion Google bientôt disponible — utilise ton email professionnel.":
     "Google sign-in is coming soon — use your work email for now.",
   "OU PAR EMAIL": "OR WITH EMAIL",
-  "EMAIL PROFESSIONNEL": "WORK EMAIL",
+  "EMAIL": "EMAIL",
+  "ton@email.com": "you@email.com",
   "MOT DE PASSE": "PASSWORD",
   "vous@votre-entreprise.com": "you@your-company.com",
   "8 caractères minimum": "8 characters minimum",
