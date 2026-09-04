@@ -1395,7 +1395,7 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
               style={{ fontSize: 12, color: 'var(--v-soft)', alignSelf: 'flex-end',
                        marginTop: -6, background: 'none', border: 'none',
                        cursor: 'pointer', padding: 0, textDecoration: 'underline' }}>
-              {resetBusy ? 'Envoi…' : '{libelle("Mot de passe oublié ?")}'}
+              {resetBusy ? libelle('Envoi…') : libelle('Mot de passe oublié ?')}
             </button>
           )}
           {resetMsg && (
@@ -1489,6 +1489,7 @@ const LABELS_EN = {
   "SOURCES CITÉES": "SOURCES CITED",
   "Retour": "Back",
   "Copier": "Copy",
+  "Envoi…": "Sending…",
   "Copié": "Copied",
   "Copier la réponse": "Copy the answer",
   "Exporter": "Export",

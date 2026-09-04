@@ -12,6 +12,22 @@ from sqlalchemy import text
 _ROLES = {"user": "Question", "assistant": "Axial"}
 
 
+_TITRES_PAR_DEFAUT = {"workspace", "conversation", "nouvelle conversation",
+                      "new conversation", "nouvelle analyse", "new analysis", ""}
+
+
+def _titre_utile(titre: str | None, messages) -> str:
+    """Titre stocké s'il est parlant, sinon la première question posée."""
+    t = (titre or "").strip()
+    if t.lower() not in _TITRES_PAR_DEFAUT:
+        return t
+    for m in messages:
+        if m["role"] == "user" and (m["content"] or "").strip():
+            premiere = " ".join((m["content"] or "").split())
+            return premiere[:80].rstrip() + ("…" if len(premiere) > 80 else "")
+    return "Conversation"
+
+
 def _entete(titre: str, quand: dt.datetime | None, n: int) -> str:
     date = (quand or dt.datetime.now(dt.timezone.utc)).strftime("%d/%m/%Y")
     return (f"# {titre}\n\n"
@@ -34,7 +50,11 @@ def markdown(db, user_id: str, conversation_id: str) -> tuple[str, str]:
         FROM messages WHERE conversation_id = :c ORDER BY created_at
     """), {"c": conversation_id}).mappings().all()
 
-    titre = conv["title"] or "Conversation"
+    # Les conversations gardent souvent leur titre par défaut. L'interface
+    # affiche alors la première question ; l'export doit faire pareil, sinon
+    # tous les fichiers s'appellent « workspace » dans le dossier de
+    # téléchargements.
+    titre = _titre_utile(conv["title"], messages)
     parties = [_entete(titre, conv["created_at"], len(messages))]
 
     for m in messages:
