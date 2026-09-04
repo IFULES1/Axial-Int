@@ -6100,7 +6100,14 @@ function App() {
         const s = await axSubscription();
         go(s && s.active ? 'app' : 'onb4');
       } catch (e) { go('app'); /* API indisponible : ne pas bloquer l'accès */ }
-    }).catch(() => axClearToken());
+    }).catch((e) => {
+      // Ne déconnecter QUE sur un refus d'authentification avéré. Une panne
+      // réseau ou un 500 passager effaçait le jeton définitivement : le
+      // 03/09, un utilisateur s'est retrouvé dehors au milieu de sa session
+      // et toutes ses requêtes suivantes sont parties sans jeton (403).
+      if (e && (e.status === 401 || e.status === 403)) { axClearToken(); go('landing'); }
+      else { go('app'); }
+    });
   }, []);
   const [suggested, setSuggested] = useState(window.AXIAL_DATA.SUGGESTED_PROMPTS);
   useEffect(() => {

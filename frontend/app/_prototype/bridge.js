@@ -54,7 +54,10 @@ export async function axFetch(path, { method = "GET", body, auth = true, _retrie
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401 && auth && !_retried && path !== "/auth/refresh") {
+  // 401 ET 403 : FastAPI répond 403 quand l'en-tête Authorization est absent
+  // ou malformé, alors que c'est exactement le cas où il faut réessayer.
+  if ((res.status === 401 || res.status === 403) && auth && !_retried
+      && path !== "/auth/refresh") {
     const ok = await tryRefresh();
     if (ok) return axFetch(path, { method, body, auth, _retried: true });
   }
