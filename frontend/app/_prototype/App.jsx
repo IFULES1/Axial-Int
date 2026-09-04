@@ -6141,7 +6141,10 @@ function App() {
       if (!u.onboarding_complete) { go('onb1'); return; }
       try {
         const s = await axSubscription();
-        go(s && s.active ? 'app' : 'onb4');
+        // Route distincte de l'onboarding : ici l'utilisateur revient, il n'a
+        // rien à découvrir. Sa sortie mène à l'app, pas à l'écran « première
+        // analyse » — celui-ci ne se voit qu'une fois, à l'inscription.
+        go(s && s.active ? 'app' : 'carte');
       } catch (e) { go('app'); /* API indisponible : ne pas bloquer l'accès */ }
     }).catch((e) => {
       // Ne déconnecter QUE sur un refus d'authentification avéré. Une panne
@@ -6354,7 +6357,16 @@ function App() {
       onBack={() => go('landing')}
       onSubmit={async ({ mode, email, pwd }) => {
         if (mode === 'signup') { await axRegister(email, pwd); go('onb1'); }
-        else { await axLogin(email, pwd); go('app'); }
+        else {
+          await axLogin(email, pwd);
+          // Même règle qu'au rechargement : sans abonnement actif, on passe
+          // par l'écran carte. Router directement vers l'app ici court-circuitait
+          // la porte à chaque connexion explicite.
+          try {
+            const s = await axSubscription();
+            go(s && s.active ? 'app' : 'carte');
+          } catch (e) { go('app'); }
+        }
       }}
     />;
   }
@@ -6404,7 +6416,12 @@ function App() {
     />;
   }
   if (route === 'onb4') {
+    // Chemin d'inscription : après la carte vient la première analyse.
     return <OnbStep4 onBack={() => go('onb2')} onSkip={() => go('onb3')} />;
+  }
+  if (route === 'carte') {
+    // Chemin de connexion : la sortie mène directement à l'app.
+    return <OnbStep4 onSkip={() => go('app')} />;
   }
 
   if (route === 'recipient') {
