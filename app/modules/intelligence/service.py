@@ -302,7 +302,9 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
 
     return _Turn(conv=conv, agent_key=agent_key, redirect_note=redirect_note,
                  system=system, prompt=prompt, citations=citations, tier=tier,
-                 max_tokens=8000 if tier == "report" else 2500)
+                 # 2500 pouvaient être entièrement absorbés par la réflexion
+                 # adaptative du modèle, ne laissant rien pour la réponse.
+                 max_tokens=16000 if tier == "report" else 8000)
 
 
 def _finalize_turn(db: Session, user_id: str, turn: _Turn, answer: str, *,
@@ -428,6 +430,22 @@ def stream_message(db: Session, user_id: str, conversation_id: str, content: str
                       "de rédaction)*")
 
     answer = "".join(chunks)
+    # Le flux peut se terminer SANS erreur et SANS rien produire : le modèle
+    # renvoie zéro token quand sa réflexion a consommé tout le budget de sortie.
+    # Sans ce garde-fou, la réponse vide était archivée et facturée — arrivé le
+    # 03/09 à un utilisateur qui posait sa deuxième question.
+    if not answer.strip():
+        logger.warning("Réponse vide (modèle %s, tier %s) — non facturée",
+                       turn.agent_key, turn.tier)
+        msg = _finalize_turn(
+            db, user_id, turn,
+            "⚠️ La réponse n'a pas abouti. Repose ta question — aucun crédit "
+            "n'a été débité.",
+            is_admin=is_admin, degraded=True)
+        yield _sse({"step": "done", "done": True, "degraded": True,
+                    "data": _stream_payload(msg, turn)})
+        return
+
     msg = _finalize_turn(db, user_id, turn, answer, is_admin=is_admin, degraded=False)
     yield _sse({"step": "done", "done": True, "data": _stream_payload(msg, turn)})
 
