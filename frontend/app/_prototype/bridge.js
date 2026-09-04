@@ -333,6 +333,26 @@ export async function axResumeWatch(id) { return axFetch(`/watches/${id}/resume`
 export async function axDeleteWatch(id) { return axFetch(`/watches/${id}`, { method: "DELETE" }); }
 export async function axMetrics(jours = 30) { return axFetch(`/metrics/tableau?jours=${jours}`); }
 export async function axPremierRapport() { return axFetch("/analysis/premier-rapport", { method: "POST" }); }
+// Export d'une conversation : on télécharge des octets, pas du JSON — axFetch
+// ne convient pas, il parse la réponse.
+export async function axExporterConversation(id, format, nomFichier) {
+  const r = await fetch(`${AX_API}/intelligence/conversations/${id}/export?format=${format}`, {
+    headers: { Authorization: "Bearer " + axGetToken() },
+  });
+  if (!r.ok) throw new Error("Export impossible");
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nomFichier;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  // Sans révocation, chaque export garde son blob en mémoire jusqu'au
+  // rechargement de la page.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export async function axListFeeds() { return axFetch("/watches/feeds"); }
 export async function axFeedsCatalogue() { return axFetch("/watches/feeds/catalogue"); }
 export async function axAddFeed(body) { return axFetch("/watches/feeds", { method: "POST", body }); }

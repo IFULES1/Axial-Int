@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axMetrics, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -1488,6 +1488,12 @@ const LABELS_EN = {
   "Première analyse": "First analysis",
   "SOURCES CITÉES": "SOURCES CITED",
   "Retour": "Back",
+  "Copier": "Copy",
+  "Copié": "Copied",
+  "Copier la réponse": "Copy the answer",
+  "Exporter": "Export",
+  "Exporter en Markdown": "Export as Markdown",
+  "Exporter en PDF": "Export as PDF",
   "COÛT TOTAL": "TOTAL COST",
   "Poste": "Item",
   "Lignes": "Rows",
@@ -2456,6 +2462,36 @@ function EmptyConvState({ onSend, suggestedPrompts }) {
 /* ============================================================
    Conversation thread
    ============================================================ */
+function BoutonCopier({ texte, libelleCourt }) {
+  const [copie, setCopie] = React.useState(false);
+  const copier = async () => {
+    try {
+      await navigator.clipboard.writeText(texte || '');
+    } catch (e) {
+      // clipboard exige un contexte sécurisé ; repli sur la vieille méthode.
+      const z = document.createElement('textarea');
+      z.value = texte || '';
+      z.style.position = 'fixed'; z.style.opacity = '0';
+      document.body.appendChild(z); z.select();
+      try { document.execCommand('copy'); } catch (_) {}
+      z.remove();
+    }
+    setCopie(true);
+    setTimeout(() => setCopie(false), 1800);
+  };
+  return (
+    <button className="icon-btn" onClick={copier}
+      title={copie ? libelle('Copié') : libelle('Copier la réponse')}>
+      <Icon name={copie ? 'check' : 'copy'} size={14} />
+      {!libelleCourt && (
+        <span style={{ marginLeft: 6, fontSize: 12 }}>
+          {copie ? libelle('Copié') : libelle('Copier')}
+        </span>
+      )}
+    </button>
+  );
+}
+
 function ConvThread({ conversation, onSend, streamingSpeed, openCite }) {
   const [draft, setDraft] = useConvState('');
   const scrollRef = useConvRef(null);
@@ -2466,8 +2502,38 @@ function ConvThread({ conversation, onSend, streamingSpeed, openCite }) {
     }
   }, [conversation.messages.length, conversation.id]);
 
+  const [exportEnCours, setExportEnCours] = useConvState('');
+  const exporter = async (format) => {
+    setExportEnCours(format);
+    const base = (conversation.title || 'conversation')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase().slice(0, 60);
+    try { await axExporterConversation(conversation.id, format, `${base || 'conversation'}.${format}`); }
+    catch (e) { /* le bouton se réactive, l'utilisateur peut réessayer */ }
+    setExportEnCours('');
+  };
+
+  // Le fil n'avait aucun en-tête : pas de titre, pas d'action. On en pose un,
+  // discret, qui porte l'export.
   return (
     <div className="thread-region">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    gap: 12, padding: '10px 20px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ minWidth: 0, fontSize: 13.5, color: 'var(--fg-2)', overflow: 'hidden',
+                      textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {conversation.title || libelle('Conversation')}
+        </div>
+        <div style={{ display: 'flex', gap: 6, flex: 'none' }}>
+          <button className="btn btn-secondary btn-sm" disabled={!!exportEnCours}
+            onClick={() => exporter('md')} title={libelle('Exporter en Markdown')}>
+            <Icon name="download" size={13} />{exportEnCours === 'md' ? '…' : 'Markdown'}
+          </button>
+          <button className="btn btn-secondary btn-sm" disabled={!!exportEnCours}
+            onClick={() => exporter('pdf')} title={libelle('Exporter en PDF')}>
+            <Icon name="download" size={13} />{exportEnCours === 'pdf' ? '…' : 'PDF'}
+          </button>
+        </div>
+      </div>
       <div className="thread-scroll" ref={scrollRef}>
         <div className="thread-inner">
           {conversation.messages.map((m, i) => (
@@ -2553,12 +2619,7 @@ function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast, live
         {stillStreaming && <span className="typing-cursor" />}
         {!stillStreaming && (
           <div className="msg-ai-actions">
-            <button className="icon-btn" title="Utile"><Icon name="thumb-up" size={14} /></button>
-            <button className="icon-btn" title="À améliorer"><Icon name="thumb-down" size={14} /></button>
-            <button className="icon-btn" title="Exporter"><Icon name="download" size={14} /></button>
-            <button className="icon-btn report" title="Signaler">
-              <Icon name="flag" size={11} /> Signaler
-            </button>
+            <BoutonCopier texte={fullText} />
           </div>
         )}
       </div>

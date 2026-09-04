@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.errors import AppError
 from app.modules.auth.schemas import AuthUser
 from app.modules.auth.security import get_current_user
 from app.modules.intelligence import personas, service
@@ -161,3 +162,43 @@ def post_message(conversation_id: str, payload: MessageIn,
                              payload.agent, is_admin=user.is_admin,
                              document_ids=payload.document_ids)
     return _msg_out(m)
+
+
+@router.get("/conversations/{conversation_id}/export")
+def exporter(conversation_id: str, format: str = "md",
+             user: AuthUser = Depends(get_current_user),
+             db: Session = Depends(get_db)):
+    """Exporte une conversation en Markdown ou en PDF.
+
+    Le nom de fichier est dérivé du titre : un export nommé d'après un
+    identifiant technique est inexploitable une fois dans un dossier.
+    """
+    import io
+    import re
+    import unicodedata
+
+    from fastapi.responses import Response, StreamingResponse
+
+    from app.modules.intelligence import export as expo
+
+    if format not in ("md", "pdf"):
+        raise AppError("Format inconnu (md ou pdf).", 400, code="bad_format")
+
+    if format == "md":
+        titre, contenu = expo.markdown(db, user.id, conversation_id)
+        corps, media = contenu.encode("utf-8"), "text/markdown; charset=utf-8"
+    else:
+        titre, corps = expo.pdf(db, user.id, conversation_id)
+        media = "application/pdf"
+
+    # Les accents et espaces d'un titre cassent l'en-tête Content-Disposition.
+    base = unicodedata.normalize("NFKD", titre).encode("ascii", "ignore").decode()
+    base = re.sub(r"[^A-Za-z0-9]+", "-", base).strip("-").lower()[:60] or "conversation"
+    nom = f"{base}.{format}"
+
+    if format == "pdf":
+        return StreamingResponse(
+            io.BytesIO(corps), media_type=media,
+            headers={"Content-Disposition": f'attachment; filename="{nom}"'})
+    return Response(content=corps, media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{nom}"'})
