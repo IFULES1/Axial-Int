@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, AX_API, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, AX_API, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument } from "./bridge";
 import { parserMarkdown } from "./markdown";
 
 
@@ -350,7 +350,14 @@ const STRINGS = {
     'conv.chargement': 'Chargement du fil…',
     'conv.stop.aide': 'Arrêter la réponse en cours',
     'conv.agent_change': 'Agent changé : ',
-    'conv.cout.credits': 'crédits',
+    // Accord du pluriel : « 1 crédit » / « 0 crédits », « 2 crédits ». Un
+    // message `partiel` rechargé affiche `credits: 0`, d'où le besoin.
+    'conv.credits.one': 'crédit',
+    'conv.credits.other': 'crédits',
+    // Texte EXACT de `NOTE_INTERROMPUE` (app/modules/intelligence/service.py:1223) :
+    // le backend le suffixe au partiel qu'il archive, la bulle locale doit dire
+    // la même chose que ce qui sera rechargé.
+    'conv.note_interrompue': '\n\n*(réponse interrompue)*',
     'conv.cout.tokens': 'tokens',
     'conv.cout.total': 'Total du fil',
     'conv.cout.aide': 'Coût de cette réponse',
@@ -614,7 +621,9 @@ const STRINGS = {
     'conv.chargement': 'Loading the thread…',
     'conv.stop.aide': 'Stop the answer in progress',
     'conv.agent_change': 'Agent switched: ',
-    'conv.cout.credits': 'credits',
+    'conv.credits.one': 'credit',
+    'conv.credits.other': 'credits',
+    'conv.note_interrompue': '\n\n*(response interrupted)*',
     'conv.cout.tokens': 'tokens',
     'conv.cout.total': 'Thread total',
     'conv.cout.aide': 'Cost of this answer',
@@ -2745,13 +2754,19 @@ function ConvThread({ conversation, onSend, openCite, profil,
                 </button>
               )}
               {conversation.messages.map((m, i) => (
+                // Clé STABLE, jamais l'index : une page préfixée par « Charger
+                // les messages précédents » décalait tout le fil et remontait
+                // chaque composant. `localId` d'abord — il ne change pas quand
+                // le `done` apporte l'identifiant serveur, donc la bulle en
+                // flux n'est pas remontée à la fin du flux ; `messageId` pour
+                // les messages venus du backend, qui n'ont pas de `localId`.
                 m.role === 'user'
-                  ? <UserMsg key={i} text={m.content} />
+                  ? <UserMsg key={m.localId || m.messageId || `i-${i}`} text={m.content} />
                   : m.role === 'system'
-                    ? <NoteSysteme key={i} text={m.content} />
+                    ? <NoteSysteme key={m.localId || m.messageId || `i-${i}`} text={m.content} />
                     : m.erreur
-                      ? <CarteErreur key={i} erreur={m.erreur} onAction={() => onErreurAction(m)} />
-                      : <AiMsg key={i} content={m.content} sources={m.sources || []} agent={m.agent}
+                      ? <CarteErreur key={m.localId || m.messageId || `i-${i}`} erreur={m.erreur} onAction={() => onErreurAction(m)} />
+                      : <AiMsg key={m.localId || m.messageId || `i-${i}`} content={m.content} sources={m.sources || []} agent={m.agent}
                           openCite={openCite} live={m.live} viz={m.viz || null}
                           statut={m.statut} credits={m.credits} estAdmin={estAdmin}
                           tokensEntree={m.tokensEntree} tokensSortie={m.tokensSortie}
@@ -2814,12 +2829,20 @@ function formaterTokens(n) {
   return arrondi.replace('.', (window.AXIAL_LANG === 'en') ? '.' : ',') + ' k';
 }
 
+/* Accord du pluriel des crédits par clé i18n : « 1 crédit », « 0 crédits »,
+   « 2 crédits ». Règle française ET anglaise : le singulier ne vaut que pour 1
+   (le français dirait « 0 crédit », mais le backend ne rend jamais 0 < n < 1 ;
+   0 est traité comme un pluriel, comme en anglais, pour une seule règle). */
+function libelleCredits(n) {
+  return texteI18n((Math.abs(Number(n) || 0) === 1) ? 'conv.credits.one' : 'conv.credits.other');
+}
+
 /* Pastille de coût, partagée entre la bulle (coût du tour) et l'en-tête du fil
    (total). Le € n'apparaît que pour un admin ET quand le backend l'a renseigné
    (`cout_micro_eur` est `None` pour tout le monde sauf les admins). */
 function texteCout({ credits, tokens, coutMicroEur, admin }) {
   const parts = [
-    `${credits} ${texteI18n('conv.cout.credits')}`,
+    `${credits} ${libelleCredits(credits)}`,
     `${formaterTokens(tokens)} ${texteI18n('conv.cout.tokens')}`,
   ];
   if (admin && typeof coutMicroEur === 'number') {
@@ -6081,6 +6104,40 @@ function App() {
   // Un AbortController par fil : c'est lui que Stop déclenche. Un `ref` et non
   // un state — l'abandon ne doit pas dépendre d'un rendu.
   const controleursFlux = useConvRef({});
+  // Appels `axMessagesPage` en vol, par identifiant de fil : garde contre un
+  // double chargement sur double clic (voir `openConversation`).
+  const chargementsEnVol = useConvRef({});
+
+  /* Purge des registres indexés par identifiant de fil quand le fil DISPARAÎT
+     de `conversations` (suppression — Task 8 —, déconnexion, rechargement de la
+     liste). Le `finally` de `sendStreamed` ne nettoie que le flux qu'il a lancé :
+     sans cet effet, un fil supprimé pendant un flux laissait son étape, son
+     verrou, son total et surtout un `AbortController` jamais déclenché.
+     `purger` rend l'objet IDENTIQUE quand il n'y a rien à retirer : l'effet
+     tourne à chaque `delta` (la liste change) sans provoquer de rendu. */
+  const idsFils = conversations.map((c) => c.id).join('|');
+  React.useEffect(() => {
+    const vivants = new Set(conversations.map((c) => c.id));
+    const purger = (registre) => {
+      const morts = Object.keys(registre).filter((k) => !vivants.has(k));
+      if (!morts.length) return registre;
+      const suivant = { ...registre };
+      morts.forEach((k) => delete suivant[k]);
+      return suivant;
+    };
+    setEtapesFlux(purger);
+    setFilsEnFlux(purger);
+    setCoutsFils(purger);
+    Object.keys(controleursFlux.current).forEach((k) => {
+      if (vivants.has(k)) return;
+      // Le fil n'existe plus : le flux doit s'arrêter, personne ne le lira.
+      try { controleursFlux.current[k].abort(); } catch (e) {}
+      delete controleursFlux.current[k];
+    });
+    Object.keys(chargementsEnVol.current).forEach((k) => {
+      if (!vivants.has(k)) delete chargementsEnVol.current[k];
+    });
+  }, [idsFils]);
   // Profil entreprise — UNE seule source de vérité, partagée par les
   // suggestions et le bandeau « contexte absent ». `undefined` = pas chargé.
   const [profil, setProfil] = useState(undefined);
@@ -6310,6 +6367,12 @@ function App() {
     setActiveId(id);
     const conv = conversations.find((c) => c.id === id);
     if (!conv || conv.loaded) return;
+    // `loaded` n'arrive qu'à la réponse : deux clics rapides sur un fil non
+    // chargé lançaient deux `axMessagesPage`. Le registre des appels en vol
+    // (un `ref`, pas un state : la garde doit valoir sans attendre un rendu)
+    // ferme la fenêtre.
+    if (chargementsEnVol.current[id]) return;
+    chargementsEnVol.current[id] = true;
     try {
       const page = await axMessagesPage(id, { limit: 50 });
       setConversations((cs) => cs.map((c) => c.id === id
@@ -6320,6 +6383,8 @@ function App() {
       // `loaded` est posé même sur un échec : sinon le skeleton tournerait
       // indéfiniment sur un fil qui ne chargera jamais.
       setConversations((cs) => cs.map((c) => c.id === id ? { ...c, loaded: true } : c));
+    } finally {
+      delete chargementsEnVol.current[id];
     }
   };
 
@@ -6348,7 +6413,7 @@ function App() {
     if (!conv || !(conv.messages || []).length) return;
     setConversations((cs) => cs.map((c) => c.id === activeId ? {
       ...c,
-      messages: [...c.messages, { role: 'system', content: t('conv.agent_change') + label }],
+      messages: [...c.messages, { role: 'system', content: t('conv.agent_change') + label, localId: nouvelIdLocal() }],
     } : c));
   };
 
@@ -6366,10 +6431,38 @@ function App() {
     deconnecter();
   };
 
+  /* Identifiant LOCAL et stable d'un message qui n'existe pas encore côté
+     serveur (question envoyée, bulle en attente, note système, carte d'erreur).
+     Il sert de clé React et d'ancre de mise à jour : plus aucun gestionnaire de
+     flux ne reconstruit le fil depuis un instantané, donc une page préfixée par
+     « Charger les messages précédents » — ou toute autre mutation concurrente
+     du fil — n'est jamais écrasée. */
+  const nouvelIdLocal = () => {
+    try {
+      if (window.crypto && window.crypto.randomUUID) return 'pending-' + window.crypto.randomUUID();
+    } catch (e) {}
+    return 'pending-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  };
+
+  /* Mise à jour FONCTIONNELLE d'UN message, repéré par son `localId`. Si le
+     message a disparu (fil supprimé, fil rechargé), l'objet est rendu
+     identique : aucun rendu, aucune résurrection d'un message effacé. */
+  const majMessage = (cid, localId, patch) => setConversations((cs) => cs.map((c) => {
+    if (c.id !== cid) return c;
+    let trouve = false;
+    const messages = c.messages.map((m) => {
+      if (m.localId !== localId) return m;
+      trouve = true;
+      return { ...patch(m), localId };
+    });
+    return trouve ? { ...c, messages } : c;
+  }));
+
   // Erreur d'envoi : une carte nommée à la place de la bulle, jamais un
   // « ⚠️ + message brut ». `cleIdem` est conservée sur la carte pour que
   // « Réessayer » rejoue le MÊME tour côté serveur (aucun double débit).
-  const poserErreur = (cid, base, e, question, cleIdem) => {
+  // La carte REMPLACE la bulle en attente, repérée par son `localId`.
+  const poserErreur = (cid, localId, e, question, cleIdem) => {
     const erreur = decrireErreur(e, t);
     if (erreur.action === 'reconnexion') { sessionExpiree(); return; }
     if (erreur.action === 'credits') {
@@ -6379,9 +6472,7 @@ function App() {
       // solde et se contredirait.
       axBalance().then((b) => setAxBal(b.available)).catch(() => {});
     }
-    setConversations((cs) => cs.map((c) => c.id === cid
-      ? { ...c, messages: [...base, { role: 'assistant', erreur, question, cleIdem }] }
-      : c));
+    majMessage(cid, localId, () => ({ role: 'assistant', erreur, question, cleIdem }));
   };
 
   /* Le texte affiché ne rétrécit JAMAIS. Le payload final ne fait que compléter
@@ -6404,14 +6495,12 @@ function App() {
   // Envoi en flux : le message assistant grandit mot à mot dans la conversation.
   // `onEvent` transmet TOUS les événements ; l'avertissement `contexte_absent`
   // est déjà rendu par le bandeau du composer (Task 5) — pas de doublon ici.
-  const sendStreamed = async (cid, text, baseMessages, cleIdem) => {
+  const sendStreamed = async (cid, text, localId, cleIdem) => {
     let acc = '';
     // Agent et citations annoncés par le flux : à conserver si le Stop tombe
     // avant le payload final (qui, lui, ne viendra jamais).
     let agentFlux = null;
     let sourcesFlux = [];
-    const setMsgs = (msgs) => setConversations((cs) => cs.map((c) => c.id === cid ? { ...c, messages: msgs } : c));
-
     const ctrl = new AbortController();
     controleursFlux.current[cid] = ctrl;
     setFilsEnFlux((f) => ({ ...f, [cid]: true }));
@@ -6433,16 +6522,15 @@ function App() {
       } else if (evt.step === 'sources') {
         agentFlux = evt.agent || agentFlux;
         sourcesFlux = mapCitations(evt.citations);
-        setMsgs([...baseMessages, { role: 'assistant', content: '__PENDING__', agent: agentFlux, sources: sourcesFlux, live: true }]);
+        majMessage(cid, localId, (m) => ({
+          ...m, role: 'assistant', content: m.content || '__PENDING__',
+          agent: agentFlux, sources: sourcesFlux, live: true,
+        }));
       } else if (evt.step === 'delta') {
         // Premier morceau de texte : le bandeau d'étapes a fini son travail.
         retirerEtape();
         acc += evt.delta || '';
-        setConversations((cs) => cs.map((c) => {
-          if (c.id !== cid) return c;
-          const last = c.messages[c.messages.length - 1] || {};
-          return { ...c, messages: [...baseMessages, { ...last, role: 'assistant', content: acc, live: true }] };
-        }));
+        majMessage(cid, localId, (m) => ({ ...m, role: 'assistant', content: acc, live: true }));
       } else if (evt.step === 'done') {
         retirerEtape();
         // La pastille de crédits ne se rafraîchissait jamais après un envoi.
@@ -6452,14 +6540,14 @@ function App() {
 
     try {
       const final = await axStreamChatIn(cid, text, onEvent, { idempotencyKey: cleIdem, signal: ctrl.signal });
-      setMsgs([...baseMessages, {
+      majMessage(cid, localId, () => ({
         role: 'assistant', content: fusionnerContenu(acc, final.content), agent: final.agent || agentFlux,
         sources: mapCitations(final.citations), viz: final.viz || null, live: false,
         statut: final.statut || 'complet', credits: final.credits,
         tokensEntree: final.tokens_entree, tokensSortie: final.tokens_sortie,
         coutMicroEur: final.cout_micro_eur,
         messageId: final.id,
-      }]);
+      }));
       // Repli sur la route bloquante : le payload ne porte pas de `balance`.
       if (typeof final.balance !== 'number') {
         axBalance().then((b) => setAxBal(b.available)).catch(() => {});
@@ -6470,13 +6558,18 @@ function App() {
       // et porte le badge « Réponse partielle » — côté serveur le tour est
       // archivé en `partiel` et n'est PAS facturé.
       if (ctrl.signal.aborted) {
-        setMsgs([...baseMessages, {
-          role: 'assistant', content: acc, agent: agentFlux,
+        // Même note que celle que le backend suffixe au partiel qu'il archive
+        // (`NOTE_INTERROMPUE`, service.py:1223) : la bulle locale dit donc
+        // exactement ce qui sera rechargé au prochain `axMessagesPage`. Comme
+        // lui, on ne l'ajoute QUE s'il y a du texte : `if chunks:`
+        // (service.py:1397) — rien n'est archivé quand aucun `delta` n'est passé.
+        majMessage(cid, localId, () => ({
+          role: 'assistant', content: acc ? (acc + t('conv.note_interrompue')) : '', agent: agentFlux,
           // Pas de `credits` : le flux a été coupé avant le payload, on n'a
           // aucun compte de tokens à afficher. Le badge « Réponse partielle »
           // dit déjà que rien n'a été débité.
           sources: sourcesFlux, live: false, statut: 'partiel',
-        }]);
+        }));
         axBalance().then((b) => setAxBal(b.available)).catch(() => {});
         rafraichirCout(cid);
         return;
@@ -6506,18 +6599,22 @@ function App() {
     const cid = activeId;
     const cleIdem = nouvelleCleIdempotence();
     const now = (window.AXIAL_LANG === 'en') ? 'now' : 'à l\'instant';
+    // Deux identifiants locaux : la question et la bulle en attente. Le flux ne
+    // touchera plus QUE la bulle, par son identifiant — plus d'instantané du fil.
+    const idQuestion = nouvelIdLocal();
+    const idReponse = nouvelIdLocal();
     setConversations((cs) => cs.map((c) => c.id === cid ? {
       ...c,
-      messages: [...c.messages, { role: 'user', content: text }, { role: 'assistant', content: '__PENDING__' }],
+      messages: [...c.messages,
+                 { role: 'user', content: text, localId: idQuestion },
+                 { role: 'assistant', content: '__PENDING__', localId: idReponse }],
       lastUpdated: now,
     } : c));
-    const base = [...(((conversations.find((c) => c.id === cid) || {}).messages) || []),
-                  { role: 'user', content: text }];
     return (async () => {
       try {
-        await sendStreamed(cid, text, base, cleIdem);
+        await sendStreamed(cid, text, idReponse, cleIdem);
       } catch (e) {
-        poserErreur(cid, base, e, text, cleIdem);
+        poserErreur(cid, idReponse, e, text, cleIdem);
       }
       return true;
     })();
@@ -6541,16 +6638,18 @@ function App() {
       setErreurCreation({ text, erreur: decrireErreur(e, t) });
       return false;
     }
-    const base = [{ role: 'user', content: text }];
+    const idQuestion = nouvelIdLocal();
+    const idReponse = nouvelIdLocal();
     setConversations((cs) => [{
       id, title, lastUpdated: now, loaded: true, hasMore: false,
-      messages: [...base, { role: 'assistant', content: '__PENDING__' }],
+      messages: [{ role: 'user', content: text, localId: idQuestion },
+                 { role: 'assistant', content: '__PENDING__', localId: idReponse }],
     }, ...cs]);
     setActiveId(id);
     try {
-      await sendStreamed(id, text, base, cleIdem);
+      await sendStreamed(id, text, idReponse, cleIdem);
     } catch (e) {
-      poserErreur(id, base, e, text, cleIdem);
+      poserErreur(id, idReponse, e, text, cleIdem);
     }
     return true;
   };
@@ -6569,15 +6668,15 @@ function App() {
     if (action === 'credits') { setModaleCredits(true); return; }
     if (action === 'reconnexion') { sessionExpiree(); return; }
     if (action !== 'reessayer') return;
-    const conv = conversations.find((c) => c.id === cid);
-    if (!conv) return;
-    const base = conv.messages.slice(0, -1);  // la carte d'erreur est toujours la dernière
-    setConversations((cs) => cs.map((c) => c.id === cid
-      ? { ...c, messages: [...base, { role: 'assistant', content: '__PENDING__' }] } : c));
+    // La carte d'erreur porte le `localId` de la bulle qu'elle a remplacée :
+    // « Réessayer » réécrit la MÊME entrée, sans jamais tronquer le fil.
+    const localId = m.localId;
+    if (!localId) return;
+    majMessage(cid, localId, () => ({ role: 'assistant', content: '__PENDING__' }));
     try {
-      await sendStreamed(cid, m.question, base, m.cleIdem);
+      await sendStreamed(cid, m.question, localId, m.cleIdem);
     } catch (e) {
-      poserErreur(cid, base, e, m.question, m.cleIdem);
+      poserErreur(cid, localId, e, m.question, m.cleIdem);
     }
   };
 
