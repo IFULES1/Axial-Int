@@ -173,8 +173,20 @@ d'adresse du compte admin, écran carte), reprise le 07/09.
   thème porte une liste de repli (`Helvetica, Liberation Sans, DejaVu Sans,
   sans-serif`) — les deux sont nécessaires. Nombres formatés en Python
   (« 3 200 M€ »), pas par d3.
-- ⏳ **Prompts non déployés** (règle 5 → bloc viz, consigne chat dans
-  `personas.py`) : diff montré, en attente de l'accord de Miradie.
+- ✓ **Prompts déployés (10/09 soir, accord de Miradie)** : règle 5 → bloc
+  ```viz ; consigne `VIZ_INSTRUCTION` (personas.py) branchée sur les TROIS
+  chemins — spécialistes (`full_system_prompt`), conversation libre
+  (`intelligence/service.py`, qui n'utilise PAS le bloc AXIAL Recommande :
+  premier essai sans graphique, cause trouvée et corrigée) et veille
+  (`watches/engine.py`).
+- ✓ **Preuves réelles** : rapport (2 blocs viz ok — line + funnel — 3 tableaux
+  gardés, PDF 15 p.), chat libre (1 courbe rendue dans la bulle, message
+  archivé avec `viz`), veille (1 bar_h, email HTML avec image hébergée).
+  Premier run de veille « skipped: insufficient credits » : le compte de
+  contrôle était à 4 crédits — recrédité.
+- Branche `visualisation-v1` fusionnée dans `main`, poussée.
+- Attention : `messages.viz` / `reports.viz` vides sont stockés en JSON `null`
+  (pas SQL NULL) — en SQL, tester `jsonb_typeof(viz) = 'array'`.
 - 143 tests verts en local, 139 sur le serveur.
 
 ## Décisions techniques prises
