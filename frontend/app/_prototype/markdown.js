@@ -86,7 +86,7 @@ function parserBlocs(lines) {
       const top = test(line);
       if (!top || top[1].length > 1) break; // pas de premier niveau ici
       const item = { inline: parserInline(top[2]) };
-      i += 1;
+      i += 1; // toujours avancer : une ligne reconnue est consommée
       // Enfants indentés (>=2 espaces), puces ou numérotés, un seul niveau.
       const children = [];
       while (i < lines.length) {
@@ -197,6 +197,8 @@ function parserBlocs(lines) {
 }
 
 export function parserMarkdown(texte) {
-  const lines = String(texte == null ? '' : texte).split('\n');
+  // Retours Windows normalisés : un `\r` résiduel faisait échouer les
+  // expressions de liste (`$` exclut `\r`) et bloquait l'analyse en boucle.
+  const lines = String(texte == null ? '' : texte).replace(/\r\n?/g, '\n').split('\n');
   return parserBlocs(lines);
 }

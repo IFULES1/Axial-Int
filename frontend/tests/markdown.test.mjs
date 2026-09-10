@@ -187,3 +187,12 @@ test('plusieurs paragraphes distincts (une ligne = un paragraphe)', () => {
   assert.equal(blocs[0].type, 'paragraph');
   assert.equal(blocs[1].type, 'paragraph');
 });
+
+test('retours à la ligne Windows (\\r\\n) : listes analysées sans boucle', () => {
+  const blocs = parserMarkdown('- item1\r\n- item2\r\n\r\n1. un\r\n2. deux\r\n');
+  assert.equal(blocs.length, 2);
+  assert.equal(blocs[0].type, 'list');
+  assert.equal(blocs[0].items.length, 2);
+  assert.equal(blocs[1].ordered, true);
+  assert.equal(blocs[1].items.length, 2);
+});
