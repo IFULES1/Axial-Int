@@ -23,21 +23,72 @@ def _inline(text: str) -> str:
     return re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
 
 
-def _md_to_html(md: str) -> str:
-    """Minimal markdown → HTML for the digest (headings, bold, bullets, rules)."""
+IMAGES_PUBLIQUES = "https://app.axial-ia.fr/api/viz"
+
+
+def _tableau_html(cellules: list[list[str]]) -> str:
+    if not cellules:
+        return ""
+    tete = "".join(f'<th style="text-align:left;padding:6px 8px;border-bottom:1px solid #d9d7e8">'
+                   f"{_inline(c)}</th>" for c in cellules[0])
+    corps = "".join("<tr>" + "".join(f'<td style="padding:6px 8px;border-bottom:1px solid #eee">{_inline(c)}</td>'
+                                     for c in ligne) + "</tr>" for ligne in cellules[1:])
+    return f'<table style="border-collapse:collapse;width:100%;font-size:13px"><thead><tr>{tete}</tr></thead>' \
+           f"<tbody>{corps}</tbody></table>"
+
+
+def _md_to_html(md: str, vizs: list[dict] | None = None) -> str:
+    """Minimal markdown → HTML for the digest (headings, bold, bullets, rules,
+    tables, and ```viz blocks as hosted images — a mail client never runs a
+    script, an image is the only form a chart can take there)."""
     out: list[str] = []
     bullets: list[str] = []
+    par_index = {v["index"]: v for v in (vizs or []) if isinstance(v, dict)}
+    lignes = md.splitlines()
 
     def flush() -> None:
         if bullets:
             out.append("<ul>" + "".join(f"<li>{_inline(b)}</li>" for b in bullets) + "</ul>")
             bullets.clear()
 
-    for raw in md.splitlines():
-        line = raw.rstrip()
+    i, k = 0, 0
+    while i < len(lignes):
+        line = lignes[i].rstrip()
         if not line.strip():
             flush()
+            i += 1
             continue
+        if line.strip().startswith("```viz"):
+            flush()
+            j = i + 1
+            while j < len(lignes) and not lignes[j].strip().startswith("```"):
+                j += 1
+            v = par_index.get(k)
+            k += 1
+            if v and v.get("statut") == "ok" and v.get("empreinte"):
+                titre = html.escape((v.get("spec") or {}).get("title") or "")
+                out.append(f'<p style="margin:14px 0"><img src="{IMAGES_PUBLIQUES}/{v["empreinte"]}.png" '
+                           f'width="560" alt="{titre}" style="max-width:100%;height:auto;border:1px solid #e4e2f0;'
+                           f'border-radius:8px"></p>')
+            elif v:
+                from app.modules.viz.pipeline import tableau_de_repli
+
+                out.append(_tableau_html(tableau_de_repli(v.get("spec") or {})))
+            i = j + 1
+            continue
+        if line.strip().startswith("|") and i + 1 < len(lignes) \
+                and re.match(r"^\|?\s*:?-{3,}", lignes[i + 1].strip()):
+            flush()
+            cellules = []
+            j = i
+            while j < len(lignes) and lignes[j].strip().startswith("|"):
+                if j != i + 1:
+                    cellules.append([c.strip() for c in lignes[j].strip().strip("|").split("|")])
+                j += 1
+            out.append(_tableau_html(cellules))
+            i = j
+            continue
+        i += 1
         if line.startswith("### "):
             flush()
             out.append(f"<h3>{_inline(line[4:])}</h3>")
@@ -67,7 +118,8 @@ def _md_to_html(md: str) -> str:
     )
 
 
-def _send_via_resend(recipients: list[str], subject: str, body: str) -> bool:
+def _send_via_resend(recipients: list[str], subject: str, body: str,
+                     vizs: list[dict] | None = None) -> bool:
     """Send through Resend's HTTP API (preferred path)."""
     import httpx
 
@@ -78,7 +130,7 @@ def _send_via_resend(recipients: list[str], subject: str, body: str) -> bool:
             headers={"Authorization": f"Bearer {settings.resend_api_key}",
                      "Content-Type": "application/json"},
             json={"from": settings.mail_from, "to": recipients, "subject": subject,
-                  "html": _md_to_html(body), "text": body},
+                  "html": _md_to_html(body, vizs), "text": body},
             timeout=20.0,
         )
         if r.status_code >= 300:
@@ -90,7 +142,8 @@ def _send_via_resend(recipients: list[str], subject: str, body: str) -> bool:
         return False
 
 
-def send_email(recipients: list[str], subject: str, body: str) -> bool:
+def send_email(recipients: list[str], subject: str, body: str,
+               vizs: list[dict] | None = None) -> bool:
     """Send the digest (markdown `body`) as HTML + plain-text. Prefers the Resend
     HTTP API; falls back to SMTP. Returns False (logged) if unconfigured/failed."""
     settings = get_settings()
@@ -98,7 +151,7 @@ def send_email(recipients: list[str], subject: str, body: str) -> bool:
         logger.info("No recipients; skipping email.")
         return False
     if settings.resend_api_key:
-        return _send_via_resend(recipients, subject, body)
+        return _send_via_resend(recipients, subject, body, vizs)
     if not settings.smtp_host:
         logger.info("No email provider configured (Resend/SMTP); skipping.")
         return False
@@ -107,7 +160,7 @@ def send_email(recipients: list[str], subject: str, body: str) -> bool:
     msg["From"] = settings.smtp_from
     msg["To"] = ", ".join(recipients)
     msg.attach(MIMEText(body, "plain", "utf-8"))
-    msg.attach(MIMEText(_md_to_html(body), "html", "utf-8"))
+    msg.attach(MIMEText(_md_to_html(body, vizs), "html", "utf-8"))
     try:
         with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as server:
             server.starttls()

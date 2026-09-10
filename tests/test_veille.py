@@ -159,3 +159,30 @@ def test_veille_routes_mounted():
         assert p in paths
     assert client.get("/watches/skills").status_code == 200          # public
     assert client.get("/watches/feeds").status_code in (401, 403)    # auth required
+
+
+def test_l_email_de_veille_integre_un_graphique_en_image_hebergee():
+    from app.modules.watches.email import _md_to_html
+
+    md = "## Signal\n```viz\n{\"version\":\"1\",\"intent\":\"domination\",\"title\":\"Parts\"}\n```\nSuite."
+    vizs = [{"index": 0, "statut": "ok", "empreinte": "a" * 64, "spec": {"title": "Parts"}}]
+    html_out = _md_to_html(md, vizs)
+    assert f'<img src="https://app.axial-ia.fr/api/viz/{"a" * 64}.png"' in html_out
+    assert "version" not in html_out and "Suite." in html_out
+
+
+def test_l_email_de_veille_remplace_un_graphique_non_rendu_par_un_tableau():
+    from app.modules.watches.email import _md_to_html
+
+    md = "```viz\n{}\n```"
+    vizs = [{"index": 0, "statut": "repli_tableau:schema", "empreinte": "",
+             "spec": {"series": [{"label": "A", "value": 60}, {"label": "B", "value": 40}], "unit": "%"}}]
+    html_out = _md_to_html(md, vizs)
+    assert "<table" in html_out and ">A<" in html_out and "version" not in html_out
+
+
+def test_l_email_de_veille_rend_les_tableaux_markdown():
+    from app.modules.watches.email import _md_to_html
+
+    html_out = _md_to_html("| a | b |\n|---|---|\n| 1 | 2 |")
+    assert "<table" in html_out and "|---|" not in html_out

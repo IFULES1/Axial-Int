@@ -232,8 +232,14 @@ def run_watch(db: Session, watch: Watch) -> bool:
 
         wants_email = memory_service.get_notification_prefs(db, uid).get("findings", True)
         if watch.email_recipients and wants_email:
-            send_email(watch.email_recipients, f"[Axial · Veille] {watch.name}",
-                       _email_body(watch.name, veille))
+            corps = _email_body(watch.name, veille)
+            # Les graphiques du rapport de veille passent par le même moteur
+            # que ceux des rapports ; l'email les reçoit en image hébergée.
+            from app.modules.viz import service as viz_service
+
+            vizs = viz_service.preparer_sans_faute(db, corps)
+            db.commit()
+            send_email(watch.email_recipients, f"[Axial · Veille] {watch.name}", corps, vizs)
 
         _reschedule(db, watch, produced=True)
         return True
