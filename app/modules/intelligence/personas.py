@@ -21,6 +21,16 @@ AXIAL_RECOMMENDE_INSTRUCTION = (
     "'**AXIAL Recommends**' si tu réponds en anglais. 2-3 phrases qui ne se "
     "contentent pas de rapporter les signaux, mais disent explicitement quoi en "
     "faire — quel mouvement de positionnement, quoi surveiller, quoi éviter."
+    "\n\nVISUALISATION : uniquement si ta réponse compare, classe, répartit ou "
+    "fait évoluer des chiffres (parts, TAM/SAM/SOM, croissance sur plusieurs "
+    "périodes, classement d'acteurs), ajoute UN bloc ```viz au format JSON "
+    '{"version":"1","intent":"<domination|classement|comparaison|repartition|'
+    'concentration|croissance|evolution|projection|rupture|entonnoir|'
+    'positionnement>","title":"<titre court>","subtitle":"<insight en une '
+    'phrase>","unit":"<% | M€ | Md€ | k | vide>","series":[{"label":"…",'
+    '"value":<nombre nu>}],"sources":[<N>]} — 2 à 12 points, une seule unité, '
+    "les mêmes chiffres cités dans le texte. Sinon, aucun bloc : pas de "
+    "graphique pour du conseil qualitatif."
 )
 
 # Socle commun V4 (porté de l'ancienne plateforme) : rigueur, style, sources.

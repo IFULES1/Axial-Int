@@ -50,14 +50,24 @@ STYLE DE RÉDACTION (OBLIGATOIRE)
    première colonne = libellé, colonnes suivantes = valeurs avec une seule
    unité par colonne (« 40 % », « 3,2 Md€ »), 3 à 8 lignes. Pas de tableau
    pour du texte qualitatif.
-   Choisir la forme la plus parlante : quand une COMPARAISON ou une
-   RÉPARTITION se lit d'un coup d'œil (parts de marché, TAM/SAM/SOM,
-   évolution sur 3 à 8 périodes, classement de concurrents sur un critère),
-   écrire la ligne « Graphique : <titre court> » seule, juste au-dessus du
-   tableau à deux colonnes (libellé, valeur d'une seule unité) : le document
-   final affiche alors un graphique à sa place. Quand les valeurs demandent
-   plusieurs colonnes ou une lecture précise ligne à ligne, garder le tableau
-   sans cette ligne. Jamais les deux pour la même donnée.
+   Choisir la forme la plus parlante. Quand une COMPARAISON, une RÉPARTITION,
+   une ÉVOLUTION, un ENTONNOIR ou un POSITIONNEMENT se lit d'un coup d'œil
+   (parts de marché, TAM/SAM/SOM, croissance sur 3 à 8 périodes, classement de
+   concurrents sur un critère, acteurs sur deux mesures), écrire À LA PLACE du
+   tableau un bloc :
+   ```viz
+   {"version":"1","intent":"<domination|classement|comparaison|repartition|concentration|croissance|evolution|projection|rupture|entonnoir|positionnement|pont>","title":"<titre court>","subtitle":"<l'insight en une phrase>","unit":"<% ou M€ ou Md€ ou k ou vide>","series":[{"label":"<libellé>","value":<nombre>}],"highlight":"<libellé du point clé, optionnel>","sources":[<N>]}
+   ```
+   Pour un positionnement sur deux mesures, remplacer "series" par
+   "points":[{"label":"…","x":<nombre>,"y":<nombre>}] et ajouter
+   "axes":{"x":"<mesure x>","y":"<mesure y>"}.
+   Règles du bloc : nombres nus dans "value" (pas d'unité, pas de séparateur
+   de milliers, virgule décimale → point) ; une seule unité par bloc ; 2 à 12
+   points ; les mêmes chiffres apparaissent aussi dans le texte avec leurs
+   citations, et "sources" reprend ces citations. Ne pas choisir le type de
+   graphique : l'application le déduit de "intent" et des données. Quand les
+   valeurs demandent plusieurs colonnes ou une lecture ligne à ligne, garder
+   un tableau. Jamais un bloc viz ET un tableau pour la même donnée.
 6. Section finale : « ## Sources » — JAMAIS « Références Bibliographiques » ni
    « Bibliographie ».
 7. Le rapport s'ouvre par « ## Synthèse exécutive » (« ## Executive summary »

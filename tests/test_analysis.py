@@ -59,3 +59,16 @@ def test_le_style_exige_une_synthese_executive_en_tete():
 
     assert "## Synthèse exécutive" in prompts.OUTPUT_STYLE
     assert "## Executive summary" in prompts.OUTPUT_STYLE
+
+
+def test_le_style_demande_un_bloc_viz_et_plus_la_marque_graphique():
+    from app.modules.analysis import prompts
+
+    assert "```viz" in prompts.OUTPUT_STYLE and '"intent"' in prompts.OUTPUT_STYLE
+    assert "Graphique : <titre court>" not in prompts.OUTPUT_STYLE
+
+
+def test_les_personas_de_chat_connaissent_le_bloc_viz():
+    from app.modules.intelligence import personas
+
+    assert "```viz" in personas.AXIAL_RECOMMENDE_INSTRUCTION
