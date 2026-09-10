@@ -38,7 +38,8 @@ PASSWORD_RESET_FILE = "app/modules/auth/password_reset.py"
 # Registre à bannir dans un message adressé à l'utilisateur de l'app.
 TUTOIEMENT = re.compile(
     r"\b(tu|te|toi|ton|ta|tes)\b|-toi\b|\bréessaie\b|\breconnecte-toi\b"
-    r"|\bremplis\b|\bvérifie\b|\bredemande\b",
+    r"|\bremplis\b|\bvérifie\b|\bredemande\b"
+    r"|\bactive\b|\brelance\b|\breconnecte\b",
     re.IGNORECASE,
 )
 
@@ -69,7 +70,7 @@ def _docstring_ids(tree: ast.AST) -> set[int]:
     return ids
 
 
-def _appError_and_degraded_strings(path: str) -> list[tuple[int, str]]:
+def _app_error_and_degraded_strings(path: str) -> list[tuple[int, str]]:
     """Chaînes littérales des appels `AppError(...)` et des réponses dégradées
     (contenant "⚠️" ou "Réessai"/"réessai") du fichier, hors docstrings."""
     with open(path, encoding="utf-8") as f:
@@ -109,7 +110,7 @@ def test_app_error_and_degraded_messages_vouvoient():
     for path in _app_python_files():
         if path in EMAIL_FILES or path == PASSWORD_RESET_FILE:
             continue
-        for lineno, text in _appError_and_degraded_strings(path):
+        for lineno, text in _app_error_and_degraded_strings(path):
             if TUTOIEMENT.search(text):
                 violations.append(f"{path}:{lineno}: {text!r}")
 
@@ -123,7 +124,7 @@ def test_password_reset_app_errors_vouvoient():
     """password_reset.py mélange emails (tutoiement, hors scope) et erreurs
     HTTP (AppError, vouvoiement) — vérifié ici à part de son corps d'email."""
     violations: list[str] = []
-    for lineno, text in _appError_and_degraded_strings(PASSWORD_RESET_FILE):
+    for lineno, text in _app_error_and_degraded_strings(PASSWORD_RESET_FILE):
         if TUTOIEMENT.search(text):
             violations.append(f"{PASSWORD_RESET_FILE}:{lineno}: {text!r}")
 
@@ -138,3 +139,14 @@ def test_registre_impose_au_contenu_genere():
     assert "vouvoy" in prompts.OUTPUT_STYLE.lower()
     assert "vouvoie" in personas.REGISTRE_INSTRUCTION
     assert personas.REGISTRE_INSTRUCTION in personas.MARKET_SCANNER.full_system_prompt()
+
+
+def test_redirect_hints_vouvoient():
+    """`redirect_hint` est injecté dans la réponse de chat montrée à
+    l'utilisateur (`redirect_note` dans intelligence/service.py) : registre app."""
+    for hint in (
+        personas.MARKET_SCANNER.redirect_hint,
+        personas.COMPETITOR_RADAR.redirect_hint,
+    ):
+        assert not TUTOIEMENT.search(hint), hint
+        assert "votre question" in hint.lower()

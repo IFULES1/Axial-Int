@@ -78,3 +78,4 @@ def test_les_personas_de_chat_connaissent_le_bloc_viz():
     from app.modules.watches import engine
 
     assert engine.VIZ_INSTRUCTION is personas.VIZ_INSTRUCTION
+    assert engine.REGISTRE_INSTRUCTION is personas.REGISTRE_INSTRUCTION

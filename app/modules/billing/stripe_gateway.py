@@ -243,6 +243,6 @@ def create_portal_session(customer_id: str, return_url: str) -> str:
         )
         return session.url
     except Exception as e:
-        raise AppError("Portail de facturation indisponible — active le Customer "
+        raise AppError("Portail de facturation indisponible — activez le Customer "
                        "Portal dans le dashboard Stripe (Settings → Billing).",
                        503, code="portal_unavailable") from e

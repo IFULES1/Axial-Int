@@ -102,7 +102,7 @@ MARKET_SCANNER = AgentPersona(
     ],
     redirect_to="competitor_radar",
     redirect_hint=(
-        "Ta question porte surtout sur la concurrence — Competitor Radar (Porter) "
+        "Votre question porte surtout sur la concurrence — Competitor Radar (Porter) "
         "est mieux adapté."
     ),
 )
@@ -129,7 +129,7 @@ COMPETITOR_RADAR = AgentPersona(
     ],
     redirect_to="market_scanner",
     redirect_hint=(
-        "Ta question porte surtout sur les forces macro du marché — Market Scanner "
+        "Votre question porte surtout sur les forces macro du marché — Market Scanner "
         "(PESTEL) est mieux adapté."
     ),
 )
