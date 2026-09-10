@@ -5,6 +5,7 @@
 // backend screen by screen.
 import React from "react";
 import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, AX_API, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument } from "./bridge";
+import { parserMarkdown } from "./markdown";
 
 
 /* data.js */
@@ -1390,6 +1391,7 @@ const LABELS_EN = {
   "Envoi…": "Sending…",
   "Copié": "Copied",
   "Copier la réponse": "Copy the answer",
+  "Copier le code": "Copy the code",
   "Exporter": "Export",
   "Exporter en Markdown": "Export as Markdown",
   "Exporter en PDF": "Export as PDF",
@@ -2562,7 +2564,7 @@ function EmptyConvState({ onSend, suggestedPrompts, profil, onCompleterProfil, e
 /* ============================================================
    Conversation thread
    ============================================================ */
-function BoutonCopier({ texte, libelleCourt }) {
+function BoutonCopier({ texte, libelleCourt, titreLibelle }) {
   const [copie, setCopie] = React.useState(false);
   const copier = async () => {
     try {
@@ -2581,7 +2583,7 @@ function BoutonCopier({ texte, libelleCourt }) {
   };
   return (
     <button className="icon-btn" onClick={copier}
-      title={copie ? libelle('Copié') : libelle('Copier la réponse')}>
+      title={copie ? libelle('Copié') : libelle(titreLibelle || 'Copier la réponse')}>
       <Icon name={copie ? 'check' : 'copy'} size={14} />
       {!libelleCourt && (
         <span style={{ marginLeft: 6, fontSize: 12 }}>
@@ -3433,26 +3435,37 @@ function ReportsGenerating({ genMeta }) {
   );
 }
 
-function renderInline(text, kp, onCite) {
-  const nodes = [];
-  const re = /\*\*(.+?)\*\*|\[(\d+(?:\]\[\d+)*)\]/g;
-  let last = 0, m, i = 0;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) nodes.push(text.slice(last, m.index));
-    if (m[1] !== undefined) nodes.push(<strong key={kp + 'b' + i++}>{m[1]}</strong>);
-    else {
-      const firstId = parseInt(m[2], 10);
-      nodes.push(
-        <sup key={kp + 'c' + i++}
-          onClick={onCite ? () => onCite(firstId) : undefined}
-          style={{ color: 'var(--v-bright)', fontWeight: 600, marginLeft: 1,
-                   cursor: onCite ? 'pointer' : 'inherit' }}>[{m[2]}]</sup>
-      );
+// Rend les nœuds inline produits par `parserMarkdown` (markdown.js) : le
+// parseur reste pur (pas de React) ; c'est ici qu'un nœud `cite` devient un
+// `<sup>` cliquable et qu'un `link` s'ouvre dans un nouvel onglet.
+function renderInlineNodes(nodes, kp, onCite) {
+  return (nodes || []).map((n, i) => {
+    const k = kp + 'i' + i;
+    switch (n.type) {
+      case 'strong':
+        return <strong key={k}>{renderInlineNodes(n.children, k, onCite)}</strong>;
+      case 'em':
+        return <em key={k}>{renderInlineNodes(n.children, k, onCite)}</em>;
+      case 'code':
+        return <code key={k} className="md-code-inline">{n.text}</code>;
+      case 'link':
+        return (
+          <a key={k} href={n.href} target="_blank" rel="noopener noreferrer">
+            {renderInlineNodes(n.children, k, onCite)}
+          </a>
+        );
+      case 'cite':
+        return (
+          <sup key={k}
+            onClick={onCite ? () => onCite(n.n) : undefined}
+            style={{ color: 'var(--v-bright)', fontWeight: 600, marginLeft: 1,
+                     cursor: onCite ? 'pointer' : 'inherit' }}>[{n.n}]</sup>
+        );
+      case 'text':
+      default:
+        return n.text;
     }
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) nodes.push(text.slice(last));
-  return nodes;
+  });
 }
 
 /* Une visualisation : image SVG servie par l'API quand le rendu est archivé
@@ -3500,100 +3513,135 @@ function VizFigure({ viz, brut, ferme, live }) {
   ) : null;
 }
 
-function MarkdownView({ text, onCite, vizs, live }) {
-  const lines = (text || '').split('\n');
-  let vizIndex = 0;   // rang du bloc de visualisation, même comptage que le serveur
-  const blocks = [];
-  let bullets = [];
-  const flush = (k) => {
-    if (bullets.length) {
-      blocks.push(
-        <ul key={'ul' + k} style={{ margin: '6px 0 6px 20px', display: 'flex', flexDirection: 'column', gap: 5 }}>
-          {bullets.map((b, i) => <li key={i} style={{ lineHeight: 1.55 }}>{renderInline(b, 'l' + k + i, onCite)}</li>)}
-        </ul>,
-      );
-      bullets = [];
-    }
-  };
-  // Tableaux : une ligne « | … | » suivie d'une ligne de séparation « |---|---| ».
-  // La boucle est indexée (pas forEach) parce qu'il faut regarder la ligne suivante.
-  const isSep = (l) => /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/.test((l || '').trim());
-  const cells = (l) => {
-    let s = l.trim();
-    if (s.startsWith('|')) s = s.slice(1);
-    if (s.endsWith('|')) s = s.slice(0, -1);
-    return s.split('|').map((c) => c.trim());
-  };
-  const isGraphique = (l) => /^\s*\**\s*(graphique|chart)\s*:/i.test(l || '');
-  let idx = 0;
-  while (idx < lines.length) {
-    const line = lines[idx].replace(/\s+$/, '');
-    if (!line.trim()) { flush(idx); idx += 1; continue; }
-    // Bloc ```viz … ``` : visualisation décrite par le modèle, rendue par le serveur.
-    if (line.trim().startsWith('```viz')) {
-      flush(idx);
-      let j = idx + 1; const corps = [];
-      while (j < lines.length && !lines[j].trim().startsWith('```')) { corps.push(lines[j]); j += 1; }
-      const ferme = j < lines.length;
-      const k = vizIndex++;
-      blocks.push(<VizFigure key={'v' + k} viz={(vizs || [])[k]} brut={corps.join('\n')} ferme={ferme} live={!!live} />);
-      idx = ferme ? j + 1 : j;
-      continue;
-    }
-    // Ancienne marque « Graphique : titre » + tableau : même compteur que le serveur.
-    if (isGraphique(line)) {
-      let j = idx + 1;
-      while (j < lines.length && !lines[j].trim()) j += 1;
-      if (j + 1 < lines.length && lines[j].trim().startsWith('|') && isSep(lines[j + 1])) {
-        flush(idx);
-        const head = cells(lines[j]); const rows = [];
-        let m = j + 2;
-        while (m < lines.length && lines[m].trim().startsWith('|')) { rows.push(cells(lines[m])); m += 1; }
-        const k = vizIndex++;
-        const v = (vizs || [])[k];
-        if (v && v.statut === 'ok') {
-          blocks.push(<VizFigure key={'v' + k} viz={v} ferme={true} live={false} />);
-        } else {
-          blocks.push(<p key={'gt' + k} style={{ margin: '10px 0 4px', fontWeight: 700 }}>{line.replace(/^\s*\**\s*(graphique|chart)\s*:\s*/i, '').replace(/\**\s*$/, '')}</p>);
-          blocks.push(
-            <div key={'t' + k} className="md-table-wrap"><table className="md-table">
-              <thead><tr>{head.map((c, i) => <th key={i}>{renderInline(c, 'gh' + k + i, onCite)}</th>)}</tr></thead>
-              <tbody>{rows.map((r, ri) => <tr key={ri}>{head.map((_, ci) => <td key={ci}>{renderInline(r[ci] || '', 'gd' + k + ri + ci, onCite)}</td>)}</tr>)}</tbody>
-            </table></div>,
-          );
-        }
-        idx = m;
-        continue;
-      }
-    }
-    if (line.trim().startsWith('|') && isSep(lines[idx + 1])) {
-      flush(idx);
-      const head = cells(line);
-      const rows = [];
-      idx += 2;
-      while (idx < lines.length && lines[idx].trim().startsWith('|')) { rows.push(cells(lines[idx])); idx += 1; }
-      blocks.push(
-        <div key={'t' + idx} className="md-table-wrap">
-          <table className="md-table">
-            <thead><tr>{head.map((c, i) => <th key={i}>{renderInline(c, 'th' + idx + i, onCite)}</th>)}</tr></thead>
-            <tbody>{rows.map((r, ri) => (
-              <tr key={ri}>{head.map((_, ci) => <td key={ci}>{renderInline(r[ci] || '', 'td' + idx + ri + ci, onCite)}</td>)}</tr>
+function ListeVue({ ordered, items, kp, onCite }) {
+  const Tag = ordered ? 'ol' : 'ul';
+  return (
+    <Tag style={{ margin: '6px 0 6px 20px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+      {items.map((it, i) => {
+        const k = kp + 'li' + i;
+        const enfants = it.children || [];
+        const sousOrdonne = enfants.length && enfants[0].ordered;
+        const SousTag = sousOrdonne ? 'ol' : 'ul';
+        return (
+          <li key={i} style={{ lineHeight: 1.55 }}>
+            {renderInlineNodes(it.inline, k, onCite)}
+            {enfants.length ? (
+              <SousTag style={{ margin: '4px 0 4px 20px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {enfants.map((c, ci) => (
+                  <li key={ci} style={{ lineHeight: 1.5 }}>{renderInlineNodes(c.inline, k + 'c' + ci, onCite)}</li>
+                ))}
+              </SousTag>
+            ) : null}
+          </li>
+        );
+      })}
+    </Tag>
+  );
+}
+
+// Ancienne marque « Graphique : titre » (repli d'un ```viz mal formé côté
+// modèle) : le paragraphe qui la porte, suivi immédiatement d'un tableau.
+const REGEX_GRAPHIQUE = /^\s*\**\s*(graphique|chart)\s*:/i;
+
+// Rend une liste de blocs (le document entier, ou le corps d'une citation
+// `>` imbriquée) en partageant le même compteur de visualisations que le
+// serveur — `vizIndexRef` est un objet mutable `{ current }` passé par
+// référence pour rester correct à travers la récursion des citations.
+function renderBlocsMarkdown(blocks, kp, onCite, vizs, live, vizIndexRef) {
+  const elems = [];
+  let i = 0;
+  while (i < blocks.length) {
+    const b = blocks[i];
+    const key = kp + 'b' + i;
+
+    if (b.type === 'paragraph' && REGEX_GRAPHIQUE.test(b.raw || '') &&
+        blocks[i + 1] && blocks[i + 1].type === 'table') {
+      const table = blocks[i + 1];
+      const k = vizIndexRef.current++;
+      const v = (vizs || [])[k];
+      if (v && v.statut === 'ok') {
+        elems.push(<VizFigure key={'v' + k} viz={v} ferme={true} live={false} />);
+      } else {
+        elems.push(
+          <p key={'gt' + k} style={{ margin: '10px 0 4px', fontWeight: 700 }}>
+            {(b.raw || '').replace(REGEX_GRAPHIQUE, '').replace(/\**\s*$/, '')}
+          </p>,
+        );
+        elems.push(
+          <div key={'t' + k} className="md-table-wrap"><table className="md-table">
+            <thead><tr>{table.header.map((c, ci) => <th key={ci}>{renderInlineNodes(c, key + 'gh' + ci, onCite)}</th>)}</tr></thead>
+            <tbody>{table.rows.map((r, ri) => (
+              <tr key={ri}>{r.map((c, ci) => <td key={ci}>{renderInlineNodes(c, key + 'gd' + ri + ci, onCite)}</td>)}</tr>
             ))}</tbody>
-          </table>
-        </div>,
-      );
+          </table></div>,
+        );
+      }
+      i += 2;
       continue;
     }
-    if (line.startsWith('### ')) { flush(idx); blocks.push(<h3 key={idx} style={{ fontSize: 15, fontWeight: 700, margin: '14px 0 6px' }}>{renderInline(line.slice(4), 'h' + idx, onCite)}</h3>); }
-    else if (line.startsWith('## ')) { flush(idx); blocks.push(<h2 key={idx} style={{ fontSize: 17, fontWeight: 700, margin: '18px 0 8px' }}>{renderInline(line.slice(3), 'h' + idx, onCite)}</h2>); }
-    else if (line.startsWith('# ')) { flush(idx); blocks.push(<h1 key={idx} style={{ fontSize: 20, fontWeight: 800, margin: '8px 0 10px' }}>{renderInline(line.slice(2), 'h' + idx, onCite)}</h1>); }
-    else if (line.trim() === '---' || line.trim() === '***') { flush(idx); blocks.push(<hr key={idx} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '16px 0' }} />); }
-    else if (/^\s*[-*]\s+/.test(line)) { bullets.push(line.replace(/^\s*[-*]\s+/, '')); }
-    else { flush(idx); blocks.push(<p key={idx} style={{ margin: '6px 0', lineHeight: 1.6 }}>{renderInline(line, 'p' + idx, onCite)}</p>); }
-    idx += 1;
+
+    switch (b.type) {
+      case 'viz': {
+        const k = vizIndexRef.current++;
+        elems.push(<VizFigure key={'v' + k} viz={(vizs || [])[k]} brut={b.raw} ferme={b.closed} live={!!live} />);
+        break;
+      }
+      case 'heading': {
+        const style = b.level === 1 ? { fontSize: 20, fontWeight: 800, margin: '8px 0 10px' }
+          : b.level === 2 ? { fontSize: 17, fontWeight: 700, margin: '18px 0 8px' }
+          : { fontSize: 15, fontWeight: 700, margin: '14px 0 6px' };
+        elems.push(React.createElement('h' + b.level, { key, style }, renderInlineNodes(b.inline, key, onCite)));
+        break;
+      }
+      case 'hr':
+        elems.push(<hr key={key} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '16px 0' }} />);
+        break;
+      case 'list':
+        elems.push(<ListeVue key={key} kp={key} ordered={b.ordered} items={b.items} onCite={onCite} />);
+        break;
+      case 'quote':
+        elems.push(
+          <blockquote key={key} style={{ margin: '10px 0', padding: '2px 14px', borderLeft: '3px solid var(--border-strong)', color: 'var(--fg-2)' }}>
+            {renderBlocsMarkdown(b.blocks, key, onCite, vizs, live, vizIndexRef)}
+          </blockquote>,
+        );
+        break;
+      case 'table':
+        elems.push(
+          <div key={key} className="md-table-wrap"><table className="md-table">
+            <thead><tr>{b.header.map((c, ci) => <th key={ci}>{renderInlineNodes(c, key + 'h' + ci, onCite)}</th>)}</tr></thead>
+            <tbody>{b.rows.map((r, ri) => (
+              <tr key={ri}>{r.map((c, ci) => <td key={ci}>{renderInlineNodes(c, key + 'd' + ri + ci, onCite)}</td>)}</tr>
+            ))}</tbody>
+          </table></div>,
+        );
+        break;
+      case 'code':
+        elems.push(
+          <div key={key} className="md-code-block">
+            <div className="md-code-head">
+              <span className="md-code-lang">{b.lang || ''}</span>
+              <BoutonCopier texte={b.code} libelleCourt titreLibelle="Copier le code" />
+            </div>
+            <pre><code>{b.code}</code></pre>
+          </div>,
+        );
+        break;
+      case 'paragraph':
+      default:
+        elems.push(<p key={key} style={{ margin: '6px 0', lineHeight: 1.6 }}>{renderInlineNodes(b.inline, key, onCite)}</p>);
+        break;
+    }
+    i += 1;
   }
-  flush('end');
-  return <div>{blocks}</div>;
+  return elems;
+}
+
+function MarkdownView({ text, onCite, vizs, live }) {
+  const blocks = React.useMemo(() => parserMarkdown(text || ''), [text]);
+  const vizIndexRef = React.useRef(0);
+  vizIndexRef.current = 0;   // rang du bloc de visualisation, même comptage que le serveur
+  return <div>{renderBlocsMarkdown(blocks, 'm', onCite, vizs, live, vizIndexRef)}</div>;
 }
 
 function ReportsEditor({ data, onBack }) {
