@@ -31,10 +31,46 @@ def _appel(monkeypatch, envois, route="intelligence.post_message"):
 
 def setup_function(_fn):
     notifier._reinitialiser()
+    notifier.ENVOI_SYNCHRONE = True  # observer l'appel sans fil démon
 
 
 def teardown_function(_fn):
     notifier._reinitialiser()
+    notifier.ENVOI_SYNCHRONE = False
+
+
+def test_l_envoi_part_dans_un_fil_demon_en_production(monkeypatch):
+    """Le 500 ne doit pas attendre Resend : hors mode synchrone, l'envoi est
+    délégué à un fil, et la signature est marquée avant l'envoi."""
+    import threading
+
+    _active(monkeypatch)
+    notifier.ENVOI_SYNCHRONE = False
+    lances = []
+    monkeypatch.setattr(threading.Thread, "start", lambda self: lances.append(self))
+    monkeypatch.setattr(notifier, "envoyer_brut", lambda *a, **k: (True, "id"))
+    try:
+        raise RuntimeError("boum")
+    except RuntimeError as e:
+        notifier.notifier_erreur(titre="t", route="/x", methode="GET",
+                                 user_email=None, exc=e, action="agir")
+    assert len(lances) == 1 and lances[0].daemon
+    assert len(notifier._derniers_envois) == 1
+
+
+def test_le_traceback_tronque_ne_depasse_pas_la_limite(monkeypatch):
+    _active(monkeypatch)
+    corps = {}
+    monkeypatch.setattr(notifier, "envoyer_brut",
+                        lambda dest, sujet, texte, **k: (corps.update(texte=texte), (True, "id"))[1])
+
+    try:
+        raise ValueError("x" * 6000)  # le message seul dépasse la limite
+    except ValueError as e:
+        notifier.notifier_erreur(titre="t", route="/y", methode="GET",
+                                 user_email=None, exc=e, action="agir")
+    trace = corps["texte"].split("Traceback :\n", 1)[1]
+    assert len(trace) <= notifier.TRACEBACK_MAX and trace.endswith("(tronqué)")
 
 
 def test_dedup_meme_signature_un_seul_envoi(monkeypatch):

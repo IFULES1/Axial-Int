@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import logging
+import threading
 import traceback
 
 from app.config import get_settings
@@ -47,6 +48,18 @@ def _deja_notifie_recemment(signature: str) -> bool:
     return (dt.datetime.now(dt.timezone.utc).timestamp() - dernier) < DEDUP_FENETRE_SECONDES
 
 
+# Les tests forcent l'envoi synchrone pour observer l'appel ; en production
+# l'email part dans un fil démon.
+ENVOI_SYNCHRONE = False
+
+
+def _lancer(cible) -> None:
+    if ENVOI_SYNCHRONE:
+        cible()
+        return
+    threading.Thread(target=cible, name="axial-notifier", daemon=True).start()
+
+
 def notifier_erreur(*, titre: str, route: str, methode: str,
                      user_email: str | None, exc: BaseException, action: str) -> None:
     """Envoie un email technique d'incident. N'échoue jamais.
@@ -65,8 +78,9 @@ def notifier_erreur(*, titre: str, route: str, methode: str,
 
         horodatage = dt.datetime.now(dt.timezone.utc).isoformat()
         trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        suffixe = "\n… (tronqué)"
         if len(trace) > TRACEBACK_MAX:
-            trace = trace[:TRACEBACK_MAX] + "\n… (tronqué)"
+            trace = trace[:TRACEBACK_MAX - len(suffixe)] + suffixe
 
         sujet = f"[Axial] Erreur backend : {methode} {route}"
         texte = (
@@ -78,11 +92,23 @@ def notifier_erreur(*, titre: str, route: str, methode: str,
             f"Traceback :\n{trace}"
         )
 
-        envoye, motif = envoyer_brut(settings.erreurs_notif_destinataire, sujet, texte)
-        if envoye:
-            _derniers_envois[signature] = dt.datetime.now(dt.timezone.utc).timestamp()
-        else:
-            logger.warning("Notification d'erreur non envoyée (%s) : %s", route, motif)
+        # La signature est marquée AVANT l'envoi : deux 500 simultanés ne
+        # partent pas en double, et l'appel réseau (jusqu'à 30 s) quitte le
+        # chemin de la requête — le client reçoit son 500 sans attendre.
+        _derniers_envois[signature] = dt.datetime.now(dt.timezone.utc).timestamp()
+        destinataire = settings.erreurs_notif_destinataire
+
+        def _envoyer() -> None:
+            try:
+                envoye, motif = envoyer_brut(destinataire, sujet, texte)
+                if not envoye:
+                    _derniers_envois.pop(signature, None)
+                    logger.warning("Notification d'erreur non envoyée (%s) : %s", route, motif)
+            except Exception as e:  # noqa: BLE001
+                _derniers_envois.pop(signature, None)
+                logger.warning("Notification d'erreur : envoi échoué (%s)", e)
+
+        _lancer(_envoyer)
     except Exception as e:  # noqa: BLE001
         # Jamais d'exception hors de cette fonction : c'est déjà le chemin
         # d'erreur, un échec ici ne doit rien casser de plus.
