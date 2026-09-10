@@ -41,8 +41,18 @@ def _annoter(vl: dict, spec: VizSpec, annotation: str | None) -> None:
         vl["title"]["subtitle"] = (spec.subtitle + " — " if spec.subtitle else "") + annotation
 
 
+def _fr(v: float, unit: str = "") -> str:
+    """« 3 200 », « 25,5 % », « 0,4 Md€ » — formaté ici, en Python : les
+    formats d3 de Vega donnent « 3.2e+3 » et ignorent la locale française."""
+    if v == int(v):
+        s = f"{int(v):,}".replace(",", " ")
+    else:
+        s = f"{v:,.1f}".replace(",", " ").replace(".", ",")
+    return f"{s} {unit}".strip() if unit else s
+
+
 def _valeurs(spec: VizSpec) -> list[dict]:
-    return [{"label": p.label, "value": p.value} for p in spec.series]
+    return [{"label": p.label, "value": p.value, "affiche": _fr(p.value, spec.unit)} for p in spec.series]
 
 
 def bar_h(spec: VizSpec) -> dict:
@@ -61,7 +71,7 @@ def bar_h(spec: VizSpec) -> dict:
             {"mark": {"type": "text", "align": "left", "dx": 4, "fontSize": 9, "color": theme.TEXTE},
              "encoding": {"x": {"field": "value", "type": "quantitative"},
                           "y": {"field": "label", "type": "nominal", "sort": "-x"},
-                          "text": {"field": "value", "type": "quantitative", "format": ".3~g"}}},
+                          "text": {"field": "affiche", "type": "nominal"}}},
         ],
     })
     _annoter(vl, spec, annotation)
@@ -84,7 +94,7 @@ def bar(spec: VizSpec) -> dict:
             {"mark": {"type": "text", "dy": -6, "fontSize": 9, "color": theme.TEXTE},
              "encoding": {"x": {"field": "label", "type": "ordinal", "sort": None},
                           "y": {"field": "value", "type": "quantitative"},
-                          "text": {"field": "value", "type": "quantitative", "format": ".3~g"}}},
+                          "text": {"field": "affiche", "type": "nominal"}}},
         ],
     })
     _annoter(vl, spec, annotation)
@@ -93,7 +103,8 @@ def bar(spec: VizSpec) -> dict:
 
 def line(spec: VizSpec) -> dict:
     cle, annotation = point_cle(spec)
-    values = [{"label": p.label, "value": p.value, "cle": p.label == cle} for p in spec.series]
+    values = [{"label": p.label, "value": p.value, "cle": p.label == cle,
+               "affiche": _fr(p.value, spec.unit)} for p in spec.series]
     vl = _base(spec)
     vl.update({
         "data": {"values": values},
@@ -109,7 +120,7 @@ def line(spec: VizSpec) -> dict:
              "transform": [{"filter": "datum.cle"}],
              "encoding": {"x": {"field": "label", "type": "ordinal", "sort": None},
                           "y": {"field": "value", "type": "quantitative"},
-                          "text": {"field": "value", "type": "quantitative", "format": ".3~g"}}},
+                          "text": {"field": "affiche", "type": "nominal"}}},
         ],
     })
     _annoter(vl, spec, annotation)
@@ -136,7 +147,8 @@ def donut(spec: VizSpec) -> dict:
 
 
 def kpi(spec: VizSpec) -> dict:
-    values = [{"label": p.label, "value": p.value, "i": i} for i, p in enumerate(spec.series)]
+    values = [{"label": p.label, "value": p.value, "i": i, "affiche": _fr(p.value)}
+              for i, p in enumerate(spec.series)]
     n = len(values)
     vl = _base(spec, h=110)
     vl.update({
@@ -146,7 +158,7 @@ def kpi(spec: VizSpec) -> dict:
              "encoding": {"x": {"field": "i", "type": "quantitative", "axis": None,
                                 "scale": {"domain": [-0.5, n - 0.5]}},
                           "y": {"value": 55},
-                          "text": {"field": "value", "type": "quantitative", "format": ".3~g"}}},
+                          "text": {"field": "affiche", "type": "nominal"}}},
             {"mark": {"type": "text", "fontSize": 10, "color": theme.GRIS, "dy": 14},
              "encoding": {"x": {"field": "i", "type": "quantitative"},
                           "y": {"value": 55},
@@ -159,7 +171,8 @@ def kpi(spec: VizSpec) -> dict:
 
 
 def funnel(spec: VizSpec) -> dict:
-    values = [{"label": p.label, "value": p.value, "ordre": i} for i, p in enumerate(spec.series)]
+    values = [{"label": p.label, "value": p.value, "ordre": i, "affiche": _fr(p.value, spec.unit)}
+              for i, p in enumerate(spec.series)]
     vl = _base(spec, h=34 * len(values) + 10)
     vl.update({
         "data": {"values": values},
@@ -173,7 +186,7 @@ def funnel(spec: VizSpec) -> dict:
             {"mark": {"type": "text", "fontSize": 9.5, "fontWeight": "bold", "color": theme.TEXTE},
              "encoding": {"x": {"value": theme.LARGEUR / 2},
                           "y": {"field": "label", "type": "nominal", "sort": {"field": "ordre"}},
-                          "text": {"field": "value", "type": "quantitative", "format": ".3~g"}}},
+                          "text": {"field": "affiche", "type": "nominal"}}},
         ],
     })
     _, annotation = point_cle(spec)
