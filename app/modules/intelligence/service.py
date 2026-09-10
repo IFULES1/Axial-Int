@@ -50,10 +50,60 @@ def list_projects(db: Session, user_id: str) -> list[Project]:
 
 
 def _own_project(db: Session, user_id: str, project_id: str) -> Project:
-    proj = db.get(Project, uuid.UUID(project_id))
+    # Un identifiant qui n'est pas un UUID vaut « introuvable », pas une
+    # erreur serveur : il arrive maintenant de l'URL (PATCH/DELETE) et un
+    # client peut y mettre n'importe quoi.
+    proj = db.get(Project, _uuid_ou_404(project_id, "Projet introuvable."))
     if not proj or str(proj.user_id) != user_id:
         raise AppError("Projet introuvable.", 404, code="not_found")
     return proj
+
+
+def update_project(db: Session, user_id: str, project_id: str, *,
+                   name: str | None = None,
+                   archived: bool | None = None) -> Project:
+    """Renomme et/ou (dés)archive un dossier. Les champs absents ne bougent pas.
+
+    `archived` est un booléen côté API et une date côté base (`archived_at`) :
+    le front veut une bascule, l'historique veut savoir quand.
+    """
+    proj = _own_project(db, user_id, project_id)
+    if name is not None:
+        propre = " ".join(name.split())
+        if not propre:
+            raise AppError("Le nom du dossier ne peut pas être vide.", 400,
+                           code="nom_vide")
+        proj.name = propre[:200]
+    if archived is not None:
+        proj.archived_at = _now() if archived else None
+    db.commit()
+    db.refresh(proj)
+    return proj
+
+
+def delete_project(db: Session, user_id: str, project_id: str) -> None:
+    """Supprime un dossier VIDE (au sens : plus aucune conversation active).
+
+    Refusé tant qu'il reste des conversations non archivées : la cascade ORM
+    emporterait les conversations ET leurs messages, et « supprimer le
+    dossier » n'est pas une manière d'effacer trente fils par erreur.
+    Les conversations archivées, elles, partent avec le dossier.
+    """
+    from sqlalchemy import func
+
+    proj = _own_project(db, user_id, project_id)
+    actives = db.scalar(
+        select(func.count()).select_from(Conversation)
+        .where(Conversation.project_id == proj.id,
+               Conversation.archived_at.is_(None))) or 0
+    if actives:
+        raise AppError(
+            f"Ce dossier contient encore {actives} conversation(s) non "
+            "archivée(s). Déplacez-les ou archivez-les avant de supprimer "
+            "le dossier.",
+            409, code="projet_non_vide")
+    db.delete(proj)
+    db.commit()
 
 
 # --- Conversations ---------------------------------------------------------
@@ -76,14 +126,79 @@ def create_conversation(db: Session, user_id: str, project_id: str,
     return conv
 
 
-def list_conversations(db: Session, user_id: str, project_id: str) -> list[Conversation]:
-    _own_project(db, user_id, project_id)
-    stmt = (
-        select(Conversation)
-        .where(Conversation.project_id == uuid.UUID(project_id))
-        .order_by(Conversation.created_at.desc())
-    )
+def list_conversations(db: Session, user_id: str, project_id: str, *,
+                       inclure_archivees: bool = False,
+                       limit: int = 100) -> list[Conversation]:
+    """Conversations d'un dossier, dans l'ordre du panneau.
+
+    Épinglées d'abord (la plus récemment épinglée en tête), puis les autres
+    par dernier message décroissant. Les `NULL` sont rejetés en fin de liste
+    par un tri sur `is_(None)` plutôt que par `NULLS LAST` : PostgreSQL et
+    SQLite ne placent pas les `NULL` du même côté d'un `ORDER BY … DESC`, et
+    une conversation créée sans message aurait remonté en tête d'un côté
+    seulement.
+    """
+    proj = _own_project(db, user_id, project_id)
+    stmt = select(Conversation).where(Conversation.project_id == proj.id)
+    if not inclure_archivees:
+        stmt = stmt.where(Conversation.archived_at.is_(None))
+    stmt = (stmt.order_by(Conversation.pinned_at.is_(None).asc(),
+                          Conversation.pinned_at.desc(),
+                          Conversation.last_message_at.is_(None).asc(),
+                          Conversation.last_message_at.desc(),
+                          Conversation.created_at.desc())
+            .limit(max(1, min(int(limit or 100), 200))))
     return list(db.scalars(stmt))
+
+
+def update_conversation(db: Session, user_id: str, conversation_id: str, *,
+                        title: str | None = None,
+                        pinned: bool | None = None,
+                        archived: bool | None = None,
+                        project_id: str | None = None) -> Conversation:
+    """Renomme, épingle, archive, ou déplace une conversation de dossier.
+
+    Un seul endpoint pour les quatre : ce sont quatre attributs de la même
+    ligne, et le menu ⋯ du panneau les enchaîne. Les champs absents du corps
+    ne sont pas touchés (sémantique PATCH), donc `archived: false` désarchive
+    et `archived` absent ne dit rien.
+    """
+    conv = _own_conversation(db, user_id, conversation_id)
+    if title is not None:
+        propre = " ".join(title.split())
+        if not propre:
+            raise AppError("Le titre ne peut pas être vide.", 400, code="titre_vide")
+        conv.title = propre[:300]
+    if pinned is not None:
+        conv.pinned_at = _now() if pinned else None
+    if archived is not None:
+        conv.archived_at = _now() if archived else None
+        # Une conversation archivée n'a plus à occuper la section « Épinglées ».
+        if archived:
+            conv.pinned_at = None
+    if project_id is not None:
+        # Le dossier de destination doit appartenir au MÊME utilisateur :
+        # sinon un identifiant deviné déplacerait un fil chez quelqu'un
+        # d'autre. `_own_project` rend 404, pas 403 — on ne confirme pas
+        # l'existence d'un dossier qui n'est pas le sien.
+        cible = _own_project(db, user_id, project_id)
+        conv.project_id = cible.id
+    db.commit()
+    db.refresh(conv)
+    return conv
+
+
+def delete_conversation(db: Session, user_id: str, conversation_id: str) -> None:
+    """Supprime la conversation et ses messages.
+
+    La cascade ORM (`Conversation.messages`, `delete-orphan`) emporte les
+    messages. Les rendus de visualisation (`viz_rendus`) ne sont PAS touchés :
+    ils sont mis en cache par empreinte du spec compilé et partagés entre
+    messages et rapports — en supprimer un casserait les images d'un autre fil.
+    """
+    conv = _own_conversation(db, user_id, conversation_id)
+    db.delete(conv)
+    db.commit()
 
 
 def _own_conversation(db: Session, user_id: str, conversation_id: str) -> Conversation:
@@ -132,6 +247,166 @@ def _uuid_ou_404(valeur: str, message: str) -> uuid.UUID:
         return uuid.UUID(valeur)
     except ValueError:
         raise AppError(message, 404, code="not_found") from None
+
+
+# --- Recherche dans les conversations --------------------------------------
+
+RECHERCHE_MINIMUM = 3
+RECHERCHE_RESULTATS = 20
+RECHERCHE_MARGE = 80
+
+
+def _motif_like(terme: str) -> str:
+    """Terme échappé pour un `LIKE`.
+
+    Sans échappement, chercher « 100 % » ou « chiffre_affaires » rendait
+    n'importe quoi : `%` et `_` sont les jokers du `LIKE`.
+    """
+    echappe = terme.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{echappe.lower()}%"
+
+
+def _extrait(texte: str, terme: str, marge: int = RECHERCHE_MARGE) -> str:
+    """Fenêtre de ±`marge` caractères autour de la PREMIÈRE occurrence.
+
+    Calculé en Python et non en SQL : `position()` n'existe pas en SQLite,
+    `strpos` n'est pas insensible à la casse, et le rendu (les « … » de
+    troncature) est de toute façon un choix d'affichage.
+    """
+    texte = texte or ""
+    i = texte.lower().find(terme.lower())
+    if i < 0:
+        # Le message ne contient pas le terme (résultat trouvé par le titre) :
+        # on rend le début, qui est le meilleur aperçu disponible.
+        debut, fin = 0, min(len(texte), 2 * marge)
+    else:
+        debut = max(0, i - marge)
+        fin = min(len(texte), i + len(terme) + marge)
+    fragment = " ".join(texte[debut:fin].split())
+    return ("…" if debut > 0 else "") + fragment + ("…" if fin < len(texte) else "")
+
+
+def rechercher(db: Session, user_id: str, q: str, *,
+               limit: int = RECHERCHE_RESULTATS) -> list[dict]:
+    """Cherche `q` dans le contenu des messages ET le titre des conversations.
+
+    Périmètre : les conversations NON archivées de cet utilisateur — chercher
+    dans ce qu'on a rangé hors de vue ferait remonter des fils qu'on a
+    justement écartés.
+
+    `func.lower(...).like(...)` plutôt qu'`ILIKE` : `ILIKE` est propre à
+    PostgreSQL et la suite de tests tourne sur SQLite. Sur PostgreSQL les deux
+    produisent le même plan (aucun index de texte ici : les volumes sont d'un
+    utilisateur, pas d'un corpus).
+    """
+    from sqlalchemy import func
+
+    terme = (q or "").strip()
+    if len(terme) < RECHERCHE_MINIMUM:
+        raise AppError(f"Saisissez au moins {RECHERCHE_MINIMUM} caractères.",
+                       400, code="requete_trop_courte")
+    limit = max(1, min(int(limit or RECHERCHE_RESULTATS), RECHERCHE_RESULTATS))
+    motif = _motif_like(terme)
+    proprietaire = (Conversation.user_id == uuid.UUID(user_id),
+                    Conversation.archived_at.is_(None))
+
+    # 1. Messages dont le contenu correspond : chaque message est un point
+    #    d'arrivée distinct dans le fil, donc une ligne de résultat distincte.
+    lignes = db.execute(
+        select(Message.id, Message.content, Message.created_at,
+               Conversation.id, Conversation.title, Conversation.project_id)
+        .join(Conversation, Message.conversation_id == Conversation.id)
+        .where(*proprietaire,
+               func.lower(Message.content).like(motif, escape="\\"))
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+    ).all()
+
+    resultats = [{
+        "conversation_id": str(conv_id),
+        "title": titre,
+        "project_id": str(project_id),
+        "extrait": _extrait(contenu, terme),
+        "message_id": str(msg_id),
+        "created_at": cree_le,
+    } for msg_id, contenu, cree_le, conv_id, titre, project_id in lignes]
+
+    # 2. Conversations dont le TITRE correspond, sans message déjà remonté :
+    #    un fil renommé « Levée de fonds » se trouve par son nom même si le
+    #    mot n'apparaît dans aucun message. `message_id` vaut alors `None` —
+    #    le front ouvre le fil sans cible à surligner.
+    deja = {r["conversation_id"] for r in resultats}
+    if len(resultats) < limit:
+        for conv in db.scalars(
+            select(Conversation)
+            .where(*proprietaire,
+                   func.lower(Conversation.title).like(motif, escape="\\"))
+            .order_by(Conversation.last_message_at.is_(None).asc(),
+                      Conversation.last_message_at.desc())
+            .limit(limit)
+        ):
+            if str(conv.id) in deja:
+                continue
+            resultats.append({
+                "conversation_id": str(conv.id),
+                "title": conv.title,
+                "project_id": str(conv.project_id),
+                "extrait": _extrait(conv.title, terme),
+                "message_id": None,
+                "created_at": conv.last_message_at or conv.created_at,
+            })
+            if len(resultats) >= limit:
+                break
+
+    # Un seul ordre pour les deux origines, sinon la liste se lit comme deux
+    # listes collées.
+    # Le tuple évite de comparer une date à `None` (un `created_at` manquant
+    # ferait lever le tri au lieu de descendre en fin de liste).
+    resultats.sort(key=lambda r: (r["created_at"] is not None, r["created_at"]),
+                   reverse=True)
+    return resultats[:limit]
+
+
+def _messages_ordonnes(db: Session, conv: Conversation) -> list[Message]:
+    """Le fil complet dans l'ordre chronologique.
+
+    `id` en second critère de tri : deux messages écrits dans la même
+    microseconde (un seed, un import) donneraient sinon un ordre instable, et
+    c'est cet ordre qui décide ce qu'une édition supprime.
+    """
+    return list(db.scalars(select(Message)
+                           .where(Message.conversation_id == conv.id)
+                           .order_by(Message.created_at.asc(), Message.id.asc())))
+
+
+def _supprimer_messages(db: Session, conv: Conversation,
+                        messages: list[Message]) -> None:
+    """Supprime ces messages, puis recale les compteurs du fil.
+
+    Suppression par `delete()` explicite sur les identifiants, et non par la
+    cascade ORM : la cascade ne concerne que la suppression de la CONVERSATION
+    entière. Les rendus `viz_rendus` sont laissés en place — cache partagé par
+    empreinte, une même figure peut être portée par un rapport ou un autre fil.
+    """
+    from sqlalchemy import delete, func
+
+    if messages:
+        # `synchronize_session="fetch"` : sans lui, les objets supprimés
+        # restent vivants dans l'identity map de la session et un accès
+        # ultérieur les ferait ressusciter au prochain flush.
+        db.execute(delete(Message).where(Message.id.in_([m.id for m in messages])),
+                   execution_options={"synchronize_session": "fetch"})
+    _recompter(db, conv)
+    # `last_message_at` sert au tri du panneau : le laisser dans le futur du
+    # fil ferait remonter une conversation qu'on vient de vider.
+    conv.last_message_at = db.scalar(
+        select(func.max(Message.created_at))
+        .where(Message.conversation_id == conv.id))
+    # Le résumé roulant est un curseur sur le fil : au-delà du nouveau nombre
+    # de messages, il ne se remettrait plus jamais à jour.
+    conv.resume_messages = min(conv.resume_messages or 0, conv.message_count)
+    if conv.message_count == 0:
+        conv.resume, conv.resume_messages = None, 0
 
 
 # --- The agent message loop ------------------------------------------------
@@ -441,6 +716,23 @@ def _programmer_resume(conv: Conversation) -> None:
         logger.warning("Résumé roulant non programmé : %s", e)
 
 
+def verifier_credits(db: Session, user_id: str, *, is_admin: bool) -> None:
+    """Solde suffisant pour un tour, sinon 402 nommé.
+
+    Extrait de `_preparer_contexte` pour être appelable AVANT une suppression :
+    régénérer ou éditer efface des messages, et découvrir le 402 seulement
+    après aurait laissé le fil amputé sans rien avoir régénéré.
+    """
+    if is_admin:
+        return
+    from app.modules.billing import service as billing
+
+    chk = billing.check_credits(db, user_id, AGENT_MESSAGE_ACTION)
+    if not chk["affordable"]:
+        raise AppError(f"Crédits insuffisants ({chk['available']}/{chk['cost']}).",
+                       402, code="insufficient_credits")
+
+
 def _fournisseurs_recherche() -> list[str]:
     """Fournisseurs qui vont être interrogés — pour l'annoncer AVANT la
     recherche (le compteur, lui, n'est rempli qu'après)."""
@@ -505,15 +797,7 @@ def _preparer_contexte(db: Session, user_id: str, conversation_id: str, content:
     conversation_libre = free_chat and agent_key == personas.AXIAL_CONSEIL.key
 
     # Affordability check before spending the API call (admins bypass).
-    from app.modules.billing import service as billing
-
-    if not is_admin:
-        chk = billing.check_credits(db, user_id, AGENT_MESSAGE_ACTION)
-        if not chk["affordable"]:
-            raise AppError(
-                f"Crédits insuffisants ({chk['available']}/{chk['cost']}).",
-                402, code="insufficient_credits",
-            )
+    verifier_credits(db, user_id, is_admin=is_admin)
 
     # Mémoire de fil AVANT d'ajouter le message courant : sinon l'autoflush du
     # `select` le glisserait dans son propre historique.
@@ -785,6 +1069,83 @@ def _finalize_turn(db: Session, user_id: str, turn: _Turn, answer: str, *,
                                   credits=billing_res.get("charged", 0))
 
     return assistant_msg
+
+
+# --- Régénérer / éditer ----------------------------------------------------
+#
+# Ces deux fonctions ne déroulent PAS de tour : elles nettoient le fil et
+# rendent le contenu à (re)jouer. Le tour lui-même repart par
+# `stream_message`, c'est-à-dire par le même générateur, la même enveloppe SSE
+# du routeur, la même idempotence et les mêmes statuts que l'envoi normal.
+# Une seconde implémentation du flux aurait divergé au premier correctif.
+#
+# Elles sont SYNCHRONES et appelées avant l'ouverture du flux : une régénération
+# refusée doit répondre en HTTP (404/409), pas en événement d'erreur dans une
+# réponse 200 que le client lit comme un succès.
+
+def preparer_regeneration(db: Session, user_id: str, conversation_id: str,
+                          message_id: str, *, is_admin: bool = False) -> str:
+    """Retire la dernière réponse ET la question qui l'a produite.
+
+    Rend le contenu de cette question, que l'appelant repasse à
+    `stream_message` : le pipeline recrée le message utilisateur puis génère
+    une nouvelle réponse, donc le fil retrouve exactement le même nombre de
+    messages. Ne supprimer que la réponse laisserait la question en double
+    (le pipeline en insère toujours une).
+
+    Seul le DERNIER message peut être régénéré : régénérer au milieu d'un fil
+    invaliderait tout ce qui suit, ce que l'édition fait explicitement.
+    """
+    conv = _own_conversation(db, user_id, conversation_id)
+    # Solde vérifié AVANT de supprimer : un 402 découvert dans le flux aurait
+    # laissé le fil amputé de la question ET de sa réponse, sans rien produire.
+    verifier_credits(db, user_id, is_admin=is_admin)
+    tous = _messages_ordonnes(db, conv)
+    cible = _uuid_ou_404(message_id, "Message introuvable.")
+    index = next((i for i, m in enumerate(tous) if m.id == cible), None)
+    if index is None:
+        raise AppError("Message introuvable.", 404, code="not_found")
+    if tous[index].role != "assistant":
+        raise AppError("Seule une réponse d'Axial peut être régénérée.", 400,
+                       code="pas_une_reponse")
+    if index != len(tous) - 1:
+        raise AppError("Seule la dernière réponse du fil peut être régénérée.",
+                       409, code="pas_le_dernier_message")
+    if index == 0 or tous[index - 1].role != "user":
+        raise AppError("La question d'origine est introuvable.", 409,
+                       code="question_introuvable")
+
+    question = tous[index - 1].content
+    _supprimer_messages(db, conv, [tous[index - 1], tous[index]])
+    db.commit()
+    return question
+
+
+def preparer_edition(db: Session, user_id: str, conversation_id: str,
+                     message_id: str, content: str, *,
+                     is_admin: bool = False) -> None:
+    """Retire le message utilisateur visé et TOUT ce qui le suit.
+
+    Éditer une question, c'est repartir de là : les réponses suivantes ont été
+    écrites pour l'ancienne formulation et les garder produirait un fil qui se
+    contredit. L'appelant relance ensuite un tour normal avec le nouveau texte,
+    donc le fil compte `index + 2` messages.
+    """
+    verifier_longueur(content)
+    conv = _own_conversation(db, user_id, conversation_id)
+    # Même raison que pour la régénération : rien n'est supprimé avant de
+    # savoir que le tour de remplacement est payable.
+    verifier_credits(db, user_id, is_admin=is_admin)
+    tous = _messages_ordonnes(db, conv)
+    cible = _uuid_ou_404(message_id, "Message introuvable.")
+    index = next((i for i, m in enumerate(tous) if m.id == cible), None)
+    if index is None:
+        raise AppError("Message introuvable.", 404, code="not_found")
+    if tous[index].role != "user":
+        raise AppError("Seul un message que vous avez envoyé peut être modifié.",
+                       400, code="pas_un_message_utilisateur")
+    _supprimer_messages(db, conv, tous[index:])
+    db.commit()
 
 
 def post_message(db: Session, user_id: str, conversation_id: str, content: str,

@@ -5,7 +5,7 @@ import datetime as dt
 import logging
 
 from fastapi.responses import StreamingResponse
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -32,6 +32,15 @@ class ProjectOut(BaseModel):
     name: str
     description: str | None
     created_at: dt.datetime
+    archived_at: dt.datetime | None = None
+
+
+class ProjectPatch(BaseModel):
+    """PATCH partiel : un champ absent (ou `null`) n'est pas modifié.
+    Renommer en vide n'est donc pas exprimable ici — c'est voulu, et le
+    service rend un 400 `nom_vide` si le nom n'est que des espaces."""
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    archived: bool | None = None
 
 
 class ConversationIn(BaseModel):
@@ -46,6 +55,33 @@ class ConversationOut(BaseModel):
     default_agent: str
     message_count: int
     last_message_at: dt.datetime | None = None
+    # Rangement du panneau. `pinned`/`archived` restent des booléens à
+    # l'entrée (PATCH) et des dates en sortie : le front veut une bascule,
+    # l'historique veut savoir quand.
+    pinned_at: dt.datetime | None = None
+    archived_at: dt.datetime | None = None
+
+
+class ConversationPatch(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    pinned: bool | None = None
+    archived: bool | None = None
+    project_id: str | None = None
+
+
+class EditionIn(BaseModel):
+    content: str = Field(min_length=1)
+
+
+class RechercheOut(BaseModel):
+    conversation_id: str
+    title: str
+    project_id: str
+    extrait: str
+    # `None` quand la conversation a été trouvée par son TITRE : il n'y a pas
+    # de message à surligner, le front ouvre simplement le fil.
+    message_id: str | None = None
+    created_at: dt.datetime | None = None
 
 
 class MessageIn(BaseModel):
@@ -109,43 +145,103 @@ def list_agents(_: AuthUser = Depends(get_current_user)) -> dict:
 
 # --- projects --------------------------------------------------------------
 
+def _project_out(p) -> ProjectOut:
+    return ProjectOut(id=str(p.id), name=p.name, description=p.description,
+                      created_at=p.created_at, archived_at=p.archived_at)
+
+
 @router.post("/projects", response_model=ProjectOut)
 def create_project(payload: ProjectIn, user: AuthUser = Depends(get_current_user),
                    db: Session = Depends(get_db)) -> ProjectOut:
-    p = service.create_project(db, user.id, payload.name, payload.description)
-    return ProjectOut(id=str(p.id), name=p.name, description=p.description, created_at=p.created_at)
+    return _project_out(service.create_project(db, user.id, payload.name,
+                                               payload.description))
 
 
 @router.get("/projects", response_model=list[ProjectOut])
 def list_projects(user: AuthUser = Depends(get_current_user),
                   db: Session = Depends(get_db)) -> list[ProjectOut]:
-    return [
-        ProjectOut(id=str(p.id), name=p.name, description=p.description, created_at=p.created_at)
-        for p in service.list_projects(db, user.id)
-    ]
+    return [_project_out(p) for p in service.list_projects(db, user.id)]
+
+
+@router.patch("/projects/{project_id}", response_model=ProjectOut)
+def update_project(project_id: str, payload: ProjectPatch,
+                   user: AuthUser = Depends(get_current_user),
+                   db: Session = Depends(get_db)) -> ProjectOut:
+    """Renomme et/ou (dés)archive un dossier."""
+    return _project_out(service.update_project(db, user.id, project_id,
+                                               name=payload.name,
+                                               archived=payload.archived))
+
+
+@router.delete("/projects/{project_id}", status_code=204, response_class=Response)
+def delete_project(project_id: str, user: AuthUser = Depends(get_current_user),
+                   db: Session = Depends(get_db)) -> Response:
+    """Supprime un dossier. Refusé (409) s'il reste des conversations actives."""
+    service.delete_project(db, user.id, project_id)
+    return Response(status_code=204)
 
 
 # --- conversations ---------------------------------------------------------
+
+def _conv_out(c) -> ConversationOut:
+    return ConversationOut(id=str(c.id), project_id=str(c.project_id), title=c.title,
+                           default_agent=c.default_agent, message_count=c.message_count,
+                           last_message_at=c.last_message_at,
+                           pinned_at=c.pinned_at, archived_at=c.archived_at)
+
 
 @router.post("/projects/{project_id}/conversations", response_model=ConversationOut)
 def create_conversation(project_id: str, payload: ConversationIn,
                         user: AuthUser = Depends(get_current_user),
                         db: Session = Depends(get_db)) -> ConversationOut:
-    c = service.create_conversation(db, user.id, project_id, payload.title, payload.default_agent)
-    return ConversationOut(id=str(c.id), project_id=str(c.project_id), title=c.title,
-                           default_agent=c.default_agent, message_count=c.message_count,
-                           last_message_at=c.last_message_at)
+    return _conv_out(service.create_conversation(db, user.id, project_id,
+                                                 payload.title, payload.default_agent))
 
 
 @router.get("/projects/{project_id}/conversations", response_model=list[ConversationOut])
 def list_conversations(project_id: str, user: AuthUser = Depends(get_current_user),
-                       db: Session = Depends(get_db)) -> list[ConversationOut]:
-    return [
-        ConversationOut(id=str(c.id), project_id=str(c.project_id), title=c.title,
-                        default_agent=c.default_agent, message_count=c.message_count,
-                        last_message_at=c.last_message_at)
-        for c in service.list_conversations(db, user.id, project_id)
-    ]
+                       db: Session = Depends(get_db),
+                       inclure_archivees: bool = Query(default=False),
+                       limit: int = Query(default=100, ge=1, le=200)
+                       ) -> list[ConversationOut]:
+    """Épinglées d'abord, puis par dernier message décroissant."""
+    return [_conv_out(c) for c in service.list_conversations(
+        db, user.id, project_id, inclure_archivees=inclure_archivees, limit=limit)]
+
+
+# `search` est déclaré AVANT les routes en `/conversations/{id}` : FastAPI
+# résout dans l'ordre de déclaration, et le jour où un `GET
+# /conversations/{id}` existera, `search` se ferait sinon capter comme un
+# identifiant de conversation.
+# `q` a une valeur par défaut : sans elle, une requête sans `q` rendait un 422
+# pydantic là où le contrat annonce un 400 `requete_trop_courte`.
+@router.get("/conversations/search", response_model=list[RechercheOut])
+def rechercher(q: str = Query(default=""),
+               user: AuthUser = Depends(get_current_user),
+               db: Session = Depends(get_db)) -> list[RechercheOut]:
+    """Cherche dans le contenu des messages et le titre des conversations
+    non archivées. 20 résultats au plus, 3 caractères au moins."""
+    return [RechercheOut(**r) for r in service.rechercher(db, user.id, q)]
+
+
+@router.patch("/conversations/{conversation_id}", response_model=ConversationOut)
+def update_conversation(conversation_id: str, payload: ConversationPatch,
+                        user: AuthUser = Depends(get_current_user),
+                        db: Session = Depends(get_db)) -> ConversationOut:
+    """Renommer, épingler, archiver, déplacer de dossier — un seul endpoint."""
+    return _conv_out(service.update_conversation(
+        db, user.id, conversation_id, title=payload.title, pinned=payload.pinned,
+        archived=payload.archived, project_id=payload.project_id))
+
+
+@router.delete("/conversations/{conversation_id}", status_code=204,
+               response_class=Response)
+def delete_conversation(conversation_id: str,
+                        user: AuthUser = Depends(get_current_user),
+                        db: Session = Depends(get_db)) -> Response:
+    """Supprime la conversation et ses messages (cascade)."""
+    service.delete_conversation(db, user.id, conversation_id)
+    return Response(status_code=204)
 
 
 # --- messages --------------------------------------------------------------
@@ -186,6 +282,14 @@ def _flux_sse(generateur):
     return _flux()
 
 
+def _reponse_sse(generateur) -> StreamingResponse:
+    return StreamingResponse(
+        _flux_sse(generateur),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.post("/conversations/{conversation_id}/messages/stream")
 def stream_message(conversation_id: str, payload: MessageIn,
                    user: AuthUser = Depends(get_current_user),
@@ -196,16 +300,47 @@ def stream_message(conversation_id: str, payload: MessageIn,
     # 413 AVANT d'ouvrir le flux : un événement SSE d'erreur dans une réponse
     # 200 est invisible pour un client qui teste le code HTTP.
     service.verifier_longueur(payload.content)
-    generator = service.stream_message(
+    return _reponse_sse(service.stream_message(
         db, user.id, conversation_id, payload.content, payload.agent,
         is_admin=user.is_admin, document_ids=payload.document_ids,
         cle_idempotence=x_idempotency_key,
-    )
-    return StreamingResponse(
-        _flux_sse(generator),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    ))
+
+
+@router.post("/conversations/{conversation_id}/messages/{message_id}/regenerer")
+def regenerer(conversation_id: str, message_id: str,
+              user: AuthUser = Depends(get_current_user),
+              db: Session = Depends(get_db),
+              x_idempotency_key: str | None = Header(default=None)
+              ) -> StreamingResponse:
+    """Rejoue le dernier tour : SSE identique à `messages/stream`.
+
+    La suppression est SYNCHRONE et hors du flux — un refus (message
+    introuvable, pas le dernier) doit sortir en HTTP, pas en événement d'erreur
+    dans une réponse 200. Le tour lui-même repart par `service.stream_message`,
+    donc rien du pipeline n'est dupliqué ici.
+    """
+    question = service.preparer_regeneration(db, user.id, conversation_id,
+                                             message_id, is_admin=user.is_admin)
+    return _reponse_sse(service.stream_message(
+        db, user.id, conversation_id, question, None, is_admin=user.is_admin,
+        cle_idempotence=x_idempotency_key))
+
+
+@router.post("/conversations/{conversation_id}/messages/{message_id}/editer")
+def editer(conversation_id: str, message_id: str, payload: EditionIn,
+           user: AuthUser = Depends(get_current_user),
+           db: Session = Depends(get_db),
+           x_idempotency_key: str | None = Header(default=None)
+           ) -> StreamingResponse:
+    """Remplace un message envoyé et rejoue la suite : SSE identique à
+    `messages/stream`."""
+    service.verifier_longueur(payload.content)
+    service.preparer_edition(db, user.id, conversation_id, message_id,
+                             payload.content, is_admin=user.is_admin)
+    return _reponse_sse(service.stream_message(
+        db, user.id, conversation_id, payload.content, None,
+        is_admin=user.is_admin, cle_idempotence=x_idempotency_key))
 
 
 def _msg_out(m, *, is_admin: bool = False) -> MessageOut:

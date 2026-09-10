@@ -51,6 +51,21 @@ def list_docs(
     return [_to_out(d) for d in service.list_documents(db, user.id)]
 
 
+@router.post("/{doc_id}/reindexer", response_model=DocumentOut)
+def reindexer(
+    doc_id: str,
+    user: AuthUser = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> DocumentOut:
+    """Relance l'indexation sur le texte déjà stocké.
+
+    Utile quand `chunk_count = 0` : le fichier est importé mais n'alimente
+    aucune réponse. `DocumentOut` rend le nouveau `chunk_count`, donc le front
+    sait immédiatement si la seconde tentative a abouti.
+    """
+    return _to_out(service.reindex(db, user.id, doc_id))
+
+
 @router.delete("/{doc_id}", status_code=204, response_class=Response)
 def delete_doc(
     doc_id: str,

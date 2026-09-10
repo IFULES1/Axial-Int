@@ -1702,3 +1702,731 @@ def test_stream_text_ferme_le_fournisseur_sur_interruption(monkeypatch):
     flux.close()
 
     assert (mesure["input_tokens"], mesure["output_tokens"]) == (9, 2)
+
+
+# ===========================================================================
+# Task 3 — gestion des conversations et des dossiers, recherche, régénérer,
+# éditer, réindexer.
+# ===========================================================================
+
+def _client_http(engine, uid, *, is_admin=False):
+    """`TestClient` sur l'app réelle, avec la base de test et un utilisateur
+    connecté — le seul moyen de prouver que les ROUTES (méthodes, codes,
+    corps) tiennent, et pas seulement le service."""
+    from fastapi.testclient import TestClient
+
+    from app.db import get_db
+    from app.main import app
+    from app.modules.auth.schemas import AuthUser
+    from app.modules.auth.security import get_current_user
+
+    def _db():
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(
+        id=uid, email="test@axial-ia.fr", is_admin=is_admin)
+    return TestClient(app)
+
+
+def _sse_de(reponse) -> list[dict]:
+    return [json.loads(ligne[len("data: "):])
+            for ligne in reponse.text.split("\n\n") if ligne.startswith("data: ")]
+
+
+# --- Step 1 : PATCH / DELETE conversations et dossiers ---------------------
+
+def test_renommer_epingler_archiver_une_conversation():
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        cid = str(conv.id)
+
+        c = intel.update_conversation(db, uid, cid, title="  Levée   série A  ")
+        # Espaces normalisés : un titre copié-collé depuis un document arrivait
+        # avec des retours à la ligne et cassait la liste.
+        assert c.title == "Levée série A"
+        assert c.pinned_at is None and c.archived_at is None
+
+        assert intel.update_conversation(db, uid, cid, pinned=True).pinned_at
+        # PATCH partiel : épingler ne renomme pas.
+        assert db.get(intel.Conversation, conv.id).title == "Levée série A"
+
+        c = intel.update_conversation(db, uid, cid, archived=True)
+        assert c.archived_at is not None
+        # Archiver dépingle : la section « Épinglées » ne doit pas garder un
+        # fil rangé hors de vue.
+        assert c.pinned_at is None
+
+        assert intel.update_conversation(db, uid, cid, archived=False).archived_at is None
+
+        with pytest.raises(intel.AppError) as e:
+            intel.update_conversation(db, uid, cid, title="   ")
+        assert e.value.code == "titre_vide"
+
+
+def test_supprimer_une_conversation_emporte_ses_messages():
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        _remplir(db, conv, 3)
+        cid, autre = str(conv.id), intel.create_conversation(
+            db, uid, str(conv.project_id), "Autre", None)
+        _remplir(db, autre, 1)
+
+        intel.delete_conversation(db, uid, cid)
+
+        assert db.get(intel.Conversation, uuidlib.UUID(cid)) is None
+        # Cascade ORM : aucun message orphelin, et le fil voisin intact.
+        restants = db.scalars(select(intel.Message)).all()
+        assert [m.conversation_id for m in restants] == [autre.id] * 2
+
+
+def test_proprietaire_seul_gere_sa_conversation():
+    """Un identifiant deviné ne doit rien laisser faire — et rendre 404, pas
+    403 : on ne confirme pas l'existence d'un fil qui n'est pas le sien."""
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        _remplir(db, conv, 1)
+        cid = str(conv.id)
+        mid = str(db.scalars(select(intel.Message)).first().id)
+        intrus = str(uuidlib.uuid4())
+
+        for appel in (
+            lambda: intel.update_conversation(db, intrus, cid, title="volé"),
+            lambda: intel.delete_conversation(db, intrus, cid),
+            lambda: intel.preparer_regeneration(db, intrus, cid, mid, is_admin=True),
+            lambda: intel.preparer_edition(db, intrus, cid, mid, "volé", is_admin=True),
+            lambda: intel.list_conversations(db, intrus, str(conv.project_id)),
+            lambda: intel.update_project(db, intrus, str(conv.project_id), name="volé"),
+            lambda: intel.delete_project(db, intrus, str(conv.project_id)),
+        ):
+            with pytest.raises(intel.AppError) as e:
+                appel()
+            assert (e.value.status_code, e.value.code) == (404, "not_found")
+
+        # Rien n'a bougé.
+        assert db.get(intel.Conversation, conv.id).title == "Nouvelle conversation"
+
+
+def test_deplacer_une_conversation_de_dossier():
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        cible = intel.create_project(db, uid, "Levées", None)
+        c = intel.update_conversation(db, uid, str(conv.id), project_id=str(cible.id))
+        assert c.project_id == cible.id
+        assert [x.id for x in intel.list_conversations(db, uid, str(cible.id))] == [conv.id]
+
+        # Dossier d'un AUTRE utilisateur : 404, jamais un déplacement.
+        etranger = intel.create_project(db, str(uuidlib.uuid4()), "Chez l'autre", None)
+        with pytest.raises(intel.AppError) as e:
+            intel.update_conversation(db, uid, str(conv.id),
+                                      project_id=str(etranger.id))
+        assert (e.value.status_code, e.value.code) == (404, "not_found")
+        assert db.get(intel.Conversation, conv.id).project_id == cible.id
+
+
+def test_liste_des_conversations_epinglees_puis_recentes():
+    with Session(_base()) as db:
+        uid, ancienne = _fil(db)
+        pid = str(ancienne.project_id)
+        recente = intel.create_conversation(db, uid, pid, "Récente", None)
+        epinglee = intel.create_conversation(db, uid, pid, "Épinglée", None)
+        archivee = intel.create_conversation(db, uid, pid, "Archivée", None)
+        jamais = intel.create_conversation(db, uid, pid, "Jamais utilisée", None)
+
+        base = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
+        ancienne.last_message_at = base
+        recente.last_message_at = base + dt.timedelta(days=2)
+        epinglee.last_message_at = base - dt.timedelta(days=5)  # la plus vieille
+        archivee.last_message_at = base + dt.timedelta(days=3)  # la plus récente
+        db.commit()
+        intel.update_conversation(db, uid, str(epinglee.id), pinned=True)
+        intel.update_conversation(db, uid, str(archivee.id), archived=True)
+
+        titres = [c.title for c in intel.list_conversations(db, uid, pid)]
+        # Épinglée en tête MALGRÉ son dernier message le plus ancien ;
+        # archivée absente ; « jamais utilisée » (last_message_at NULL) en fin.
+        assert titres == ["Épinglée", "Récente", "Nouvelle conversation",
+                          "Jamais utilisée"]
+
+        avec = [c.title for c in intel.list_conversations(db, uid, pid,
+                                                          inclure_archivees=True)]
+        assert "Archivée" in avec and avec[0] == "Épinglée"
+        assert len(intel.list_conversations(db, uid, pid, limit=2)) == 2
+        assert jamais.id in {c.id for c in intel.list_conversations(db, uid, pid)}
+
+
+def test_dossier_renomme_et_archive():
+    with Session(_base()) as db:
+        uid = str(uuidlib.uuid4())
+        proj = intel.create_project(db, uid, "Workspace", None)
+        p = intel.update_project(db, uid, str(proj.id), name="  Général  ")
+        assert p.name == "Général" and p.archived_at is None
+
+        assert intel.update_project(db, uid, str(proj.id), archived=True).archived_at
+        # `list_projects` ne rend que les dossiers actifs (comportement existant).
+        assert intel.list_projects(db, uid) == []
+        assert intel.update_project(db, uid, str(proj.id), archived=False).archived_at is None
+        assert len(intel.list_projects(db, uid)) == 1
+
+        with pytest.raises(intel.AppError) as e:
+            intel.update_project(db, uid, str(proj.id), name="  ")
+        assert e.value.code == "nom_vide"
+
+
+def test_dossier_non_vide_refuse_la_suppression():
+    """La cascade emporterait les conversations ET leurs messages : supprimer
+    un dossier ne doit pas être une manière d'effacer trente fils par erreur.
+    """
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        _remplir(db, conv, 2)
+        pid = str(conv.project_id)
+
+        with pytest.raises(intel.AppError) as e:
+            intel.delete_project(db, uid, pid)
+        assert (e.value.status_code, e.value.code) == (409, "projet_non_vide")
+        assert "2 conversation" not in e.value.message  # une seule, non archivée
+        assert db.get(intel.Project, conv.project_id) is not None
+
+        # Archivée = plus active : la suppression passe, et emporte le fil.
+        intel.update_conversation(db, uid, str(conv.id), archived=True)
+        intel.delete_project(db, uid, pid)
+        assert db.get(intel.Project, uuidlib.UUID(pid)) is None
+        assert db.scalars(select(intel.Conversation)).all() == []
+        assert db.scalars(select(intel.Message)).all() == []
+
+
+def test_routes_de_gestion_publiees_dans_le_schema():
+    from app.main import app
+
+    chemins = app.openapi()["paths"]
+    attendus = {
+        "/intelligence/projects/{project_id}": {"patch", "delete"},
+        "/intelligence/conversations/{conversation_id}": {"patch", "delete"},
+        "/intelligence/conversations/search": {"get"},
+        "/intelligence/conversations/{conversation_id}/messages/{message_id}/regenerer": {"post"},
+        "/intelligence/conversations/{conversation_id}/messages/{message_id}/editer": {"post"},
+        "/documents/{doc_id}/reindexer": {"post"},
+    }
+    for chemin, methodes in attendus.items():
+        assert chemin in chemins, chemin
+        assert methodes <= set(chemins[chemin]), (chemin, list(chemins[chemin]))
+
+    # `ConversationOut` porte enfin de quoi dessiner le panneau.
+    props = app.openapi()["components"]["schemas"]["ConversationOut"]["properties"]
+    assert {"project_id", "pinned_at", "archived_at", "message_count",
+            "last_message_at"} <= set(props)
+    # Filtre d'archivage et borne de liste sur la liste de conversations.
+    liste = chemins["/intelligence/projects/{project_id}/conversations"]["get"]
+    assert {"inclure_archivees", "limit"} <= {p["name"] for p in liste["parameters"]}
+    # Régénérer ne prend PAS de corps (le contenu vient du fil) ; éditer si.
+    regen = chemins[
+        "/intelligence/conversations/{conversation_id}/messages/{message_id}/regenerer"]["post"]
+    assert "requestBody" not in regen
+    edit = chemins[
+        "/intelligence/conversations/{conversation_id}/messages/{message_id}/editer"]["post"]
+    assert edit["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "EditionIn")
+
+
+def test_gestion_des_conversations_en_http():
+    """Les codes de retour, vus par un vrai client : 200 sur PATCH, 204 sur
+    DELETE, 409 nommé sur un dossier non vide."""
+    engine = _base_complete(partagee=True)
+    uid = str(uuidlib.uuid4())
+    client = _client_http(engine, uid)
+    try:
+        with Session(engine) as db:
+            uid_, conv = _fil(db)
+            # Le fil doit appartenir à l'utilisateur connecté.
+            conv.user_id = uuidlib.UUID(uid)
+            proj = db.get(intel.Project, conv.project_id)
+            proj.user_id = uuidlib.UUID(uid)
+            db.commit()
+            cid, pid = str(conv.id), str(proj.id)
+
+        res = client.patch(f"/intelligence/conversations/{cid}",
+                           json={"title": "Série A", "pinned": True})
+        assert res.status_code == 200, res.text
+        corps = res.json()
+        assert corps["title"] == "Série A" and corps["pinned_at"]
+        assert corps["project_id"] == pid and corps["archived_at"] is None
+
+        assert client.patch(f"/intelligence/projects/{pid}",
+                            json={"name": "Général"}).json()["name"] == "Général"
+
+        refus = client.delete(f"/intelligence/projects/{pid}")
+        assert refus.status_code == 409
+        assert refus.json()["error"]["code"] == "projet_non_vide"
+
+        assert client.delete(f"/intelligence/conversations/{cid}").status_code == 204
+        assert client.delete(f"/intelligence/projects/{pid}").status_code == 204
+        # Identifiant inconnu : 404 nommé, pas un 500.
+        for chemin in (f"/intelligence/conversations/{cid}",
+                       "/intelligence/conversations/pas-un-uuid"):
+            assert client.delete(chemin).status_code == 404
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+# --- Step 2 : recherche ----------------------------------------------------
+
+def test_recherche_extrait_de_80_caracteres_autour_du_terme():
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        contenu = "A" * 200 + "TERME" + "B" * 200
+        db.add(intel.Message(id=uuidlib.uuid4(), conversation_id=conv.id,
+                             role="assistant", content=contenu))
+        db.commit()
+
+        (res,) = intel.rechercher(db, uid, "terme")  # insensible à la casse
+        extrait = res["extrait"]
+        assert extrait.startswith("…") and extrait.endswith("…")
+        # ±80 caractères, en dur : le vérifier contre la constante rendrait
+        # le test complice de sa modification.
+        assert intel.RECHERCHE_MARGE == 80
+        assert extrait.count("A") == 80 and extrait.count("B") == 80
+        assert len(extrait) == 80 + len("TERME") + 80 + 2  # deux « … »
+        assert "TERME" in extrait
+        assert res["conversation_id"] == str(conv.id)
+        assert res["project_id"] == str(conv.project_id)
+        assert res["message_id"] is not None and res["created_at"] is not None
+
+
+def test_recherche_trouve_par_titre_et_ignore_les_archivees():
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        pid = str(conv.project_id)
+        intel.update_conversation(db, uid, str(conv.id), title="Cartographie des fonds")
+        archivee = intel.create_conversation(db, uid, pid, "Cartographie ancienne", None)
+        db.add(intel.Message(id=uuidlib.uuid4(), conversation_id=archivee.id,
+                             role="user", content="Cartographie du marché"))
+        db.commit()
+        intel.update_conversation(db, uid, str(archivee.id), archived=True)
+
+        res = intel.rechercher(db, uid, "cartographie")
+        # Le fil archivé est écarté, titre ET contenu : on l'a rangé hors de vue.
+        assert [r["conversation_id"] for r in res] == [str(conv.id)]
+        # Trouvé par le TITRE : pas de message à surligner.
+        assert res[0]["message_id"] is None
+        assert "Cartographie" in res[0]["extrait"]
+
+        # Un autre utilisateur ne voit rien.
+        assert intel.rechercher(db, str(uuidlib.uuid4()), "cartographie") == []
+
+
+def test_recherche_trop_courte_est_un_400_nomme():
+    with Session(_base()) as db:
+        uid, _ = _fil(db)
+        for court in ("", "  ", "ab", " a "):
+            with pytest.raises(intel.AppError) as e:
+                intel.rechercher(db, uid, court)
+            assert (e.value.status_code, e.value.code) == (400, "requete_trop_courte")
+
+
+def test_recherche_echappe_les_jokers_du_like():
+    """`%` et `_` sont les jokers du LIKE : sans échappement, chercher
+    « 100 % » remontait tout le fil."""
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        for texte in ("Marge de 100 % sur le SaaS", "Aucun pourcentage ici"):
+            db.add(intel.Message(id=uuidlib.uuid4(), conversation_id=conv.id,
+                                 role="user", content=texte))
+        db.commit()
+
+        assert len(intel.rechercher(db, uid, "100 %")) == 1
+        assert intel.rechercher(db, uid, "___") == []
+
+
+def test_recherche_bornee_a_20_resultats():
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        base = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
+        for i in range(30):
+            db.add(intel.Message(id=uuidlib.uuid4(), conversation_id=conv.id,
+                                 role="user", content=f"pricing numéro {i}",
+                                 created_at=base + dt.timedelta(minutes=i)))
+        db.commit()
+
+        res = intel.rechercher(db, uid, "pricing")
+        assert len(res) == intel.RECHERCHE_RESULTATS == 20
+        # Les plus récents d'abord, un message = un point d'arrivée.
+        assert "numéro 29" in res[0]["extrait"]
+        assert len({r["message_id"] for r in res}) == 20
+        dates = [r["created_at"] for r in res]
+        assert dates == sorted(dates, reverse=True)
+
+
+def test_recherche_en_http():
+    engine = _base_complete(partagee=True)
+    uid = str(uuidlib.uuid4())
+    client = _client_http(engine, uid)
+    try:
+        with Session(engine) as db:
+            proj = intel.create_project(db, uid, "P", None)
+            conv = intel.create_conversation(db, uid, str(proj.id), None, None)
+            db.add(intel.Message(id=uuidlib.uuid4(), conversation_id=conv.id,
+                                 role="assistant",
+                                 content="Le marché du logiciel RH est concentré."))
+            db.commit()
+            cid = str(conv.id)
+
+        res = client.get("/intelligence/conversations/search", params={"q": "logiciel"})
+        assert res.status_code == 200, res.text
+        (ligne,) = res.json()
+        assert ligne["conversation_id"] == cid and "logiciel" in ligne["extrait"]
+
+        court = client.get("/intelligence/conversations/search", params={"q": "lo"})
+        assert court.status_code == 400
+        assert court.json()["error"]["code"] == "requete_trop_courte"
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+# --- Step 3 : régénérer / éditer -------------------------------------------
+
+def test_regeneration_conserve_le_nombre_de_messages(monkeypatch):
+    """Régénérer supprime la réponse ET sa question : le pipeline recrée
+    toujours un message utilisateur, donc ne retirer que la réponse laissait
+    la question en double et faisait grandir le fil à chaque essai."""
+    _hors_reseau(monkeypatch)
+    debits = _sans_effets(monkeypatch, contexte="ACME")
+    _stub_flux(monkeypatch, [(["Nouvelle ", "réponse."], "end_turn")])
+
+    with Session(_base_complete()) as db:
+        uid, conv = _fil(db)
+        _remplir(db, conv, 2)  # 4 messages
+        cid = str(conv.id)
+        derniere = intel._messages_ordonnes(db, conv)[-1]
+        assert derniere.role == "assistant"
+
+        question = intel.preparer_regeneration(db, uid, cid, str(derniere.id),
+                                               is_admin=True)
+        assert question == "Question 1"
+        # Entre les deux : le fil est retombé à 2 messages, compteur recalé.
+        assert db.get(intel.Conversation, uuidlib.UUID(cid)).message_count == 2
+
+        evts = _evenements(intel.stream_message(db, uid, cid, question, is_admin=True))
+
+    with Session(db.get_bind()) as apres:
+        conv2 = apres.get(intel.Conversation, uuidlib.UUID(cid))
+        fil = intel._messages_ordonnes(apres, conv2)
+        assert conv2.message_count == len(fil) == 4
+        assert [m.role for m in fil] == ["user", "assistant", "user", "assistant"]
+        assert fil[-2].content == "Question 1"
+        assert fil[-1].content == "Nouvelle réponse."
+        assert "Réponse 1" not in [m.content for m in fil]
+        # Un tour régénéré est un tour : même statut, même facturation.
+        assert fil[-1].statut == "complet" and len(debits) == 1
+    assert evts[-1]["step"] == "done" and evts[-1]["data"]["statut"] == "complet"
+
+
+def test_regeneration_refuse_ce_qui_n_est_pas_la_derniere_reponse():
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        _remplir(db, conv, 2)
+        cid = str(conv.id)
+        fil = intel._messages_ordonnes(db, conv)
+
+        cas = [
+            (fil[1], 409, "pas_le_dernier_message"),   # réponse, mais pas la dernière
+            (fil[2], 400, "pas_une_reponse"),          # message utilisateur
+            (fil[0], 400, "pas_une_reponse"),
+        ]
+        for msg, code_http, code in cas:
+            with pytest.raises(intel.AppError) as e:
+                intel.preparer_regeneration(db, uid, cid, str(msg.id), is_admin=True)
+            assert (e.value.status_code, e.value.code) == (code_http, code)
+
+        for inconnu in (str(uuidlib.uuid4()), "pas-un-uuid"):
+            with pytest.raises(intel.AppError) as e:
+                intel.preparer_regeneration(db, uid, cid, inconnu, is_admin=True)
+            assert (e.value.status_code, e.value.code) == (404, "not_found")
+
+        # Aucun refus n'a supprimé quoi que ce soit.
+        assert len(intel._messages_ordonnes(db, conv)) == 4
+
+
+def test_regeneration_sans_question_d_origine():
+    """Une réponse orpheline (fil abîmé) ne doit pas produire un tour sans
+    question : mieux vaut un 409 lisible."""
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        db.add(intel.Message(id=uuidlib.uuid4(), conversation_id=conv.id,
+                             role="assistant", content="Orpheline"))
+        conv.message_count = 1
+        db.commit()
+        orpheline = intel._messages_ordonnes(db, conv)[-1]
+
+        with pytest.raises(intel.AppError) as e:
+            intel.preparer_regeneration(db, uid, str(conv.id), str(orpheline.id),
+                                        is_admin=True)
+        assert (e.value.status_code, e.value.code) == (409, "question_introuvable")
+
+
+def test_edition_supprime_la_suite_et_relance(monkeypatch):
+    """Éditer la question d'index 2 laisse 2 messages, plus le tour rejoué :
+    4 au total. Garder les réponses suivantes produirait un fil qui se
+    contredit — elles répondaient à l'ancienne formulation."""
+    _hors_reseau(monkeypatch)
+    _sans_effets(monkeypatch, contexte="ACME")
+    _stub_flux(monkeypatch, [(["Réponse ", "révisée."], "end_turn")])
+
+    with Session(_base_complete()) as db:
+        uid, conv = _fil(db)
+        _remplir(db, conv, 3)  # 6 messages
+        cid = str(conv.id)
+        fil = intel._messages_ordonnes(db, conv)
+        index = 2
+        cible = fil[index]
+        assert cible.role == "user"
+
+        intel.preparer_edition(db, uid, cid, str(cible.id), "Question 1 corrigée",
+                               is_admin=True)
+        conv_apres = db.get(intel.Conversation, uuidlib.UUID(cid))
+        assert conv_apres.message_count == index
+        # `last_message_at` recalé : sinon la conversation vidée restait en
+        # tête du panneau.
+        assert conv_apres.last_message_at == fil[index - 1].created_at
+
+        list(intel.stream_message(db, uid, cid, "Question 1 corrigée", is_admin=True))
+
+    with Session(db.get_bind()) as apres:
+        conv2 = apres.get(intel.Conversation, uuidlib.UUID(cid))
+        fil2 = intel._messages_ordonnes(apres, conv2)
+        assert conv2.message_count == len(fil2) == index + 2 == 4
+        assert [m.content for m in fil2] == [
+            "Question 0", "Réponse 0", "Question 1 corrigée", "Réponse révisée."]
+
+
+def test_edition_refuse_une_reponse_et_un_message_trop_long():
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        _remplir(db, conv, 1)
+        cid = str(conv.id)
+        fil = intel._messages_ordonnes(db, conv)
+
+        with pytest.raises(intel.AppError) as e:
+            intel.preparer_edition(db, uid, cid, str(fil[1].id), "x", is_admin=True)
+        assert (e.value.status_code, e.value.code) == (400, "pas_un_message_utilisateur")
+
+        with pytest.raises(intel.AppError) as e:
+            intel.preparer_edition(db, uid, cid, str(fil[0].id),
+                                   "x" * (intel.LONGUEUR_MAX_MESSAGE + 1),
+                                   is_admin=True)
+        assert (e.value.status_code, e.value.code) == (413, "message_trop_long")
+        # Le 413 est levé AVANT toute suppression.
+        assert len(intel._messages_ordonnes(db, conv)) == 2
+
+
+def test_regenerer_et_editer_passent_par_le_meme_flux(monkeypatch):
+    """Preuve de non-duplication : les trois routes produisent la MÊME
+    séquence d'événements SSE, parce qu'elles appellent le même générateur et
+    la même enveloppe `_flux_sse` du routeur."""
+    _hors_reseau(monkeypatch)
+    _sans_effets(monkeypatch, contexte="ACME")
+    _stub_flux(monkeypatch, [(["Un.", " Deux."], "end_turn")] * 3)
+
+    engine = _base_complete(partagee=True)
+    uid = str(uuidlib.uuid4())
+    client = _client_http(engine, uid)
+    try:
+        with Session(engine) as db:
+            proj = intel.create_project(db, uid, "P", None)
+            conv = intel.create_conversation(db, uid, str(proj.id), None, None)
+            cid = str(conv.id)
+
+        envoi = client.post(f"/intelligence/conversations/{cid}/messages/stream",
+                            json={"content": "Analyse détaillée du marché RH"})
+        assert envoi.status_code == 200, envoi.text
+        assert envoi.headers["content-type"].startswith("text/event-stream")
+        reference = [(e["step"], e.get("etape")) for e in _sse_de(envoi)]
+
+        with Session(engine) as db:
+            fil = intel._messages_ordonnes(db, db.get(intel.Conversation,
+                                                      uuidlib.UUID(cid)))
+            assert [m.role for m in fil] == ["user", "assistant"]
+            reponse_id, question_id = str(fil[1].id), str(fil[0].id)
+
+        regen = client.post(
+            f"/intelligence/conversations/{cid}/messages/{reponse_id}/regenerer")
+        assert regen.status_code == 200, regen.text
+        assert regen.headers["content-type"].startswith("text/event-stream")
+        assert [(e["step"], e.get("etape")) for e in _sse_de(regen)] == reference
+
+        with Session(engine) as db:
+            conv2 = db.get(intel.Conversation, uuidlib.UUID(cid))
+            fil = intel._messages_ordonnes(db, conv2)
+            assert conv2.message_count == len(fil) == 2  # inchangé
+            question_id = str(fil[0].id)
+
+        edit = client.post(
+            f"/intelligence/conversations/{cid}/messages/{question_id}/editer",
+            json={"content": "Analyse détaillée du marché de la paie"})
+        assert edit.status_code == 200, edit.text
+        assert [(e["step"], e.get("etape")) for e in _sse_de(edit)] == reference
+
+        with Session(engine) as db:
+            conv3 = db.get(intel.Conversation, uuidlib.UUID(cid))
+            fil = intel._messages_ordonnes(db, conv3)
+            assert conv3.message_count == len(fil) == 2  # index 0 + 2
+            assert fil[0].content == "Analyse détaillée du marché de la paie"
+
+        # Refus en HTTP, pas en événement d'erreur dans une 200 : un client qui
+        # teste `res.status` doit le voir.
+        rate = client.post(
+            f"/intelligence/conversations/{cid}/messages/{fil[0].id}/regenerer")
+        assert rate.status_code == 400
+        assert rate.json()["error"]["code"] == "pas_une_reponse"
+        trop_long = client.post(
+            f"/intelligence/conversations/{cid}/messages/{fil[0].id}/editer",
+            json={"content": "x" * (intel.LONGUEUR_MAX_MESSAGE + 1)})
+        assert trop_long.status_code == 413
+        assert trop_long.json()["error"]["code"] == "message_trop_long"
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+def test_suppression_de_messages_recale_le_resume_roulant():
+    """Le résumé est un CURSEUR sur le fil (`resume_messages`) : laissé
+    au-delà du nouveau nombre de messages, il ne se remettait plus jamais à
+    jour et le modèle recevait un résumé de messages disparus."""
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        _remplir(db, conv, 6)  # 12 messages
+        conv.resume, conv.resume_messages = "Résumé des 4 premiers.", 4
+        db.commit()
+        fil = intel._messages_ordonnes(db, conv)
+
+        intel.preparer_edition(db, uid, str(conv.id), str(fil[2].id), "Nouvelle",
+                               is_admin=True)
+        conv = db.get(intel.Conversation, conv.id)
+        assert conv.message_count == 2
+        # Curseur ramené au fil réel, résumé conservé (il porte sur le début).
+        assert conv.resume_messages == 2 and conv.resume
+
+        intel.preparer_edition(db, uid, str(conv.id), str(fil[0].id), "Nouvelle",
+                               is_admin=True)
+        conv = db.get(intel.Conversation, conv.id)
+        # Fil vidé : le résumé n'a plus d'objet, et `last_message_at` non plus.
+        assert (conv.message_count, conv.resume, conv.resume_messages,
+                conv.last_message_at) == (0, None, 0, None)
+
+
+# --- Step 4 : réindexation d'un document -----------------------------------
+
+def _base_documents():
+    import app.modules.documents.models  # noqa: F401
+
+    engine = create_engine("sqlite://", future=True)
+    Base.metadata.create_all(engine, tables=[Base.metadata.tables["documents"]])
+    return engine
+
+
+def _document(db, uid, *, contenu="Texte du document. " * 50, chunks=0):
+    from app.modules.documents.models import Document
+
+    doc = Document(id=uuidlib.uuid4(), user_id=uuidlib.UUID(uid),
+                   filename="note.txt", mime_type="text/plain",
+                   size_bytes=len(contenu), content=contenu, chunk_count=chunks)
+    db.add(doc)
+    db.commit()
+    return doc
+
+
+def test_reindexation_met_a_jour_chunk_count(monkeypatch):
+    """Le cas utile de « rafraîchir le RAG » : un import dont l'indexation a
+    échoué (`chunk_count = 0`) est en base mais n'alimente aucune réponse."""
+    from app.modules.documents import service as docs
+    from app.modules.rag import embeddings, vector_store
+
+    supprimes: list[str] = []
+    envoyes: list[tuple] = []
+    monkeypatch.setattr(vector_store, "delete_document",
+                        lambda doc_id, **k: supprimes.append(doc_id))
+    monkeypatch.setattr(embeddings, "embed_texts",
+                        lambda morceaux: [[0.0] * 3 for _ in morceaux])
+    monkeypatch.setattr(vector_store, "upsert_chunks",
+                        lambda doc_id, uid, morceaux, vecteurs:
+                        (envoyes.append((doc_id, len(morceaux))), len(morceaux))[1])
+
+    with Session(_base_documents()) as db:
+        uid = str(uuidlib.uuid4())
+        doc = _document(db, uid)
+        rendu = docs.reindex(db, uid, str(doc.id))
+
+        assert rendu.chunk_count > 0
+        assert db.get(type(doc), doc.id).chunk_count == rendu.chunk_count
+        # Les anciens vecteurs partent AVANT les nouveaux : les identifiants de
+        # points sont dérivés de l'index de chunk, donc un texte devenu plus
+        # court laisserait la queue de l'ancienne version dans les réponses.
+        assert supprimes == [str(doc.id)]
+        assert envoyes == [(str(doc.id), rendu.chunk_count)]
+
+        # Propriété : le document d'un autre utilisateur est introuvable.
+        for mauvais in (str(uuidlib.uuid4()), "pas-un-uuid"):
+            with pytest.raises(intel.AppError) as e:
+                docs.reindex(db, uid, mauvais)
+            assert (e.value.status_code, e.value.code) == (404, "not_found")
+        with pytest.raises(intel.AppError):
+            docs.reindex(db, str(uuidlib.uuid4()), str(doc.id))
+
+
+def test_reindexation_en_echec_remet_chunk_count_a_zero(monkeypatch):
+    from app.modules.documents import service as docs
+    from app.modules.rag import embeddings, vector_store
+
+    monkeypatch.setattr(vector_store, "delete_document", lambda *a, **k: None)
+    monkeypatch.setattr(embeddings, "embed_texts",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("qdrant HS")))
+
+    with Session(_base_documents()) as db:
+        uid = str(uuidlib.uuid4())
+        doc = _document(db, uid, chunks=12)
+
+        with pytest.raises(intel.AppError) as e:
+            docs.reindex(db, uid, str(doc.id))
+        assert (e.value.status_code, e.value.code) == (503, "indexing_failed")
+        # Les anciens vecteurs sont déjà partis : 0 dit la vérité et garde le
+        # bouton « Réindexer » visible. Un compteur à 12 promettait des
+        # vecteurs disparus.
+        assert db.get(type(doc), doc.id).chunk_count == 0
+
+
+def test_reindexation_d_un_document_sans_texte():
+    from app.modules.documents import service as docs
+
+    with Session(_base_documents()) as db:
+        uid = str(uuidlib.uuid4())
+        doc = _document(db, uid, contenu="   ")
+        with pytest.raises(intel.AppError) as e:
+            docs.reindex(db, uid, str(doc.id))
+        assert (e.value.status_code, e.value.code) == (422, "extraction_failed")
+
+
+def test_credits_verifies_avant_toute_suppression(monkeypatch):
+    """Découvrir le 402 dans le flux aurait laissé le fil amputé de la question
+    ET de sa réponse, sans rien avoir régénéré : la perte n'est pas
+    rattrapable côté client, le message n'existe plus."""
+    from app.modules.billing import service as billing
+
+    monkeypatch.setattr(billing, "check_credits",
+                        lambda *a, **k: {"affordable": False, "available": 0,
+                                         "cost": 2})
+    with Session(_base_complete()) as db:
+        uid, conv = _fil(db)
+        _remplir(db, conv, 2)
+        cid = str(conv.id)
+        fil = intel._messages_ordonnes(db, conv)
+
+        for appel in (
+            lambda: intel.preparer_regeneration(db, uid, cid, str(fil[-1].id)),
+            lambda: intel.preparer_edition(db, uid, cid, str(fil[0].id), "Autre"),
+        ):
+            with pytest.raises(intel.AppError) as e:
+                appel()
+            assert (e.value.status_code, e.value.code) == (402, "insufficient_credits")
+
+        assert len(intel._messages_ordonnes(db, conv)) == 4
+        assert db.get(intel.Conversation, conv.id).message_count == 4
