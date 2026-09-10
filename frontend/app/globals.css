@@ -2623,11 +2623,6 @@ html[data-theme="light"] .sidebar {
   letter-spacing: 0.04em;
 }
 
-.credits-legend {
-  display: flex; gap: 18px;
-  margin-top: 18px;
-}
-.credits-legend .item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-2); }
 
 .plan-card {
   background: linear-gradient(180deg, rgba(121,118,247,0.06), transparent);

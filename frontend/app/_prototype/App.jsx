@@ -228,8 +228,6 @@ const STRINGS = {
 
     'reports.quota.title': 'Crédits insuffisants',
     'reports.quota.body': 'Ce rapport demande plus de crédits que ce qu\'il vous reste ce mois-ci. Deux options.',
-    'reports.quota.upgrade': 'Passer à Pro',
-    'reports.quota.topup': 'Recharger ponctuellement',
     'reports.quota.usage': 'Consommation du mois',
     'reports.quota.see_credits': 'Voir les crédits',
 
@@ -442,8 +440,6 @@ const STRINGS = {
 
     'reports.quota.title': 'Out of credits',
     'reports.quota.body': 'This report needs more credits than you have left this month. Two paths.',
-    'reports.quota.upgrade': 'Move to Pro',
-    'reports.quota.topup': 'One-time top-up',
     'reports.quota.usage': 'This month',
     'reports.quota.see_credits': 'See credits',
 
