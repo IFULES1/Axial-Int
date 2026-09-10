@@ -81,7 +81,13 @@ def list_conversations(db: Session, user_id: str, project_id: str) -> list[Conve
 
 
 def _own_conversation(db: Session, user_id: str, conversation_id: str) -> Conversation:
-    conv = db.get(Conversation, uuid.UUID(conversation_id))
+    # Un identifiant qui n'est pas un UUID (id provisoire côté client) vaut
+    # « introuvable », pas une erreur serveur.
+    try:
+        conv_uuid = uuid.UUID(conversation_id)
+    except ValueError:
+        raise AppError("Conversation introuvable.", 404, code="not_found") from None
+    conv = db.get(Conversation, conv_uuid)
     if not conv or str(conv.user_id) != user_id:
         raise AppError("Conversation introuvable.", 404, code="not_found")
     return conv

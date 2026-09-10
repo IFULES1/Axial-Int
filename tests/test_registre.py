@@ -249,3 +249,4 @@ def test_email_reinitialisation_mot_de_passe_tutoie(monkeypatch):
     # Le corps HTML porte le même registre que le texte brut.
     assert TUTOIEMENT.search(html)
     assert not VOUVOIEMENT_LECTEUR.search(html)
+

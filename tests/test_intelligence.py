@@ -65,3 +65,15 @@ def test_intelligence_routes_mounted():
         assert p in paths
     assert client.get("/intelligence/agents").status_code == 200          # public
     assert client.get("/intelligence/projects").status_code in (401, 403)  # protected
+
+
+def test_un_id_de_conversation_non_uuid_vaut_introuvable():
+    """Un id provisoire côté client (« c-… ») ne doit pas produire un 500."""
+    import pytest
+
+    from app.errors import AppError
+    from app.modules.intelligence import service as intel
+
+    with pytest.raises(AppError) as exc:
+        intel._own_conversation(None, "u", "c-1789047892832")
+    assert exc.value.status_code == 404
