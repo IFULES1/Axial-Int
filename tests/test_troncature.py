@@ -244,16 +244,23 @@ def test_reponse_de_chat_vide_non_facturee(monkeypatch):
         agent = "conseiller"
         content = ""
         citations = None
+        viz = None
+        statut = "degrade"
+        tokens_entree = None
+        tokens_sortie = None
+        cout_micro_eur = None
         created_at = __import__("datetime").datetime.now()
 
-    def faux_finalize(db, user_id, turn, answer, *, is_admin, degraded, mesure=None):
-        factures.append(not degraded)
+    def faux_finalize(db, user_id, turn, answer, *, is_admin, statut="complet",
+                      mesure=None, cle_idempotence=None):
+        factures.append(statut == "complet")
         m = _Msg()
         m.content = answer
+        m.statut = statut
         return m
 
     class _Turn:
-        conv = types.SimpleNamespace(id="c1")
+        conv = types.SimpleNamespace(id="c1", resume=None)
         agent_key = "conseiller"
         redirect_note = None
         system = "s"
@@ -262,9 +269,17 @@ def test_reponse_de_chat_vide_non_facturee(monkeypatch):
         tier = "chat"
         max_tokens = 8000
         blocked_answer = None
+        history = []
+
+    ctx = types.SimpleNamespace(company_context="présent", trivial=True,
+                                conv=_Turn.conv)
 
     # Le flux se termine sans erreur et sans produire un seul morceau.
-    with mock.patch.object(service, "_prepare_turn", lambda *a, **k: _Turn()), \
+    with mock.patch.object(service, "_preparer_contexte", lambda *a, **k: ctx), \
+         mock.patch.object(service, "_rechercher", lambda *a, **k: service._Recherche()), \
+         mock.patch.object(service, "_assembler_turn", lambda *a, **k: _Turn()), \
+         mock.patch.object(service, "rejeu", lambda *a, **k: None), \
+         mock.patch.object(service, "_solde", lambda *a, **k: 7), \
          mock.patch.object(service, "_finalize_turn", faux_finalize), \
          mock.patch.object(service.llm_client, "stream_text", lambda **k: iter(())):
         evts = list(service.stream_message(db=None, user_id="u",

@@ -27,6 +27,33 @@ class LLMResult:
     output_tokens: int = 0
 
 
+def cumuler_mesure(mesure: dict, model: str, provider: str,
+                   entree: int, sortie: int) -> None:
+    """Accumule modèle et tokens dans le dictionnaire de mesure d'un flux.
+
+    Un flux ne peut pas rendre un `LLMResult` (sa valeur de retour porte déjà
+    le `stop_reason`) : l'appelant fournit un dictionnaire, le fournisseur le
+    remplit. Cumulatif, parce qu'une réponse tronquée est reprise en plusieurs
+    appels qui comptent tous.
+    """
+    mesure["model"] = model
+    mesure["provider"] = provider
+    mesure["input_tokens"] = mesure.get("input_tokens", 0) + (entree or 0)
+    mesure["output_tokens"] = mesure.get("output_tokens", 0) + (sortie or 0)
+
+
+def resultat_de_mesure(mesure: dict | None) -> LLMResult | None:
+    """Le `LLMResult` équivalent d'une mesure de flux, ou `None` si rien n'a
+    été mesuré (fournisseur muet : mieux vaut aucun coût qu'un coût faux)."""
+    if not mesure or not mesure.get("model"):
+        return None
+    return LLMResult(text="", model=mesure["model"],
+                     provider=mesure.get("provider", ""),
+                     input_tokens=mesure.get("input_tokens", 0),
+                     output_tokens=mesure.get("output_tokens", 0),
+                     tokens=mesure.get("input_tokens", 0) + mesure.get("output_tokens", 0))
+
+
 @runtime_checkable
 class WebSearchProvider(Protocol):
     """Generates an answer grounded in a live web search (+ optional context)."""

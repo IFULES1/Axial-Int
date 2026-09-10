@@ -9,7 +9,11 @@ from __future__ import annotations
 import logging
 
 from app.config import get_settings
-from app.shared.llm_client.base import LLMResult, ProviderUnavailable
+from app.shared.llm_client.base import (
+    LLMResult,
+    ProviderUnavailable,
+    cumuler_mesure,
+)
 
 logger = logging.getLogger("axial.llm.claude")
 
@@ -30,14 +34,30 @@ SUITE_CONSIGNE = (
 )
 
 
+def _messages(history: list[dict] | None, prompt: str) -> list[dict]:
+    """Tour utilisateur courant précédé des tours passés.
+
+    `history` arrive déjà nettoyé et alterné par l'appelant (voir
+    `intelligence.service._historique`) : on le recopie tel quel plutôt que de
+    dupliquer ici une logique de conversation.
+    """
+    tours = [{"role": m["role"], "content": m["content"]}
+             for m in (history or []) if (m.get("content") or "").strip()]
+    return tours + [{"role": "user", "content": prompt}]
+
+
 def generate(*, system: str, prompt: str, model: str | None = None,
              max_tokens: int = 4000, mcp_servers: list | None = None,
-             mcp_tools: list | None = None) -> LLMResult:
+             mcp_tools: list | None = None,
+             history: list[dict] | None = None) -> LLMResult:
     """General text generation (premium tier — final reports).
 
     `mcp_servers` / `mcp_tools` branchent les outils du client (Notion…) :
     Claude interroge alors son espace de travail pendant la rédaction. Les deux
     listes vont ensemble — un serveur déclaré sans son `mcp_toolset` est rejeté.
+
+    `history` — tours précédents (`{role, content}`), passés tels quels dans
+    `messages` avant la question courante : c'est la mémoire de fil.
     """
     settings = get_settings()
     if not settings.anthropic_api_key:
@@ -48,7 +68,7 @@ def generate(*, system: str, prompt: str, model: str | None = None,
     model = model or settings.llm_report_model
     kwargs = {
         "model": model, "max_tokens": max_tokens, "system": system,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": _messages(history, prompt),
     }
     if mcp_servers and mcp_tools:
         kwargs["mcp_servers"] = mcp_servers
@@ -148,12 +168,23 @@ class ClaudeProvider:
 
 def stream(*, system: str, prompt: str, model: str | None = None,
            max_tokens: int = 4000, mcp_servers: list | None = None,
-           mcp_tools: list | None = None):
+           mcp_tools: list | None = None, history: list[dict] | None = None,
+           mesure: dict | None = None):
     """Yield text chunks as they are produced (streaming variant of generate()).
 
     Avec des serveurs MCP, les appels d'outils sont exécutés côté Anthropic :
     le flux de texte reste le même pour l'appelant, il marque simplement une
     pause pendant que Claude interroge l'outil.
+
+    **Valeur de retour** : le `stop_reason` du message final (`return`, donc
+    lisible par l'appelant avec `raison = yield from stream(...)`). Sans elle,
+    une réponse coupée par le plafond de sortie est indiscernable en flux d'une
+    réponse terminée — et le service ne peut pas la reprendre.
+
+    `mesure` — dictionnaire fourni par l'appelant, rempli du modèle et des
+    tokens consommés (cumulés si le même dictionnaire sert à plusieurs appels).
+    Sans lui, une réponse en flux n'a ni tokens ni coût mesuré, alors que le
+    flux est le chemin normal du chat.
     """
     settings = get_settings()
     if not settings.anthropic_api_key:
@@ -164,12 +195,30 @@ def stream(*, system: str, prompt: str, model: str | None = None,
     model = model or settings.llm_report_model
     kwargs = {
         "model": model, "max_tokens": max_tokens, "system": system,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": _messages(history, prompt),
     }
     if mcp_servers and mcp_tools:
         kwargs["mcp_servers"] = mcp_servers
         kwargs["tools"] = mcp_tools
         kwargs["betas"] = ["mcp-client-2025-11-20"]
     espace = client.beta.messages if "betas" in kwargs else client.messages
+    raison = None
     with espace.stream(**kwargs) as s:
         yield from s.text_stream
+        # Le message final n'est complet qu'à l'intérieur du `with`. Tolérant :
+        # un SDK qui ne le fournit pas ne doit pas casser un flux déjà livré.
+        try:
+            final = s.get_final_message()
+            raison = getattr(final, "stop_reason", None)
+            if mesure is not None:
+                cumuler_mesure(mesure, model, "claude",
+                               *_usage_de(getattr(final, "usage", None)))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("stop_reason indisponible en flux : %s", e)
+    return raison
+
+
+def _usage_de(u) -> tuple[int, int]:
+    if u is None:
+        return 0, 0
+    return (getattr(u, "input_tokens", 0) or 0), (getattr(u, "output_tokens", 0) or 0)

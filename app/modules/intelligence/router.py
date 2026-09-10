@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 
 from fastapi.responses import StreamingResponse
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -61,6 +61,29 @@ class MessageOut(BaseModel):
     citations: list | None
     viz: list | None = None
     created_at: dt.datetime
+    # complet | partiel | degrade — le front pose un bandeau « Réponse
+    # partielle » sur les deux derniers.
+    statut: str = "complet"
+    tokens_entree: int | None = None
+    tokens_sortie: int | None = None
+    # Crédits réellement débités : 0 sur un tour partiel ou dégradé.
+    credits: int = 0
+    # Coût réel de production. Donnée de marge : renseignée pour les admins
+    # seulement, `None` pour tous les autres.
+    cout_micro_eur: int | None = None
+
+
+class MessagesPage(BaseModel):
+    items: list[MessageOut]
+    has_more: bool
+
+
+class CoutOut(BaseModel):
+    messages: int
+    credits: int
+    tokens_entree: int
+    tokens_sortie: int
+    cout_micro_eur: int | None = None
 
 
 # --- agents ----------------------------------------------------------------
@@ -124,14 +147,42 @@ def list_conversations(project_id: str, user: AuthUser = Depends(get_current_use
 
 # --- messages --------------------------------------------------------------
 
+def _detecteur_deconnexion(request: Request):
+    """Rend une fonction SYNCHRONE qui dit si le client est parti.
+
+    Le générateur du service est synchrone : Starlette l'itère dans un thread
+    du pool (`iterate_in_threadpool`), donc `request.is_disconnected()` — une
+    coroutine — doit être relancée sur la boucle d'événements depuis ce thread.
+    C'est exactement ce que fait `anyio.from_thread.run`. Un générateur async
+    aurait évité le détour mais aurait forcé à rendre asynchrone tout le
+    pipeline (SQLAlchemy synchrone compris).
+    """
+    import anyio
+
+    def _parti() -> bool:
+        try:
+            return bool(anyio.from_thread.run(request.is_disconnected))
+        except Exception:  # noqa: BLE001 — un test raté ne doit jamais couper un flux sain
+            return False
+
+    return _parti
+
+
 @router.post("/conversations/{conversation_id}/messages/stream")
-def stream_message(conversation_id: str, payload: MessageIn,
+def stream_message(conversation_id: str, payload: MessageIn, request: Request,
                    user: AuthUser = Depends(get_current_user),
-                   db: Session = Depends(get_db)) -> StreamingResponse:
+                   db: Session = Depends(get_db),
+                   x_idempotency_key: str | None = Header(default=None)
+                   ) -> StreamingResponse:
     """Word-by-word answer (SSE). Same billing and persistence as the blocking route."""
+    # 413 AVANT d'ouvrir le flux : un événement SSE d'erreur dans une réponse
+    # 200 est invisible pour un client qui teste le code HTTP.
+    service.verifier_longueur(payload.content)
     generator = service.stream_message(
         db, user.id, conversation_id, payload.content, payload.agent,
         is_admin=user.is_admin, document_ids=payload.document_ids,
+        cle_idempotence=x_idempotency_key,
+        est_deconnecte=_detecteur_deconnexion(request),
     )
     return StreamingResponse(
         generator,
@@ -140,25 +191,47 @@ def stream_message(conversation_id: str, payload: MessageIn,
     )
 
 
-def _msg_out(m) -> MessageOut:
+def _msg_out(m, *, is_admin: bool = False) -> MessageOut:
     return MessageOut(id=str(m.id), role=m.role, agent=m.agent, content=m.content,
-                      citations=m.citations, viz=m.viz, created_at=m.created_at)
+                      citations=m.citations, viz=m.viz, created_at=m.created_at,
+                      statut=m.statut, tokens_entree=m.tokens_entree,
+                      tokens_sortie=m.tokens_sortie,
+                      credits=service.credits_du_message(m),
+                      cout_micro_eur=m.cout_micro_eur if is_admin else None)
 
 
-@router.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])
+@router.get("/conversations/{conversation_id}/messages", response_model=MessagesPage)
 def list_messages(conversation_id: str, user: AuthUser = Depends(get_current_user),
-                  db: Session = Depends(get_db)) -> list[MessageOut]:
-    return [_msg_out(m) for m in service.list_messages(db, user.id, conversation_id)]
+                  db: Session = Depends(get_db),
+                  limit: int = Query(default=50, ge=1, le=200),
+                  before: str | None = Query(default=None)) -> MessagesPage:
+    """Fenêtre paginée, ordre chronologique. `before` = identifiant du plus
+    ancien message déjà affiché, pour « Charger les messages précédents »."""
+    items, has_more = service.list_messages(db, user.id, conversation_id,
+                                            limit=limit, before=before)
+    return MessagesPage(items=[_msg_out(m, is_admin=user.is_admin) for m in items],
+                        has_more=has_more)
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=MessageOut)
 def post_message(conversation_id: str, payload: MessageIn,
                  user: AuthUser = Depends(get_current_user),
-                 db: Session = Depends(get_db)) -> MessageOut:
+                 db: Session = Depends(get_db),
+                 x_idempotency_key: str | None = Header(default=None)) -> MessageOut:
+    service.verifier_longueur(payload.content)
     m = service.post_message(db, user.id, conversation_id, payload.content,
                              payload.agent, is_admin=user.is_admin,
-                             document_ids=payload.document_ids)
-    return _msg_out(m)
+                             document_ids=payload.document_ids,
+                             cle_idempotence=x_idempotency_key)
+    return _msg_out(m, is_admin=user.is_admin)
+
+
+@router.get("/conversations/{conversation_id}/cout", response_model=CoutOut)
+def cout_conversation(conversation_id: str, user: AuthUser = Depends(get_current_user),
+                      db: Session = Depends(get_db)) -> CoutOut:
+    """Total du fil : crédits, tokens, et le coût € pour les admins seulement."""
+    return CoutOut(**service.cout_conversation(db, user.id, conversation_id,
+                                               is_admin=user.is_admin))
 
 
 @router.get("/conversations/{conversation_id}/export")
