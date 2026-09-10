@@ -76,3 +76,26 @@ def decouper(markdown: str) -> list[Bloc]:
         i += 1
     vider_puces()
     return blocs
+
+
+_NOMBRE = re.compile(r"^\s*([-+]?\d[\d\s  ]*(?:[.,]\d+)?)\s*(%|Md€|M€|k€|€|M\$|\$|k)?\s*$")
+
+
+def serie_numerique(cellules: list[list[str]]):
+    """Étiquettes + valeurs + unité, si et seulement si la 2e colonne est
+    entièrement numérique et de même unité. Un graphique tracé sur des
+    unités mélangées mentirait : mieux vaut aucun graphique."""
+    if len(cellules) < 3 or any(len(ligne) < 2 for ligne in cellules):
+        return None
+    etiquettes, valeurs, unites = [], [], set()
+    for ligne in cellules[1:]:
+        m = _NOMBRE.match(ligne[1])
+        if not m:
+            return None
+        brut = re.sub(r"[\s  ]", "", m.group(1)).replace(",", ".")
+        valeurs.append(float(brut))
+        unites.add(m.group(2) or "")
+        etiquettes.append(ligne[0])
+    if len(unites) != 1:
+        return None
+    return etiquettes, valeurs, unites.pop()

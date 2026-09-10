@@ -22,3 +22,24 @@ def test_titres_paragraphes_puces_et_regle():
 def test_une_ligne_seule_avec_barre_reste_un_paragraphe():
     # Une seule ligne « | » sans ligne de séparation suivante n'est pas un tableau.
     assert decouper("| pas un tableau")[0].genre == "p"
+
+
+def test_une_serie_homogene_est_reconnue():
+    from app.modules.reports.blocs import serie_numerique
+
+    c = [["Acteur", "Part"], ["Alpha", "40 %"], ["Beta", "25,5 %"]]
+    assert serie_numerique(c) == (["Alpha", "Beta"], [40.0, 25.5], "%")
+
+
+def test_des_unites_melangees_ne_donnent_pas_de_graphique():
+    from app.modules.reports.blocs import serie_numerique
+
+    c = [["Pays", "Taille"], ["FR", "3 Md€"], ["DE", "40 %"]]
+    assert serie_numerique(c) is None
+
+
+def test_un_tableau_textuel_ne_donne_pas_de_graphique():
+    from app.modules.reports.blocs import serie_numerique
+
+    c = [["Acteur", "Positionnement"], ["Alpha", "Premium"], ["Beta", "Low cost"]]
+    assert serie_numerique(c) is None
