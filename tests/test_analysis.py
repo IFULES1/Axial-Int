@@ -52,3 +52,10 @@ def test_analysis_routes_mounted():
     # /analysis/types is public; run/stream require auth.
     assert client.get("/analysis/types").status_code == 200
     assert client.post("/analysis/run", json={"query": "x"}).status_code in (401, 403)
+
+
+def test_le_style_exige_une_synthese_executive_en_tete():
+    from app.modules.analysis import prompts
+
+    assert "## Synthèse exécutive" in prompts.OUTPUT_STYLE
+    assert "## Executive summary" in prompts.OUTPUT_STYLE

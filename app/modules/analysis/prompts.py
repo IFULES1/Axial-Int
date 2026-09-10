@@ -46,7 +46,11 @@ STYLE DE RÉDACTION (OBLIGATOIRE)
 4. Phrases complètes, ton professionnel et accessible, transitions entre sections.
 5. Tableaux markdown uniquement s'ils apportent une donnée clé (1-3 maximum).
 6. Section finale : « ## Sources » — JAMAIS « Références Bibliographiques » ni
-   « Bibliographie »."""
+   « Bibliographie ».
+7. Le rapport s'ouvre par « ## Synthèse exécutive » (« ## Executive summary »
+   si le rapport est en anglais) : 5 à 8 phrases, les chiffres clés et la
+   conclusion principale, lisibles sans le reste du document. Cette section
+   précède la section 1 et ne contient ni puce ni tableau."""
 
 ACTIONABLE_KPIS = """\
 KPIs & INDICATEURS
