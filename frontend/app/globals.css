@@ -547,6 +547,7 @@ input, select, textarea { font-family: inherit; color: inherit; }
   display: block;
   filter: drop-shadow(0 0 6px rgba(121, 118, 247, 0.35));
 }
+.lockup-text { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
 .lockup-word {
   font-weight: 700;
   font-size: 17px;
@@ -913,9 +914,10 @@ input, select, textarea { font-family: inherit; color: inherit; }
    ============================================================ */
 .app-shell {
   display: grid;
-  grid-template-columns: 240px 1fr;
+  grid-template-columns: var(--sidebar-w, 240px) 1fr;
   min-height: 100vh;
   background: var(--bg);
+  transition: grid-template-columns 160ms ease-out;
 }
 .sidebar {
   background: var(--bg);
@@ -924,8 +926,48 @@ input, select, textarea { font-family: inherit; color: inherit; }
   padding: 18px 14px;
   position: sticky; top: 0;
   height: 100vh;
+  width: var(--sidebar-w, 240px);
+  overflow-x: hidden;
+  transition: width 160ms ease-out;
 }
 .sidebar .lockup { padding: 4px 8px 18px; }
+
+/* ---- Barre latérale repliable : mode rail (icônes seules) ---- */
+html[data-sidebar="rail"] { --sidebar-w: 60px; }
+html[data-sidebar="rail"] .sidebar .lockup-text,
+html[data-sidebar="rail"] .sidebar .nav-item span.label,
+html[data-sidebar="rail"] .sidebar .user-meta,
+html[data-sidebar="rail"] .sidebar .sidebar-newconv .label,
+html[data-sidebar="rail"] .sidebar .sidebar-foot .label {
+  display: none;
+}
+html[data-sidebar="rail"] .sidebar .nav-item,
+html[data-sidebar="rail"] .sidebar .sidebar-newconv,
+html[data-sidebar="rail"] .sidebar .sidebar-foot .btn {
+  justify-content: center;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+html[data-sidebar="rail"] .sidebar .user-row { justify-content: center; padding-left: 4px; padding-right: 4px; }
+html[data-sidebar="rail"] .sidebar { padding-left: 8px; padding-right: 8px; }
+html[data-sidebar="rail"] .sidebar .lockup { padding-left: 0; padding-right: 0; justify-content: center; display: flex; }
+
+.topbar-hamburger {
+  display: none;
+  align-items: center; justify-content: center;
+  width: 34px; height: 34px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  margin-right: 10px;
+}
+.topbar-hamburger:hover { background: rgba(121,118,247,0.08); }
+
+.sidebar-backdrop {
+  display: none;
+}
 
 .sidebar-newconv {
   display: flex; align-items: center; gap: 8px;
@@ -1017,6 +1059,42 @@ input, select, textarea { font-family: inherit; color: inherit; }
   display: grid;
   grid-template-columns: 280px 1fr;
   min-height: 0;
+}
+
+/* ---- Barre latérale : surcouche mobile (< 768px) ---- */
+@media (max-width: 768px) {
+  .app-shell { grid-template-columns: 1fr; }
+  .sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: 260px;
+    transform: translateX(-100%);
+    z-index: 40;
+    box-shadow: 0 0 0 1px transparent;
+  }
+  html[data-sidebar-mobile="open"] .sidebar { transform: none; }
+  .sidebar-backdrop {
+    display: block;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.45);
+    z-index: 39;
+  }
+  .topbar-hamburger { display: inline-flex; }
+  .topbar { justify-content: flex-start; padding: 0 16px; }
+  .topbar-actions { margin-left: auto; }
+
+  /* Le mode rail est une préférence desktop ; en surcouche mobile la barre
+     reste toujours en pleine largeur avec ses libellés. */
+  .sidebar { width: 260px !important; }
+  .sidebar .nav-item span.label,
+  .sidebar .sidebar-newconv .label,
+  .sidebar .sidebar-foot .label {
+    display: inline;
+  }
+  .sidebar .lockup-text { display: inline-flex; }
+  .sidebar .user-meta { display: flex; }
+  .sidebar .nav-item, .sidebar .sidebar-newconv, .sidebar .sidebar-foot .btn { justify-content: flex-start; }
+  .sidebar .user-row { justify-content: flex-start; }
 }
 
 /* ============================================================
