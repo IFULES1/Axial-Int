@@ -1459,12 +1459,34 @@ html[data-theme="light"] .sidebar {
   max-width: 640px;
 }
 
+/* Mono uppercase label used above a list/section — repeated across
+   Reports, Agents, Documents and Billing. */
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+/* Document action bar in ReportsEditor — back button left, document
+   actions (export, feedback, delivery) right. TopControls lives in
+   .surface-head instead, same as ReportsEmpty. */
+.editor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
 /* ============================================================
    Reports — Empty state composer
    ============================================================ */
 .rep-types {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 12px;
   margin-bottom: 24px;
 }
@@ -1478,7 +1500,6 @@ html[data-theme="light"] .sidebar {
   transition: all 160ms ease-out;
   display: flex; flex-direction: column;
   gap: 10px;
-  min-height: 140px;
 }
 .rep-type-tile:hover { border-color: var(--border-strong); transform: translateY(-2px); }
 .rep-type-tile.active {
@@ -1499,6 +1520,13 @@ html[data-theme="light"] .sidebar {
 }
 .rep-type-tile p {
   font-size: 12.5px; color: var(--fg-2); margin: 0; line-height: 1.45;
+}
+.rep-type-tile .rep-type-cost {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  margin-top: auto;
+  padding-top: 2px;
 }
 
 .rep-prompt-card {
@@ -2791,6 +2819,13 @@ html[data-theme="light"] .sidebar {
   gap: 8px;
   align-items: stretch;
 }
+.settings-row .icon-tile {
+  width: 32px; height: 32px;
+  border-radius: 9px;
+  background: rgba(121,118,247,0.12);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--v-soft);
+}
 
 .toggle {
   position: relative;
@@ -3050,6 +3085,9 @@ html[data-theme="light"] .sidebar {
   .rep-types { grid-template-columns: repeat(2, 1fr); }
   .rep-gen, .rep-editor, .agent-session, .credits-grid, .quota-card, .recipient-shell, .conflict-pair, .memory-cats, .settings-shell { grid-template-columns: 1fr; }
   .recipient-doc { padding: 32px 24px; }
+}
+@media (max-width: 600px) {
+  .rep-types { grid-template-columns: 1fr; }
 }
 
 

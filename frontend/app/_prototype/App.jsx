@@ -38,7 +38,7 @@ const REPORT_TYPES = [
   { id: 'regulatory', icon: 'shield', at: 'analyse_reglementaire', cost: 25 },
   { id: 'risk', icon: 'alert', at: 'analyse_risques', cost: 25 },
   { id: 'investors', icon: 'briefcase', at: 'cartographie_investisseurs', cost: 30 },
-  { id: 'custom', icon: 'sparkle', at: 'synthese_executive', cost: 40 },
+  { id: 'custom', icon: 'edit', at: 'synthese_executive', cost: 40 },
 ];
 
 const REPORT_TEMPLATES = {
@@ -142,17 +142,19 @@ const STRINGS = {
     'reports.empty.h1': 'Un rapport, pas un résumé.',
     'reports.empty.lede': 'Choisissez un type d\'étude. Axial cadre la question, recueille les sources, raisonne, et livre un document structuré.',
     'reports.types.market': 'Étude de marché',
-    'reports.types.market_desc': 'TAM/SAM/SOM, segments, dynamiques de croissance.',
+    'reports.types.market_desc': 'TAM/SAM/SOM, segments, dynamiques de croissance',
     'reports.types.competitive': 'Cartographie concurrentielle',
-    'reports.types.competitive_desc': 'Positionnement, parts, forces structurelles.',
+    'reports.types.competitive_desc': 'Positionnement, parts, forces structurelles',
     'reports.types.regulatory': 'Veille réglementaire',
-    'reports.types.regulatory_desc': 'Cadres légaux applicables, calendriers d\'entrée en vigueur.',
+    'reports.types.regulatory_desc': 'Cadres légaux, calendriers, obligations en vigueur',
     'reports.types.risk': 'Analyse de risques',
-    'reports.types.risk_desc': 'Risques opérationnels, marché, réglementaires.',
-    'reports.types.investors': 'Cartographie des investisseurs',
-    'reports.types.investors_desc': 'Fonds et réseaux BA correspondant à votre secteur et votre stade, avec stratégie d\'approche.',
+    'reports.types.risk_desc': 'Risques opérationnels, marché, réglementaires',
+    'reports.types.investors': 'Cartographie investisseurs',
+    'reports.types.investors_desc': 'Fonds et réseaux adaptés à votre secteur et votre stade',
     'reports.types.custom': 'Étude personnalisée',
-    'reports.types.custom_desc': 'Question stratégique ouverte. Axial cadre.',
+    'reports.types.custom_desc': 'Question ouverte, cadrage libre, sources citées',
+    'reports.credits': 'crédits',
+    'reports.feedback': 'Votre avis',
     'reports.template_strip': 'Exemples de questions',
     'reports.start': 'Lancer le rapport',
     'reports.estimate': 'Estimation',
@@ -350,17 +352,19 @@ const STRINGS = {
     'reports.empty.h1': 'A report, not a summary.',
     'reports.empty.lede': 'Pick a study type. Axial frames the question, gathers sources, reasons, and ships a structured document.',
     'reports.types.market': 'Market study',
-    'reports.types.market_desc': 'TAM/SAM/SOM, segments, growth dynamics.',
+    'reports.types.market_desc': 'TAM/SAM/SOM, market segments, growth dynamics',
     'reports.types.competitive': 'Competitive map',
-    'reports.types.competitive_desc': 'Positioning, share, structural forces.',
+    'reports.types.competitive_desc': 'Positioning, market share, structural forces',
     'reports.types.regulatory': 'Regulatory scan',
-    'reports.types.regulatory_desc': 'Applicable legal frames and timelines.',
+    'reports.types.regulatory_desc': 'Legal frameworks, timelines, obligations in force',
     'reports.types.risk': 'Risk analysis',
-    'reports.types.risk_desc': 'Operational, market, regulatory risks.',
+    'reports.types.risk_desc': 'Operational, market, and regulatory risks',
     'reports.types.investors': 'Investor mapping',
-    'reports.types.investors_desc': 'Funds and angel networks matching your sector and stage, with an approach strategy.',
+    'reports.types.investors_desc': 'Funds and networks matching your sector and stage',
     'reports.types.custom': 'Custom study',
-    'reports.types.custom_desc': 'Open strategic question. Axial frames it.',
+    'reports.types.custom_desc': 'Open question, free framing, cited sources',
+    'reports.credits': 'credits',
+    'reports.feedback': 'Your feedback',
     'reports.template_strip': 'Example questions',
     'reports.start': 'Run report',
     'reports.estimate': 'Estimate',
@@ -2909,7 +2913,7 @@ function ReportsEmpty({ onStart, onOpenReport }) {
 
   const savedList = saved && saved.length > 0 && (
     <div style={{ marginTop: 34 }}>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 12 }}>
+      <div className="section-label">
         {lang === 'fr' ? 'Vos rapports' : 'Your reports'}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 760 }}>
@@ -2949,6 +2953,7 @@ function ReportsEmpty({ onStart, onOpenReport }) {
             <span className="icon-tile"><Icon name={tp.icon} size={16} /></span>
             <h4>{t(`reports.types.${tp.id}`)}</h4>
             <p>{t(`reports.types.${tp.id}_desc`)}</p>
+            <span className="rep-type-cost">{tp.cost} {t('reports.credits')}</span>
           </button>
         ))}
       </div>
@@ -2974,7 +2979,7 @@ function ReportsEmpty({ onStart, onOpenReport }) {
       </div>
 
       <div style={{ marginTop: 22 }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 10 }}>
+        <div className="section-label">
           {t('reports.template_strip')}
         </div>
         <div className="rep-templates">
@@ -3277,15 +3282,17 @@ function ReportsEditor({ data, onBack }) {
   return (
     <div className="surface" style={{ paddingTop: 16, paddingBottom: 16, maxWidth: 1000 }}>
       <div className="surface-head" style={{ marginBottom: 14 }}>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          <button className="btn btn-ghost btn-sm" onClick={onBack}><Icon name="arrow-left" size={14} /></button>
-          <div>
-            <h1 style={{ fontSize: 22 }}>{title}</h1>
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-              {sources.length} sources · {lang === 'fr' ? 'Rapport Axial' : 'Axial report'}
-            </p>
-          </div>
+        <div>
+          <h1>{title}</h1>
+          <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+            {sources.length} sources · {lang === 'fr' ? 'Rapport Axial' : 'Axial report'}
+          </p>
         </div>
+        <TopControls />
+      </div>
+
+      <div className="editor-head">
+        <button className="btn btn-ghost btn-sm" onClick={onBack}><Icon name="arrow-left" size={14} /></button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button className="btn btn-primary btn-sm" onClick={exportPdf} disabled={saving}>
             <Icon name="download" size={14} />{saving ? (lang === 'fr' ? 'Export…' : 'Exporting…') : 'PDF'}
@@ -3297,7 +3304,7 @@ function ReportsEditor({ data, onBack }) {
           <a className="btn btn-secondary btn-sm" href={FORMULAIRE_FEEDBACK}
             target="_blank" rel="noopener noreferrer"
             title={libelle("Dis-nous ce que vaut ce rapport")}>
-            <Icon name="message-square" size={14} />{libelle("Votre avis")}
+            <Icon name="message-square" size={14} />{t('reports.feedback')}
           </a>
           {(outils.notion && outils.notion.connecte) && (
             <button className="btn btn-secondary btn-sm" disabled={!!envoi}
@@ -3313,7 +3320,6 @@ function ReportsEditor({ data, onBack }) {
                 : envoiMsg.texte}
             </span>
           )}
-          <TopControls />
         </div>
       </div>
 
@@ -3332,7 +3338,7 @@ function ReportsEditor({ data, onBack }) {
 
       {sources.length > 0 && (
         <div style={{ marginTop: 28 }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 12 }}>
+          <div className="section-label">
             Sources
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -3955,7 +3961,7 @@ function AgentSession({ agent, onBack }) {
 
       <div className="agent-session">
         <div className="agent-timeline">
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 18 }}>
+          <div className="section-label">
             {t('agents.session.timeline')}
           </div>
           {runs === null && <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>{lang === 'fr' ? 'Chargement…' : 'Loading…'}</p>}
@@ -3977,7 +3983,7 @@ function AgentSession({ agent, onBack }) {
         </div>
 
         <div className="findings-stream">
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase' }}>
+          <div className="section-label">
             {shown ? (lang === 'fr' ? 'Détail du run' : 'Run detail') : t('agents.session.findings')}
           </div>
           {shown ? (
@@ -4043,7 +4049,7 @@ function DocumentsPanel() {
   return (
     <div style={{ maxWidth: 720, marginTop: 34 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 12 }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase' }}>
+        <div className="section-label">
           {lang === 'fr' ? 'Vos documents (utilisés dans les analyses)' : 'Your documents (used in analyses)'}
         </div>
         <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current && fileRef.current.click()} disabled={busy}>
@@ -4257,7 +4263,7 @@ function CreditsSurface() {
         </div>
       )}
 
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 12 }}>
+      <div className="section-label">
         {lang === 'fr' ? 'Abonnements (mensuel)' : 'Subscriptions (monthly)'}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 14, maxWidth: 760, marginBottom: 30 }}>
@@ -4286,7 +4292,7 @@ function CreditsSurface() {
         })}
       </div>
 
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 12 }}>
+      <div className="section-label">
         {lang === 'fr' ? 'Recharge ponctuelle (pay-as-you-go)' : 'One-off top-up (pay-as-you-go)'}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 14, maxWidth: 760 }}>
