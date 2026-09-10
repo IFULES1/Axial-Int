@@ -203,18 +203,37 @@ def stream(*, system: str, prompt: str, model: str | None = None,
         kwargs["betas"] = ["mcp-client-2025-11-20"]
     espace = client.beta.messages if "betas" in kwargs else client.messages
     raison = None
+    mesure_faite = False
+    ecrit = 0  # caractères livrés, pour l'estimation de repli sur interruption
     with espace.stream(**kwargs) as s:
-        yield from s.text_stream
-        # Le message final n'est complet qu'à l'intérieur du `with`. Tolérant :
-        # un SDK qui ne le fournit pas ne doit pas casser un flux déjà livré.
         try:
-            final = s.get_final_message()
-            raison = getattr(final, "stop_reason", None)
-            if mesure is not None:
-                cumuler_mesure(mesure, model, "claude",
-                               *_usage_de(getattr(final, "usage", None)))
-        except Exception as e:  # noqa: BLE001
-            logger.warning("stop_reason indisponible en flux : %s", e)
+            for morceau in s.text_stream:
+                ecrit += len(morceau)
+                yield morceau
+            # Le message final n'est complet qu'à l'intérieur du `with`. Tolérant :
+            # un SDK qui ne le fournit pas ne doit pas casser un flux déjà livré.
+            try:
+                final = s.get_final_message()
+                raison = getattr(final, "stop_reason", None)
+                if mesure is not None:
+                    cumuler_mesure(mesure, model, "claude",
+                                   *_usage_de(getattr(final, "usage", None)))
+                    mesure_faite = True
+            except Exception as e:  # noqa: BLE001
+                logger.warning("stop_reason indisponible en flux : %s", e)
+        finally:
+            # Interruption (Stop du client → `GeneratorExit`) ou erreur tardive :
+            # `get_final_message()` n'est plus disponible, mais les tokens ont
+            # bien été payés. On les récupère du dernier instantané du SDK, et
+            # à défaut on estime la sortie depuis le texte livré (≈ 4 caractères
+            # par token) : une mesure approchée vaut mieux qu'un partiel archivé
+            # à coût nul, qui fausse les métriques de marge dans l'autre sens.
+            if mesure is not None and not mesure_faite:
+                entree, sortie = _usage_instantane(s)
+                if not sortie and ecrit:
+                    sortie = max(1, ecrit // 4)
+                if entree or sortie:
+                    cumuler_mesure(mesure, model, "claude", entree, sortie)
     return raison
 
 
@@ -222,3 +241,18 @@ def _usage_de(u) -> tuple[int, int]:
     if u is None:
         return 0, 0
     return (getattr(u, "input_tokens", 0) or 0), (getattr(u, "output_tokens", 0) or 0)
+
+
+def _usage_instantane(s) -> tuple[int, int]:
+    """Tokens déjà comptés par le SDK au moment de l'interruption, ou (0, 0).
+
+    `current_message_snapshot` porte l'`usage` reconstruit depuis les événements
+    reçus : l'entrée est connue dès le `message_start`, la sortie est cumulée au
+    fil des deltas. Tolérant : un SDK qui n'expose rien ne doit pas transformer
+    une interruption en erreur.
+    """
+    try:
+        return _usage_de(getattr(s.current_message_snapshot, "usage", None))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("usage indisponible sur interruption : %s", e)
+        return 0, 0

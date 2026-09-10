@@ -8,6 +8,7 @@ concurrence arrive chez Competitor Radar ».
 """
 from __future__ import annotations
 
+import sys
 import uuid as uuidlib
 
 import pytest
@@ -655,8 +656,12 @@ def test_enveloppe_du_routeur_archive_a_la_deconnexion(monkeypatch):
     engine = _base_complete(partagee=True)
     with Session(engine) as db:
         uid, conv = _fil(db)
+        # `cid` retenu AVANT le flux : le générateur referme la session en
+        # sortant (elle n'appartient plus à personne d'autre), donc `conv` en
+        # ressort détaché — l'appelant de production ne le relit jamais.
+        cid = conv.id
         generateur = intel.stream_message(
-            db, uid, str(conv.id), "Analyse détaillée du marché du logiciel RH",
+            db, uid, str(cid), "Analyse détaillée du marché du logiciel RH",
             is_admin=False, cle_idempotence="cle-coupee")
         flux = intel_router._flux_sse(generateur)
 
@@ -672,7 +677,7 @@ def test_enveloppe_du_routeur_archive_a_la_deconnexion(monkeypatch):
         asyncio.run(_lire_deux_puis_partir())
 
         reponse = db.scalars(select(intel.Message).where(
-            intel.Message.conversation_id == conv.id,
+            intel.Message.conversation_id == cid,
             intel.Message.role == "assistant")).one()
         assert reponse.statut == "partiel"
         assert reponse.content.startswith("mot0")
@@ -680,10 +685,10 @@ def test_enveloppe_du_routeur_archive_a_la_deconnexion(monkeypatch):
         assert "mot39" not in reponse.content
         assert debits == [], "un flux coupé a été facturé"
         # Le fil reste cohérent : la question ET la réponse partielle sont là.
-        db.refresh(conv)
+        conv = db.get(intel.Conversation, cid)
         assert conv.message_count == 2
         assert db.scalar(select(func.count()).select_from(intel.Message)
-                         .where(intel.Message.conversation_id == conv.id)) == 2
+                         .where(intel.Message.conversation_id == cid)) == 2
         # Rien n'est absorbé par l'idempotence : la même clé doit pouvoir
         # redonner une réponse complète (finding 3).
         assert reponse.cle_idempotence is None
@@ -700,7 +705,8 @@ def test_flux_survit_a_la_deconnexion_du_client(monkeypatch):
 
     with Session(_base_complete()) as db:
         uid, conv = _fil(db)
-        flux = intel.stream_message(db, uid, str(conv.id),
+        cid = conv.id
+        flux = intel.stream_message(db, uid, str(cid),
                                     "Analyse détaillée du marché du logiciel RH",
                                     is_admin=False)
         # On avance jusqu'en pleine rédaction, puis on coupe comme FastAPI.
@@ -713,7 +719,7 @@ def test_flux_survit_a_la_deconnexion_du_client(monkeypatch):
         flux.close()
 
         reponse = db.scalars(select(intel.Message).where(
-            intel.Message.conversation_id == conv.id,
+            intel.Message.conversation_id == cid,
             intel.Message.role == "assistant")).one()
         assert reponse.statut == "partiel"
         assert reponse.content.startswith("mot0")
@@ -740,11 +746,12 @@ def test_flux_coupe_par_le_fournisseur_est_partiel(monkeypatch):
 
     with Session(_base_complete()) as db:
         uid, conv = _fil(db)
+        cid = conv.id
         evts = _evenements(intel.stream_message(
-            db, uid, str(conv.id), "Analyse du marché du logiciel RH en France",
+            db, uid, str(cid), "Analyse du marché du logiciel RH en France",
             is_admin=False))
         reponse = db.scalars(select(intel.Message).where(
-            intel.Message.conversation_id == conv.id,
+            intel.Message.conversation_id == cid,
             intel.Message.role == "assistant")).one()
 
     assert reponse.statut == "partiel"
@@ -764,11 +771,12 @@ def test_tour_degrade_non_facture_et_signale(monkeypatch):
 
     with Session(_base_complete()) as db:
         uid, conv = _fil(db)
+        cid = conv.id
         evts = _evenements(intel.stream_message(
-            db, uid, str(conv.id), "Analyse du marché du logiciel RH en France",
+            db, uid, str(cid), "Analyse du marché du logiciel RH en France",
             is_admin=False))
         reponse = db.scalars(select(intel.Message).where(
-            intel.Message.conversation_id == conv.id,
+            intel.Message.conversation_id == cid,
             intel.Message.role == "assistant")).one()
 
     assert reponse.statut == "degrade"
@@ -1354,8 +1362,9 @@ def test_cle_idempotence_absente_des_tours_non_complets(monkeypatch):
 
     with Session(_base_complete()) as db:
         uid, conv = _fil(db)
+        cid = conv.id
         question = "Analyse du marché du logiciel RH en France"
-        list(intel.stream_message(db, uid, str(conv.id), question,
+        list(intel.stream_message(db, uid, str(cid), question,
                                   is_admin=False, cle_idempotence="cle-1"))
         partiel = db.scalars(select(intel.Message).where(
             intel.Message.role == "assistant")).one()
@@ -1365,7 +1374,7 @@ def test_cle_idempotence_absente_des_tours_non_complets(monkeypatch):
         # Le tour dégradé non plus ne fixe pas la clé.
         monkeypatch.setattr(intel.llm_client, "stream_text",
                             lambda **k: (_ for _ in ()).throw(RuntimeError("503")))
-        list(intel.stream_message(db, uid, str(conv.id), question,
+        list(intel.stream_message(db, uid, str(cid), question,
                                   is_admin=False, cle_idempotence="cle-2"))
         degrade = db.scalars(select(intel.Message).where(
             intel.Message.role == "assistant",
@@ -1375,7 +1384,7 @@ def test_cle_idempotence_absente_des_tours_non_complets(monkeypatch):
         # La même clé peut donc encore obtenir une réponse COMPLÈTE.
         _stub_flux(monkeypatch, [(["Réponse entière."], "end_turn")])
         evts = _evenements(intel.stream_message(
-            db, uid, str(conv.id), question, is_admin=False,
+            db, uid, str(cid), question, is_admin=False,
             cle_idempotence="cle-1"))
         assert "rejeu" not in evts[-1]
         assert evts[-1]["data"]["content"] == "Réponse entière."
@@ -1463,3 +1472,233 @@ def test_bascule_ferme_le_flux_du_fournisseur_en_echec(monkeypatch):
     assert list(intel.llm_client.stream_text(system="s", prompt="p",
                                              tier="chat")) == ["repli"]
     assert abandonne.ferme, "le flux du fournisseur en échec n'a pas été fermé"
+
+
+# --- Fix round 2 : mesure sur interruption, garde de l'archivage -----------
+
+def test_partiel_archive_avec_les_tokens_mesures(monkeypatch):
+    """Issue A — le service doit FERMER le flux du fournisseur avant de lire la
+    mesure. Sans ce `close()`, la frame du service tient encore le générateur,
+    son `finally` de mesure n'a pas tourné et le partiel était archivé sans
+    tokens ni coût — alors que le fournisseur les a bien facturés.
+    """
+    from app.shared.llm_client.base import cumuler_mesure
+
+    _hors_reseau(monkeypatch)
+    debits = _sans_effets(monkeypatch, contexte="ACME")
+
+    def _stream_text(*, mesure=None, **kw):
+        # Fournisseur réaliste : la mesure n'est cumulée QUE dans le `finally`,
+        # donc uniquement si quelqu'un ferme le générateur.
+        def _gen():
+            try:
+                for i in range(40):
+                    yield f"mot{i} "
+                return "end_turn"
+            finally:
+                if mesure is not None:
+                    cumuler_mesure(mesure, "gemini-flash-test", "gemini", 120, 17)
+
+        return _gen()
+
+    monkeypatch.setattr(intel.llm_client, "stream_text", _stream_text)
+
+    with Session(_base_complete()) as db:
+        uid, conv = _fil(db)
+        cid = conv.id
+        flux = intel.stream_message(db, uid, str(cid),
+                                    "Analyse détaillée du marché du logiciel RH",
+                                    is_admin=False)
+        deltas = 0
+        for bloc in flux:
+            if '"delta"' in bloc:
+                deltas += 1
+                if deltas == 2:
+                    break
+        flux.close()
+
+        reponse = db.scalars(select(intel.Message).where(
+            intel.Message.conversation_id == cid,
+            intel.Message.role == "assistant")).one()
+
+    assert reponse.statut == "partiel"
+    assert reponse.tokens_sortie == 17, "partiel archivé sans tokens de sortie"
+    assert reponse.tokens_entree == 120
+    assert reponse.modele == "gemini-flash-test"
+    assert reponse.cout_micro_eur is not None, "partiel archivé à coût nul"
+    assert debits == [], "un flux coupé a été facturé"
+
+
+def test_archivage_en_echec_ne_sort_pas_du_close(monkeypatch):
+    """Issue B — une erreur base pendant l'archivage du partiel ne doit pas
+    remplacer l'annulation par une exception bruyante : `close()` doit rendre
+    la main normalement, l'incident reste dans les logs."""
+    _hors_reseau(monkeypatch)
+    _sans_effets(monkeypatch, contexte="ACME")
+    _stub_flux(monkeypatch, [([f"mot{i} " for i in range(40)], "end_turn")])
+
+    def _archivage_casse(*a, **k):
+        raise RuntimeError("IntegrityError simulée")
+
+    with Session(_base_complete()) as db:
+        uid, conv = _fil(db)
+        flux = intel.stream_message(db, uid, str(conv.id),
+                                    "Analyse détaillée du marché du logiciel RH",
+                                    is_admin=False)
+        for bloc in flux:
+            if '"delta"' in bloc:
+                break
+        monkeypatch.setattr(intel, "_finalize_turn", _archivage_casse)
+        flux.close()  # ne doit PAS lever
+
+
+def test_session_refermee_en_fin_de_flux(monkeypatch):
+    """Issue D — `get_db` ferme la session avant que le corps du générateur ne
+    démarre ; le premier accès ORM la ressuscite et personne ne la refermait,
+    donc la transaction ouverte par `_finalize_turn` retenait sa connexion
+    jusqu'au ramasse-miettes."""
+    _hors_reseau(monkeypatch)
+    _sans_effets(monkeypatch, contexte="ACME")
+    _stub_flux(monkeypatch, [(["Réponse entière."], "end_turn")])
+
+    with Session(_base_complete()) as db:
+        uid, conv = _fil(db)
+        fermetures = []
+        vraie_fermeture = db.close
+
+        def _close():
+            fermetures.append(True)
+            vraie_fermeture()
+
+        monkeypatch.setattr(db, "close", _close)
+        evts = _evenements(intel.stream_message(
+            db, uid, str(conv.id), "Analyse du marché du logiciel RH en France",
+            is_admin=False))
+
+        assert evts[-1]["step"] == "done"
+        assert fermetures, "la session n'a pas été refermée en fin de flux"
+        # Refermée, donc plus de transaction en cours : la connexion est rendue.
+        assert not db.in_transaction()
+
+
+def test_mesure_claude_conservee_sur_interruption(monkeypatch):
+    """Issue C — côté Claude, `get_final_message()` est APRÈS le flux de texte :
+    un Stop ne mesurait rien. On récupère l'instantané du SDK."""
+    import types
+
+    from app.shared.llm_client import claude
+
+    class _Flux:
+        def __init__(self):
+            self.text_stream = iter(["Bonjour", " monde"])
+            self.current_message_snapshot = types.SimpleNamespace(
+                usage=types.SimpleNamespace(input_tokens=31, output_tokens=7))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get_final_message(self):
+            raise AssertionError("indisponible après une interruption")
+
+    monkeypatch.setattr(claude, "get_settings",
+                        lambda: types.SimpleNamespace(anthropic_api_key="k",
+                                                      llm_report_model="claude-test"))
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(
+        Anthropic=lambda api_key: types.SimpleNamespace(
+            messages=types.SimpleNamespace(stream=lambda **k: _Flux()),
+            beta=types.SimpleNamespace(messages=types.SimpleNamespace(
+                stream=lambda **k: _Flux())))))
+
+    mesure: dict = {}
+    flux = claude.stream(system="s", prompt="p", mesure=mesure)
+    assert next(flux) == "Bonjour"
+    flux.close()  # ce que fait le service sur une déconnexion
+
+    assert mesure["model"] == "claude-test"
+    assert mesure["provider"] == "claude"
+    assert (mesure["input_tokens"], mesure["output_tokens"]) == (31, 7)
+
+
+def test_mesure_claude_estimee_si_le_sdk_ne_dit_rien(monkeypatch):
+    """Issue C, repli — un SDK muet sur interruption ne doit pas produire un
+    partiel à coût nul : la sortie est estimée depuis le texte livré."""
+    import types
+
+    from app.shared.llm_client import claude
+
+    class _FluxMuet:
+        def __init__(self):
+            self.text_stream = iter(["x" * 400, "y" * 400])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        @property
+        def current_message_snapshot(self):
+            raise RuntimeError("aucun instantané")
+
+        def get_final_message(self):
+            raise AssertionError("indisponible après une interruption")
+
+    monkeypatch.setattr(claude, "get_settings",
+                        lambda: types.SimpleNamespace(anthropic_api_key="k",
+                                                      llm_report_model="claude-test"))
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(
+        Anthropic=lambda api_key: types.SimpleNamespace(
+            messages=types.SimpleNamespace(stream=lambda **k: _FluxMuet()),
+            beta=types.SimpleNamespace(messages=types.SimpleNamespace(
+                stream=lambda **k: _FluxMuet())))))
+
+    mesure: dict = {}
+    flux = claude.stream(system="s", prompt="p", mesure=mesure)
+    assert len(next(flux)) == 400
+    flux.close()
+
+    assert mesure["input_tokens"] == 0, "l'entrée n'est pas devinable"
+    assert mesure["output_tokens"] == 100, "≈ 4 caractères par token"
+
+
+def test_stream_text_ferme_le_fournisseur_sur_interruption(monkeypatch):
+    """Issue A, maillon intermédiaire — `stream_text` est un générateur : le
+    `GeneratorExit` du service y arrive au `yield`, hors de portée de son
+    `except Exception`. La fermeture du générateur du fournisseur doit donc être
+    dans un `finally`, et pas seulement dans l'`except` : ici une référence
+    extérieure empêche le ramassage immédiat du générateur, donc seul un
+    `close()` explicite déclenche sa mesure — comme dans le service, dont la
+    frame reste vivante pendant l'archivage du partiel."""
+    from app.shared.llm_client import claude, gemini
+    from app.shared.llm_client.base import cumuler_mesure
+
+    monkeypatch.setattr(gemini, "available", lambda: True)
+    monkeypatch.setattr(claude, "available", lambda: False)
+
+    retenus = []  # empêche le ramassage du générateur du fournisseur
+
+    def _gemini_stream(*, mesure=None, **kw):
+        def _gen():
+            try:
+                yield "un "
+                yield "deux "
+            finally:
+                if mesure is not None:
+                    cumuler_mesure(mesure, "gemini-test", "gemini", 9, 2)
+
+        g = _gen()
+        retenus.append(g)
+        return g
+
+    monkeypatch.setattr(gemini, "stream", _gemini_stream)
+
+    mesure: dict = {}
+    flux = intel.llm_client.stream_text(system="s", prompt="p", tier="chat",
+                                        mesure=mesure)
+    assert next(flux) == "un "
+    flux.close()
+
+    assert (mesure["input_tokens"], mesure["output_tokens"]) == (9, 2)

@@ -856,10 +856,51 @@ NOTE_INTERROMPUE = "\n\n*(réponse interrompue)*"
 NOTE_COUPURE = ("\n\n*(réponse interrompue — le service a coupé en cours "
                 "de rédaction)*")
 
+
+def _fermer_flux(flux) -> None:
+    """Ferme le générateur du fournisseur, sans jamais lever.
+
+    C'est ce `close()` qui déclenche le `finally` de mesure des adaptateurs
+    (Gemini, Claude) : il DOIT être appelé avant de lire le dictionnaire de
+    mesure sur un chemin d'interruption.
+    """
+    if flux is None:
+        return
+    try:
+        flux.close()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Flux du fournisseur non refermé : %s", e)
+
+
 def stream_message(db: Session, user_id: str, conversation_id: str, content: str,
                    agent_override: str | None = None, *, is_admin: bool = False,
                    document_ids: list[str] | None = None,
                    cle_idempotence: str | None = None):
+    """`_stream_message`, plus la fermeture garantie de la session.
+
+    `get_db` ferme la session à la fin du cycle de requête, c'est-à-dire AVANT
+    que le corps de ce générateur ne démarre (il tourne dans le thread de la
+    réponse). Le premier accès ORM la ressuscite, et plus personne ne la
+    referme : la transaction ouverte par `_finalize_turn` retenait sa connexion
+    jusqu'au ramasse-miettes. `close()` est idempotent, l'appeler ici ne gêne
+    pas `get_db`.
+    """
+    try:
+        yield from _stream_message(db, user_id, conversation_id, content,
+                                   agent_override, is_admin=is_admin,
+                                   document_ids=document_ids,
+                                   cle_idempotence=cle_idempotence)
+    finally:
+        try:
+            db.close()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Session non refermée en fin de flux : %s", e)
+
+
+def _stream_message(db: Session, user_id: str, conversation_id: str, content: str,
+                    agent_override: str | None = None, *, is_admin: bool = False,
+                    document_ids: list[str] | None = None,
+                    cle_idempotence: str | None = None):
     """Same turn as post_message, but the answer arrives word by word.
 
     Order matters: the citations are sent BEFORE the first word, so the reader
@@ -941,6 +982,7 @@ def stream_message(db: Session, user_id: str, conversation_id: str, content: str
     # réponse en flux — le chemin normal du chat — n'aurait ni tokens ni coût
     # archivés, alors que `MessageOut` et `GET …/cout` les exposent.
     compte_tokens: dict = {}
+    flux = None
     try:
         prompt_flux, hist_flux = turn.prompt, list(turn.history)
         for reprise in range(REPRISES_FLUX_MAX + 1):
@@ -978,15 +1020,32 @@ def stream_message(db: Session, user_id: str, conversation_id: str, content: str
         # archive AVANT de laisser la fermeture se poursuivre — c'est
         # exactement ce qui faisait perdre un rapport le 25/08. Aucun `yield`
         # n'est permis ici, d'où l'absence de `done`.
+        #
+        # Fermer le flux du fournisseur AVANT de lire `compte_tokens` : la frame
+        # de ce générateur est encore vivante, donc rien n'a fermé `flux` et le
+        # `finally` de mesure du fournisseur n'a pas tourné — le partiel était
+        # archivé sans tokens ni coût, alors que le fournisseur les a facturés.
+        _fermer_flux(flux)
         if chunks:
             chunks.append(NOTE_INTERROMPUE)
-            _finalize_turn(db, user_id, turn, "".join(chunks), is_admin=is_admin,
-                           statut="partiel", cle_idempotence=cle_idempotence,
-                           mesure=llm_client.resultat_de_mesure(compte_tokens))
-            logger.info("Flux fermé par le client — réponse partielle archivée")
+            # Jamais d'exception hors d'un `close()` : une erreur de base ici
+            # (un `IntegrityError` sur la clé d'idempotence, par exemple)
+            # remplacerait l'annulation par une trace bruyante côté serveur,
+            # sans rien sauver de plus.
+            try:
+                _finalize_turn(db, user_id, turn, "".join(chunks), is_admin=is_admin,
+                               statut="partiel", cle_idempotence=cle_idempotence,
+                               mesure=llm_client.resultat_de_mesure(compte_tokens))
+                logger.info("Flux fermé par le client — réponse partielle archivée")
+            except Exception as archivage:  # noqa: BLE001
+                logger.warning("Archivage du partiel impossible : %s", archivage)
         raise
     except Exception as e:
         logger.warning("Agent stream failed: %s", e)
+        # Même raison que ci-dessus : l'erreur peut venir d'ailleurs que du
+        # fournisseur (un `yield` refusé, par exemple) et laisser son flux
+        # ouvert, donc sa mesure non cumulée.
+        _fermer_flux(flux)
         if not chunks:
             msg = _finalize_turn(db, user_id, turn,
                                  "⚠️ La génération a échoué. Réessayez dans un instant.",

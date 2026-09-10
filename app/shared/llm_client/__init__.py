@@ -138,21 +138,26 @@ def stream_text(*, system: str, prompt: str, tier: str = "chat",
                 started = True
                 yield chunk
         except Exception as e:  # noqa: BLE001
-            # Fermer le générateur abandonné : sans ce `close()`, le
-            # `with httpx.stream(...)` de Gemini ou le `with espace.stream(...)`
-            # de Claude ne se refermait qu'au ramasse-miettes — une connexion
-            # sortante retenue à chaque bascule de fournisseur.
+            if started:
+                logger.warning("LLM %s a coupé en cours de réponse : %s", name, _sans_secret(e))
+                raise
+            last_err = e
+            logger.warning("LLM %s a échoué avant le 1er mot, bascule : %s", name, _sans_secret(e))
+        finally:
+            # Fermer le générateur du fournisseur dans un `finally`, et pas
+            # seulement dans l'`except` : sur un Stop, c'est un `GeneratorExit`
+            # (une `BaseException`) qui traverse le `yield chunk`, l'`except
+            # Exception` ne le voyait pas et le générateur du fournisseur
+            # restait ouvert — donc son `finally` de mesure ne tournait pas et
+            # le `with httpx.stream(...)` / `with espace.stream(...)` ne se
+            # refermait qu'au ramasse-miettes. Sur le chemin normal, le
+            # générateur est déjà épuisé : `close()` ne fait rien.
             if flux is not None:
                 try:
                     flux.close()
                 except Exception as fermeture:  # noqa: BLE001
                     logger.warning("Flux %s non refermé : %s", name,
                                    _sans_secret(fermeture))
-            if started:
-                logger.warning("LLM %s a coupé en cours de réponse : %s", name, _sans_secret(e))
-                raise
-            last_err = e
-            logger.warning("LLM %s a échoué avant le 1er mot, bascule : %s", name, _sans_secret(e))
     if last_err:
         raise last_err
     raise ProviderUnavailable("Aucun LLM de génération configuré (Gemini/Claude).")

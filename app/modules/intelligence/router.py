@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 
 from fastapi.responses import StreamingResponse
 from fastapi import APIRouter, Depends, Header, Query
@@ -15,6 +16,8 @@ from app.modules.auth.security import get_current_user
 from app.modules.intelligence import personas, service
 
 router = APIRouter(prefix="/intelligence", tags=["intelligence"])
+
+logger = logging.getLogger("axial.intelligence")
 
 
 # --- schemas ---------------------------------------------------------------
@@ -171,7 +174,14 @@ def _flux_sse(generateur):
             async for evenement in iterate_in_threadpool(generateur):
                 yield evenement
         finally:
-            await run_in_threadpool(generateur.close)
+            # Jamais d'exception hors de ce `finally` : il tourne pendant
+            # l'annulation de la requête, et une erreur venue de l'archivage du
+            # partiel y remplacerait le `CancelledError` par une trace 500
+            # trompeuse — le client est déjà parti, personne ne la lirait.
+            try:
+                await run_in_threadpool(generateur.close)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Fermeture du flux SSE en échec : %s", e)
 
     return _flux()
 
