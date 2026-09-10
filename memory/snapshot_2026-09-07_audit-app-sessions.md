@@ -154,6 +154,29 @@ d'adresse du compte admin, écran carte), reprise le 07/09.
   Réserve : libellés longs tronqués à 22 caractères sur l'axe des graphiques.
 - 107 tests verts en local, 105 sur le serveur.
 
+## Visualisation intelligente V1 (11/09, branche `visualisation-v1`)
+
+- ✓ Spec `docs/superpowers/specs/2026-09-10-visualisation-intelligente.md`,
+  plan `docs/superpowers/plans/2026-09-11-visualisation-v1.md`. **Verdict :
+  Vega-Lite** rendu côté serveur par `vl-convert` (SVG/PNG sans navigateur).
+  Le modèle écrit un bloc ```viz (`VizSpec` v1, 10 champs) ; sélecteur,
+  insight, compilation et rendu sont déterministes (`app/modules/viz/`).
+- ✓ 7 types (kpi, bar, bar_h, line, donut, funnel, scatter) ; repli tableau
+  sur toute spec invalide ; empreinte SHA-256 = cache + identifiant public
+  d'image (`/api/viz/{empreinte}.svg|png`, table `viz_rendus`).
+- ✓ Migration `0021_viz` appliquée en prod (colonnes `reports.viz`,
+  `messages.viz`) ; PDF rend les blocs en image ; app (`VizFigure`) en image
+  SVG, « en préparation » pendant le flux, rendu à la volée `POST /viz/rendu`
+  pour le chat ; email de veille en PNG hébergé.
+- ✓ **Piège VPS** : sans police système, `vl-convert` produit des PNG **sans
+  aucun texte**. Installé `fonts-liberation` + `fonts-dejavu-core`, et le
+  thème porte une liste de repli (`Helvetica, Liberation Sans, DejaVu Sans,
+  sans-serif`) — les deux sont nécessaires. Nombres formatés en Python
+  (« 3 200 M€ »), pas par d3.
+- ⏳ **Prompts non déployés** (règle 5 → bloc viz, consigne chat dans
+  `personas.py`) : diff montré, en attente de l'accord de Miradie.
+- 143 tests verts en local, 139 sur le serveur.
+
 ## Décisions techniques prises
 
 - **Le serveur ne détient aucune session Supabase** : il relaie des jetons.
