@@ -3028,3 +3028,96 @@ html[data-theme="light"] .sidebar {
   .ax-modale-actions { flex-direction: column; }
   .ax-modale-actions .btn { width: 100%; justify-content: center; }
 }
+
+/* ============================================================
+   CONVERSATIONS V2 — flux lisible, Stop, verrous, coût visible
+   ============================================================ */
+
+/* Bandeau d'étapes du flux (§3) : « Recherche web… » → « 17 sources lues »
+   → « Rédaction… », avec le compteur de secondes. Disparaît au premier
+   morceau de texte. */
+.ax-bandeau-etape {
+  display: flex; align-items: center; gap: 10px;
+  align-self: flex-start;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(121, 118, 247, 0.06);
+  color: var(--fg-2);
+  font-size: 11.5px; letter-spacing: 0.03em;
+}
+.ax-bandeau-etape .dots { display: inline-flex; gap: 4px; }
+.ax-bandeau-etape .dots i {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--v-bright); display: inline-block;
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+.ax-bandeau-etape .dots i:nth-child(2) { animation-delay: 0.2s; }
+.ax-bandeau-etape .dots i:nth-child(3) { animation-delay: 0.4s; }
+.ax-bandeau-etape-chrono { color: var(--fg-3); }
+
+/* Note locale « Agent changé : … » — ligne centrée, discrète, jamais envoyée
+   au backend ni persistée. */
+.ax-note-systeme {
+  align-self: center;
+  max-width: 100%;
+  text-align: center;
+  padding: 2px 12px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-size: 11px; letter-spacing: 0.04em;
+}
+
+/* Pastille de coût — sous chaque réponse et dans l'en-tête du fil. Toujours
+   visible (elle ne dépend pas du survol, contrairement à `.msg-ai-actions`). */
+.ax-pastille-cout {
+  display: inline-flex; align-items: center;
+  color: var(--fg-3);
+  font-size: 10.5px; letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.msg-ai > .ax-pastille-cout { margin-top: 10px; }
+
+/* Skeleton du fil (§3) : trois lignes pendant le chargement de la première
+   page. Réutilise l'animation `shimmer` des rapports, avec sa propre portée —
+   `.rep-gen-doc .skeleton` n'était visible que dans l'écran Rapports. */
+.ax-fil-skeleton { display: flex; flex-direction: column; gap: 10px; }
+.ax-fil-skeleton .skeleton {
+  height: 14px;
+  background: linear-gradient(90deg, rgba(121,118,247,0.06), rgba(121,118,247,0.14), rgba(121,118,247,0.06));
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+  border-radius: 4px;
+}
+.ax-fil-skeleton .skeleton.med { width: 85%; }
+.ax-fil-skeleton .skeleton.short { width: 60%; }
+
+/* « Charger les messages précédents » — en tête du fil paginé. */
+.ax-charger-precedents { align-self: center; margin-bottom: 6px; }
+
+/* « ↓ Nouveaux messages » : n'apparaît que si le lecteur a quitté le bas. */
+.ax-bouton-bas {
+  position: absolute;
+  left: 50%; transform: translateX(-50%);
+  bottom: 150px;
+  z-index: 3;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2, #1a1a22);
+  color: var(--fg-2);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+}
+.ax-bouton-bas:hover { color: var(--fg); border-color: var(--v-soft); }
+
+/* Stop : le bouton d'envoi pendant un flux. */
+.ax-composer-stop { background: var(--error, #e5484d); }
+.ax-composer-stop:hover { background: #ef5f63; }
+
+@media (max-width: 767px) {
+  .ax-bouton-bas { bottom: 170px; }
+  .ax-pastille-cout { white-space: normal; }
+}

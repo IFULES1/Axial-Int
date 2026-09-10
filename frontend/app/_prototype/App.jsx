@@ -339,6 +339,21 @@ const STRINGS = {
     'conv.partielle': 'Réponse partielle',
     'conv.partielle.aide': 'La réponse a été interrompue ou produite sans toutes ses sources. Aucun crédit n\u2019a été débité.',
     'conv.compteur.aide': 'Caractères utilisés',
+    'conv.attente': 'Axial analyse votre question…',
+    'conv.etape.attente': 'Préparation…',
+    'conv.etape.recherche': 'Recherche web…',
+    'conv.etape.sources': 'sources lues',
+    'conv.etape.redaction': 'Rédaction…',
+    'conv.etape.secondes': 's',
+    'conv.scroll.bas': 'Nouveaux messages',
+    'conv.charger_precedents': 'Charger les messages précédents',
+    'conv.chargement': 'Chargement du fil…',
+    'conv.stop.aide': 'Arrêter la réponse en cours',
+    'conv.agent_change': 'Agent changé : ',
+    'conv.cout.credits': 'crédits',
+    'conv.cout.tokens': 'tokens',
+    'conv.cout.total': 'Total du fil',
+    'conv.cout.aide': 'Coût de cette réponse',
     'conv.doc.max': '3 documents maximum par message',
     'conv.doc.importer': 'Importer un document',
     'conv.doc.importer.aide': 'Importer un document (PDF, DOCX, XLSX, CSV, TXT — utilisé dans les analyses)',
@@ -588,6 +603,21 @@ const STRINGS = {
     'conv.partielle': 'Partial answer',
     'conv.partielle.aide': 'The answer was interrupted or produced without all of its sources. No credit was charged.',
     'conv.compteur.aide': 'Characters used',
+    'conv.attente': 'Axial is analysing your question…',
+    'conv.etape.attente': 'Preparing…',
+    'conv.etape.recherche': 'Web search…',
+    'conv.etape.sources': 'sources read',
+    'conv.etape.redaction': 'Writing…',
+    'conv.etape.secondes': 's',
+    'conv.scroll.bas': 'New messages',
+    'conv.charger_precedents': 'Load earlier messages',
+    'conv.chargement': 'Loading the thread…',
+    'conv.stop.aide': 'Stop the answer in progress',
+    'conv.agent_change': 'Agent switched: ',
+    'conv.cout.credits': 'credits',
+    'conv.cout.tokens': 'tokens',
+    'conv.cout.total': 'Thread total',
+    'conv.cout.aide': 'Cost of this answer',
     'conv.doc.max': '3 documents maximum per message',
     'conv.doc.importer': 'Import a document',
     'conv.doc.importer.aide': 'Import a document (PDF, DOCX, XLSX, CSV, TXT — used in analyses)',
@@ -718,6 +748,14 @@ function Icon({ name, size = 18, stroke = 1.6, ...rest }) {
     );
     case 'x': return (
       <svg {...common}><path d="M18 6 6 18M6 6l12 12" /></svg>
+    );
+    // « Stop » du composer : un carré plein, la convention universelle de
+    // l'arrêt (le triangle « play » a déjà son pendant `pause`).
+    case 'stop': return (
+      <svg {...common}><rect x="6.5" y="6.5" width="11" height="11" rx="1.5" fill="currentColor" stroke="none" /></svg>
+    );
+    case 'arrow-down': return (
+      <svg {...common}><path d="M12 5v14M5 12l7 7 7-7" /></svg>
     );
     case 'thumb-up': return (
       <svg {...common}><path d="M7 22V11M2 13v7a2 2 0 0 0 2 2h13.66a2 2 0 0 0 2-1.7l1.26-8a2 2 0 0 0-2-2.3H15V5a3 3 0 0 0-3-3l-3 8v12" /></svg>
@@ -2409,8 +2447,9 @@ function CarteErreur({ erreur, onAction }) {
    ============================================================ */
 function ConversationsRegion({
   conversations, activeId, setActiveId, onSendInActive, onSendNew, onNewChat,
-  suggestedPrompts, streamingSpeed, showCitePanelFor, setShowCitePanelFor,
+  suggestedPrompts, showCitePanelFor, setShowCitePanelFor,
   profil, onCompleterProfil, onErreurAction, erreurCreation, onRetryCreation,
+  etapes, couts, estAdmin, filsEnFlux, onStop, onAgentChange, onChargerPrecedents,
 }) {
   const active = conversations.find((c) => c.id === activeId);
 
@@ -2426,7 +2465,13 @@ function ConversationsRegion({
         <ConvThread
           conversation={active}
           onSend={onSendInActive}
-          streamingSpeed={streamingSpeed}
+          etape={(etapes || {})[active.id] || null}
+          cout={(couts || {})[active.id] || null}
+          estAdmin={estAdmin}
+          enFlux={!!(filsEnFlux || {})[active.id]}
+          onStop={() => onStop(active.id)}
+          onAgentChange={onAgentChange}
+          onChargerPrecedents={() => onChargerPrecedents(active.id)}
           profil={profil}
           onCompleterProfil={onCompleterProfil}
           onErreurAction={(m) => onErreurAction(active.id, m)}
@@ -2594,16 +2639,48 @@ function BoutonCopier({ texte, libelleCourt, titreLibelle }) {
   );
 }
 
-function ConvThread({ conversation, onSend, streamingSpeed, openCite, profil,
-                     onCompleterProfil, onErreurAction }) {
+function ConvThread({ conversation, onSend, openCite, profil,
+                     onCompleterProfil, onErreurAction, etape, cout, estAdmin,
+                     enFlux, onStop, onAgentChange, onChargerPrecedents }) {
+  const t = window.useT();
   const [draft, setDraft] = React.useState('');
   const scrollRef = useConvRef(null);
+  // « L'utilisateur est-il déjà en bas ? » — condition de l'auto-défilement.
+  // Sans elle, chaque `delta` ramenait de force en bas un lecteur remonté dans
+  // l'historique.
+  const [enBas, setEnBas] = React.useState(true);
+  const [chargementPrecedents, setChargementPrecedents] = React.useState(false);
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    setEnBas(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+  };
+
+  // Le défilement est indexé sur la LONGUEUR du contenu, pas sur le nombre de
+  // messages : pendant un flux, le nombre ne change pas et le texte grandissait
+  // sous le bord de la fenêtre.
+  const longueurContenu = conversation.messages.reduce(
+    (n, m) => n + ((m.content && String(m.content).length) || 0), 0);
+
+  React.useEffect(() => { setEnBas(true); }, [conversation.id]);
 
   React.useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [conversation.messages.length, conversation.id]);
+    if (!enBas) return;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [longueurContenu, conversation.messages.length, conversation.id, enBas, etape]);
+
+  const allerEnBas = () => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    setEnBas(true);
+  };
+
+  const chargerPrecedents = async () => {
+    setChargementPrecedents(true);
+    try { await onChargerPrecedents(); } finally { setChargementPrecedents(false); }
+  };
 
   const [exportEnCours, setExportEnCours] = React.useState('');
   const exporter = async (format) => {
@@ -2622,9 +2699,21 @@ function ConvThread({ conversation, onSend, streamingSpeed, openCite, profil,
     <div className="thread-region">
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     gap: 12, padding: '10px 20px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ minWidth: 0, fontSize: 13.5, color: 'var(--fg-2)', overflow: 'hidden',
-                      textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {conversation.title || libelle('Conversation')}
+        <div style={{ minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 10, overflow: 'hidden' }}>
+          <div style={{ minWidth: 0, fontSize: 13.5, color: 'var(--fg-2)', overflow: 'hidden',
+                        textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {conversation.title || libelle('Conversation')}
+          </div>
+          {cout && cout.messages > 0 && (
+            <span className="ax-pastille-cout mono" style={{ flex: 'none' }}
+              title={t('conv.cout.total')}>
+              {texteCout({
+                credits: cout.credits || 0,
+                tokens: (cout.tokens_entree || 0) + (cout.tokens_sortie || 0),
+                coutMicroEur: cout.cout_micro_eur, admin: estAdmin,
+              })}
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 6, flex: 'none' }}>
           <button className="btn btn-secondary btn-sm" disabled={!!exportEnCours}
@@ -2637,28 +2726,61 @@ function ConvThread({ conversation, onSend, streamingSpeed, openCite, profil,
           </button>
         </div>
       </div>
-      <div className="thread-scroll" ref={scrollRef}>
+      <div className="thread-scroll" ref={scrollRef} onScroll={onScroll}>
         <div className="thread-inner">
-          {conversation.messages.map((m, i) => (
-            m.role === 'user'
-              ? <UserMsg key={i} text={m.content} />
-              : m.erreur
-                ? <CarteErreur key={i} erreur={m.erreur} onAction={() => onErreurAction(m)} />
-                : <AiMsg key={i} content={m.content} sources={m.sources || []} agent={m.agent}
-                    streamingSpeed={streamingSpeed} openCite={openCite} live={m.live} viz={m.viz || null}
-                    statut={m.statut} isLast={i === conversation.messages.length - 1} />
-          ))}
+          {!conversation.loaded ? (
+            // Trois lignes le temps de la première page de messages : le fil
+            // vide laissait croire à une conversation sans historique.
+            <div className="ax-fil-skeleton" role="status" aria-label={t('conv.chargement')}>
+              <div className="skeleton" />
+              <div className="skeleton med" />
+              <div className="skeleton short" />
+            </div>
+          ) : (
+            <>
+              {conversation.hasMore && (
+                <button className="btn btn-secondary btn-sm ax-charger-precedents"
+                  disabled={chargementPrecedents} onClick={chargerPrecedents}>
+                  {chargementPrecedents ? '…' : t('conv.charger_precedents')}
+                </button>
+              )}
+              {conversation.messages.map((m, i) => (
+                m.role === 'user'
+                  ? <UserMsg key={i} text={m.content} />
+                  : m.role === 'system'
+                    ? <NoteSysteme key={i} text={m.content} />
+                    : m.erreur
+                      ? <CarteErreur key={i} erreur={m.erreur} onAction={() => onErreurAction(m)} />
+                      : <AiMsg key={i} content={m.content} sources={m.sources || []} agent={m.agent}
+                          openCite={openCite} live={m.live} viz={m.viz || null}
+                          statut={m.statut} credits={m.credits} estAdmin={estAdmin}
+                          tokensEntree={m.tokensEntree} tokensSortie={m.tokensSortie}
+                          coutMicroEur={m.coutMicroEur} />
+              ))}
+              {etape && (
+                <BandeauEtape etape={etape.etape} nombre={etape.nombre} depuis={etape.depuis} />
+              )}
+            </>
+          )}
         </div>
       </div>
 
+      {!enBas && (
+        <button className="ax-bouton-bas" onClick={allerEnBas} title={t('conv.scroll.bas')}>
+          <Icon name="arrow-down" size={14} /> {t('conv.scroll.bas')}
+        </button>
+      )}
+
       <Composer value={draft} onChange={setDraft} profil={profil}
-        onCompleterProfil={onCompleterProfil} onSend={async () => {
+        enFlux={enFlux} onStop={onStop} onAgentChange={onAgentChange}
+        onCompleterProfil={onCompleterProfil} onSend={() => {
           if (!draft.trim()) return;
-          const envoye = await onSend(draft);
-          // Ne vider le brouillon QUE sur un envoi accepté (garde de crédits
-          // non déclenchée) — sinon le texte tapé disparaît sans avoir
-          // jamais été envoyé.
-          if (envoye !== false) setDraft('');
+          // `onSend` (= handleSendInActive) rend `false` SYNCHRONEMENT quand la
+          // garde de crédits se déclenche, et sinon une promesse qu'on n'attend
+          // pas : le brouillon est vidé dès l'envoi, jamais quand la modale
+          // s'ouvre. Attendre la fin du flux laisserait le texte envoyé dans le
+          // champ verrouillé pendant toute la réponse.
+          if (onSend(draft) !== false) setDraft('');
         }} />
     </div>
   );
@@ -2672,13 +2794,81 @@ function UserMsg({ text }) {
   );
 }
 
-// Badge affiché seulement pour les agents spécialisés — la conversation libre
-// (clé "conseiller") reste une discussion simple, sans badge.
-const AGENT_LABELS = { market_scanner: 'Market Scanner · PESTEL', competitor_radar: 'Competitor Radar · Porter' };
+// Badge de l'agent qui a RÉPONDU, sur chaque réponse — y compris en mode
+// « auto », où c'est la seule façon de savoir qui a traité la question. La clé
+// `conseiller` a donc désormais un libellé (elle n'en avait pas : en auto, une
+// question générique produisait une bulle anonyme).
+const AGENT_LABELS = {
+  market_scanner: 'Market Scanner · PESTEL',
+  competitor_radar: 'Competitor Radar · Porter',
+  conseiller: 'Axial Conseil',
+};
 
-function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast, live, viz, statut }) {
-  // Pending state: a real backend answer is on its way (search + RAG + LLM can
-  // take 20-40s). Show a clear "thinking" indicator instead of a mute placeholder.
+/* Tokens en notation courte : « 3,1 k » en français, « 3.1 k » en anglais.
+   Au-delà de 10 000 la décimale n'apporte rien (« 12 k »). */
+function formaterTokens(n) {
+  const v = Number(n) || 0;
+  if (v < 1000) return String(v);
+  const k = v / 1000;
+  const arrondi = k >= 10 ? String(Math.round(k)) : String(Math.round(k * 10) / 10);
+  return arrondi.replace('.', (window.AXIAL_LANG === 'en') ? '.' : ',') + ' k';
+}
+
+/* Pastille de coût, partagée entre la bulle (coût du tour) et l'en-tête du fil
+   (total). Le € n'apparaît que pour un admin ET quand le backend l'a renseigné
+   (`cout_micro_eur` est `None` pour tout le monde sauf les admins). */
+function texteCout({ credits, tokens, coutMicroEur, admin }) {
+  const parts = [
+    `${credits} ${texteI18n('conv.cout.credits')}`,
+    `${formaterTokens(tokens)} ${texteI18n('conv.cout.tokens')}`,
+  ];
+  if (admin && typeof coutMicroEur === 'number') {
+    parts.push(`${(coutMicroEur / 1e6).toFixed(3)} €`);
+  }
+  return parts.join(' · ');
+}
+
+/* Bandeau d'étapes du flux, alimenté par les événements SSE `etape`. Il porte
+   son propre compteur de secondes : l'intervalle est monté avec le bandeau et
+   nettoyé à son démontage — c'est-à-dire au premier `delta`, au `done` ou sur
+   erreur, quand `sendStreamed` retire l'étape du fil. */
+function BandeauEtape({ etape, nombre, depuis }) {
+  const [secondes, setSecondes] = React.useState(() => Math.max(0, Math.round((Date.now() - depuis) / 1000)));
+  React.useEffect(() => {
+    const id = setInterval(() => {
+      setSecondes(Math.max(0, Math.round((Date.now() - depuis) / 1000)));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [depuis]);
+
+  const libelleEtape = etape === 'recherche'
+    ? texteI18n('conv.etape.recherche')
+    : etape === 'sources'
+      ? `${Number(nombre) || 0} ${texteI18n('conv.etape.sources')}`
+      : etape === 'redaction'
+        ? texteI18n('conv.etape.redaction')
+        : texteI18n('conv.etape.attente');
+
+  return (
+    <div className="ax-bandeau-etape mono" role="status" aria-live="polite">
+      <span className="dots"><i /><i /><i /></span>
+      <span>{libelleEtape}</span>
+      <span className="ax-bandeau-etape-chrono">{secondes} {texteI18n('conv.etape.secondes')}</span>
+    </div>
+  );
+}
+
+/* Note locale « Agent changé : … » : jamais envoyée à l'API, jamais persistée
+   (elle disparaît au rechargement du fil). Simple repère visuel. */
+function NoteSysteme({ text }) {
+  return <div className="ax-note-systeme">{text}</div>;
+}
+
+function AiMsg({ content, sources, agent, openCite, live, viz, statut,
+                credits, tokensEntree, tokensSortie, coutMicroEur, estAdmin }) {
+  // En attente : la réponse est en route (recherche + RAG + LLM = 20-40 s).
+  // Le détail de l'attente est porté par le bandeau d'étapes du fil ; la bulle
+  // se contente d'exister pour que le fil ne saute pas à l'arrivée du texte.
   if (content === '__PENDING__') {
     return (
       <div className="msg-ai-wrap">
@@ -2686,36 +2876,24 @@ function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast, live
         <div className="msg-ai">
           <span className="ax-thinking">
             <span className="dots"><i /><i /><i /></span>
-            AXIAL analyse — recherche web + base de connaissance…
+            {texteI18n('conv.attente')}
           </span>
         </div>
       </div>
     );
   }
-  // Le backend renvoie un texte markdown avec citations [N].
+  // Le backend renvoie un texte markdown avec citations [N]. Il arrive déjà
+  // progressivement (événements `delta`) : AUCUNE animation locale par-dessus.
+  // L'ancienne machine à écrire redessinait le texte depuis zéro à chaque
+  // payload final — le texte affiché rétrécissait puis se retapait.
   const fullText = useConvMemo(() => (content == null ? '' : String(content)), [content]);
-  const [shown, setShown] = React.useState(isLast ? 0 : fullText.length);
-
-  React.useEffect(() => {
-    // Flux réel : le texte arrive déjà progressivement du serveur — pas
-    // d'animation locale par-dessus, sinon les deux se battent.
-    if (live) { setShown(fullText.length); return; }
-    if (!isLast) { setShown(fullText.length); return; }
-    if (streamingSpeed === 0) { setShown(fullText.length); return; }
-    let cancelled = false;
-    let i = 0;
-    const tick = () => {
-      if (cancelled) return;
-      i = Math.min(fullText.length, i + Math.max(2, Math.round(streamingSpeed)));
-      setShown(i);
-      if (i < fullText.length) setTimeout(tick, 18);
-    };
-    tick();
-    return () => { cancelled = true; };
-  }, [fullText, isLast, streamingSpeed, live]);
-
-  const shownText = fullText.slice(0, shown);
-  const stillStreaming = live || (isLast && shown < fullText.length && streamingSpeed > 0);
+  const pastille = (typeof credits === 'number' && !live)
+    ? texteCout({
+        credits,
+        tokens: (Number(tokensEntree) || 0) + (Number(tokensSortie) || 0),
+        coutMicroEur, admin: estAdmin,
+      })
+    : null;
 
   return (
     <div className="msg-ai-wrap">
@@ -2731,12 +2909,17 @@ function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast, live
             <Icon name="alert" size={11} /> {texteI18n('conv.partielle')}
           </div>
         )}
-        <MarkdownView text={shownText} onCite={openCite} vizs={viz} live={!!live || stillStreaming} />
-        {stillStreaming && <span className="typing-cursor" />}
-        {!stillStreaming && (
+        <MarkdownView text={fullText} onCite={openCite} vizs={viz} live={!!live} />
+        {live && <span className="typing-cursor" />}
+        {!live && (
           <div className="msg-ai-actions">
             <BoutonCopier texte={fullText} />
           </div>
+        )}
+        {/* La pastille de coût vit HORS de `.msg-ai-actions`, qui n'apparaît
+            qu'au survol : le coût doit être lisible sans geste. */}
+        {pastille && (
+          <div className="ax-pastille-cout mono" title={texteI18n('conv.cout.aide')}>{pastille}</div>
         )}
       </div>
     </div>
@@ -2761,7 +2944,8 @@ const MAX_CARACTERES = 6000;
 const SEUIL_COMPTEUR = 5000;
 const MAX_DOCS_PAR_MESSAGE = 3;
 
-function Composer({ value, onChange, onSend, profil, onCompleterProfil }) {
+function Composer({ value, onChange, onSend, profil, onCompleterProfil,
+                    enFlux, onStop, onAgentChange }) {
   const t = window.useT();
   const en = window.AXIAL_LANG === 'en';
   const ref = useConvRef(null);
@@ -2772,8 +2956,12 @@ function Composer({ value, onChange, onSend, profil, onCompleterProfil }) {
     try { return localStorage.getItem('axial_agent_mode') || 'auto'; } catch (e) { return 'auto'; }
   });
   const pickMode = (k) => {
+    if (k === mode) return;
     setMode(k);
     try { localStorage.setItem('axial_agent_mode', k); } catch (e) {}
+    // Le fil courant doit dire à l'utilisateur que la suite sera traitée par
+    // un autre agent — sinon le changement est invisible dans l'historique.
+    if (onAgentChange) onAgentChange(k, (AGENT_MODES.find((m) => m.key === k) || {}).label || k);
   };
   const [pendingDocs, setPendingDocs] = React.useState(() => (window.AXIAL_PENDING_DOCS || []));
   React.useEffect(() => {
@@ -2819,7 +3007,11 @@ function Composer({ value, onChange, onSend, profil, onCompleterProfil }) {
   }, [value]);
 
   const onKey = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      // Verrou du fil : pendant un flux, Entrée ne doit pas non plus envoyer.
+      if (!enFlux) onSend();
+    }
   };
 
   const docsPleins = pendingDocs.length >= MAX_DOCS_PAR_MESSAGE;
@@ -2840,7 +3032,7 @@ function Composer({ value, onChange, onSend, profil, onCompleterProfil }) {
         <input ref={fileRef} type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.md"
           style={{ display: 'none' }} onChange={onPickFile} />
         <button className="icon-btn" onClick={() => fileRef.current && fileRef.current.click()}
-          disabled={uploading || docsPleins} aria-label={t('conv.doc.importer')}
+          disabled={uploading || docsPleins || !!enFlux} aria-label={t('conv.doc.importer')}
           title={docsPleins ? t('conv.doc.max') : t('conv.doc.importer.aide')}
           style={{ alignSelf: 'flex-end', marginBottom: 6, flexShrink: 0 }}>
           <Icon name={uploading ? 'clock' : 'plus'} size={15} />
@@ -2850,14 +3042,23 @@ function Composer({ value, onChange, onSend, profil, onCompleterProfil }) {
           rows={1}
           value={value}
           maxLength={MAX_CARACTERES}
+          disabled={!!enFlux}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKey}
           placeholder={t('conv.placeholder')}
         />
-        <button className="composer-send" onClick={onSend} disabled={!value.trim()}
-          aria-label={t('common.send')}>
-          <Icon name="arrow-up" size={16} />
-        </button>
+        {enFlux ? (
+          // Envoyer devient Stop pendant le flux de CE fil (spec §4).
+          <button className="composer-send ax-composer-stop" onClick={onStop}
+            aria-label={t('conv.stop.aide')} title={t('conv.stop.aide')}>
+            <Icon name="stop" size={14} />
+          </button>
+        ) : (
+          <button className="composer-send" onClick={onSend} disabled={!value.trim()}
+            aria-label={t('common.send')}>
+            <Icon name="arrow-up" size={16} />
+          </button>
+        )}
       </div>
       {value.length >= SEUIL_COMPTEUR && (
         <div className="ax-compteur-carac mono" title={t('conv.compteur.aide')}
@@ -2888,12 +3089,14 @@ function Composer({ value, onChange, onSend, profil, onCompleterProfil }) {
         <div style={{ display: 'inline-flex', gap: 4, padding: 3, borderRadius: 999, border: '1px solid var(--border)', background: 'var(--bg-2, rgba(255,255,255,0.03))' }}>
           {AGENT_MODES.map((m) => (
             <button key={m.key} type="button" onClick={() => pickMode(m.key)}
+              disabled={!!enFlux}
               title={m.key === 'auto'
                 ? (en ? 'Free discussion with Axial, no imposed framework' : 'Discussion libre avec Axial, sans cadre imposé')
                 : (en ? `Use the ${m.label} agent` : `Utiliser l'agent ${m.label}`)}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 5,
-                padding: '4px 10px', borderRadius: 999, border: 'none', cursor: 'pointer',
+                padding: '4px 10px', borderRadius: 999, border: 'none',
+                cursor: enFlux ? 'not-allowed' : 'pointer', opacity: enFlux ? 0.55 : 1,
                 fontSize: 11.5, fontFamily: 'var(--font-mono)', letterSpacing: '0.02em',
                 background: mode === m.key ? 'rgba(121,118,247,0.18)' : 'transparent',
                 color: mode === m.key ? 'var(--fg)' : 'var(--fg-3)',
@@ -5868,6 +6071,16 @@ function App() {
   // Échec de création de conversation (écran vide) : { text, erreur }, pas de
   // fil fantôme ajouté à la liste — voir `handleSendNew`.
   const [erreurCreation, setErreurCreation] = useState(null);
+  // Étape courante du flux, PAR FIL : { etape, nombre, depuis }. Un fil peut
+  // streamer pendant qu'on lit un autre fil, d'où l'indexation par identifiant.
+  const [etapesFlux, setEtapesFlux] = useState({});
+  // Fils dont le flux tourne : verrou du composer + bouton Stop, fil par fil.
+  const [filsEnFlux, setFilsEnFlux] = useState({});
+  // Total du fil (`GET …/cout`), rafraîchi à l'ouverture et après chaque `done`.
+  const [coutsFils, setCoutsFils] = useState({});
+  // Un AbortController par fil : c'est lui que Stop déclenche. Un `ref` et non
+  // un state — l'abandon ne doit pas dépendre d'un rendu.
+  const controleursFlux = useConvRef({});
   // Profil entreprise — UNE seule source de vérité, partagée par les
   // suggestions et le bandeau « contexte absent ». `undefined` = pas chargé.
   const [profil, setProfil] = useState(undefined);
@@ -6068,7 +6281,10 @@ function App() {
     link: c.url || null,
   }));
   const mapBackendMsg = (m) => (m.role === 'user'
-    ? { role: 'user', content: m.content }
+    // `messageId` aussi sur les messages utilisateur : c'est l'identifiant du
+    // PREMIER message affiché qui sert de borne `before` à la pagination, et
+    // un fil commence toujours par un message utilisateur.
+    ? { role: 'user', content: m.content, messageId: m.id }
     : {
         role: 'assistant', content: m.content, agent: m.agent,
         sources: mapCitations(m.citations), viz: m.viz || null,
@@ -6076,6 +6292,7 @@ function App() {
         // de coût (Task 7) les lisent sur le message, pas sur le flux.
         statut: m.statut || 'complet', credits: m.credits,
         tokensEntree: m.tokens_entree, tokensSortie: m.tokens_sortie,
+        coutMicroEur: m.cout_micro_eur,
         messageId: m.id,
       });
 
@@ -6083,16 +6300,63 @@ function App() {
   // de ses messages depuis le backend (une seule fois).
   // La route est paginée depuis Task 2 : elle rend `{ items, has_more }`, et
   // `has_more` est conservé pour le « Charger les messages précédents ».
+  const rafraichirCout = (cid) => {
+    axCoutConversation(cid)
+      .then((c) => setCoutsFils((m) => ({ ...m, [cid]: c })))
+      .catch(() => {});
+  };
+
   const openConversation = async (id) => {
     setActiveId(id);
     const conv = conversations.find((c) => c.id === id);
     if (!conv || conv.loaded) return;
     try {
-      const page = await axMessagesPage(id);
+      const page = await axMessagesPage(id, { limit: 50 });
       setConversations((cs) => cs.map((c) => c.id === id
         ? { ...c, loaded: true, hasMore: !!page.has_more, messages: (page.items || []).map(mapBackendMsg) }
         : c));
-    } catch (e) { /* la conversation reste vide plutôt que de casser l'UI */ }
+      rafraichirCout(id);
+    } catch (e) {
+      // `loaded` est posé même sur un échec : sinon le skeleton tournerait
+      // indéfiniment sur un fil qui ne chargera jamais.
+      setConversations((cs) => cs.map((c) => c.id === id ? { ...c, loaded: true } : c));
+    }
+  };
+
+  // « Charger les messages précédents » : la borne est l'identifiant du plus
+  // ancien message DÉJÀ affiché ; la page reçue est préfixée au fil.
+  const chargerMessagesPrecedents = async (cid) => {
+    const conv = conversations.find((c) => c.id === cid);
+    if (!conv) return;
+    const borne = (conv.messages || []).find((m) => m.messageId);
+    if (!borne) return;
+    try {
+      const page = await axMessagesPage(cid, { limit: 50, before: borne.messageId });
+      setConversations((cs) => cs.map((c) => c.id === cid ? {
+        ...c,
+        hasMore: !!page.has_more,
+        messages: [...(page.items || []).map(mapBackendMsg), ...c.messages],
+      } : c));
+    } catch (e) { /* le bouton se réactive, l'utilisateur peut réessayer */ }
+  };
+
+  // Note locale « Agent changé : … » — jamais envoyée à l'API (l'agent voyage
+  // dans le corps de la requête, lu par `bridge.modeAgent`), jamais persistée.
+  const noterChangementAgent = (cle, label) => {
+    if (!activeId) return;
+    const conv = conversations.find((c) => c.id === activeId);
+    if (!conv || !(conv.messages || []).length) return;
+    setConversations((cs) => cs.map((c) => c.id === activeId ? {
+      ...c,
+      messages: [...c.messages, { role: 'system', content: t('conv.agent_change') + label }],
+    } : c));
+  };
+
+  // Stop : le générateur serveur détecte la déconnexion, archive le texte
+  // partiel en `statut='partiel'` et NE facture pas (spec §4).
+  const arreterFlux = (cid) => {
+    const ctrl = controleursFlux.current[cid];
+    if (ctrl) { try { ctrl.abort(); } catch (e) {} }
   };
 
   // Session expirée en cours d'envoi : déconnexion propre (jeton effacé,
@@ -6120,45 +6384,123 @@ function App() {
       : c));
   };
 
+  /* Le texte affiché ne rétrécit JAMAIS. Le payload final ne fait que compléter
+     le texte accumulé par les `delta` :
+       - payload sans texte (repli, coupure) → on garde l'accumulé ;
+         rien n'est affiché ? → on prend le payload ;
+       - payload au moins aussi long → il fait autorité (il porte la reprise sur
+         troncature et la note « (réponse interrompue) ») ;
+       - payload PLUS COURT → c'est le flux qui a raison ; on garde l'accumulé.
+     C'est la panne observée en prod : le texte affiché rétrécissait à l'arrivée
+     du `done`, puis se retapait — l'animation locale repartait de zéro. Elle est
+     supprimée, donc reprendre le texte final ne réanime plus rien. */
+  const fusionnerContenu = (accumule, contenuFinal) => {
+    const fin = (contenuFinal == null) ? '' : String(contenuFinal);
+    if (!fin) return accumule;
+    if (!accumule) return fin;
+    return (fin.length >= accumule.length) ? fin : accumule;
+  };
+
   // Envoi en flux : le message assistant grandit mot à mot dans la conversation.
-  // `onEvent` transmet TOUS les événements (étapes, avertissements) ; Task 5
-  // n'en consomme que `sources`, `delta` et `done`.
+  // `onEvent` transmet TOUS les événements ; l'avertissement `contexte_absent`
+  // est déjà rendu par le bandeau du composer (Task 5) — pas de doublon ici.
   const sendStreamed = async (cid, text, baseMessages, cleIdem) => {
     let acc = '';
+    // Agent et citations annoncés par le flux : à conserver si le Stop tombe
+    // avant le payload final (qui, lui, ne viendra jamais).
+    let agentFlux = null;
+    let sourcesFlux = [];
     const setMsgs = (msgs) => setConversations((cs) => cs.map((c) => c.id === cid ? { ...c, messages: msgs } : c));
+
+    const ctrl = new AbortController();
+    controleursFlux.current[cid] = ctrl;
+    setFilsEnFlux((f) => ({ ...f, [cid]: true }));
+    const debutEtape = Date.now();
+    const poserEtape = (etape, nombre) => setEtapesFlux((e) => ({
+      ...e, [cid]: { etape, nombre, depuis: debutEtape },
+    }));
+    const retirerEtape = () => setEtapesFlux((e) => {
+      if (!(cid in e)) return e;
+      const suivant = { ...e };
+      delete suivant[cid];
+      return suivant;
+    });
+    poserEtape('attente', null);
+
     const onEvent = (evt) => {
-      if (evt.step === 'sources') {
-        setMsgs([...baseMessages, { role: 'assistant', content: '__PENDING__', agent: evt.agent, sources: mapCitations(evt.citations), live: true }]);
+      if (evt.step === 'etape') {
+        poserEtape(evt.etape, (evt.detail && evt.detail.nombre));
+      } else if (evt.step === 'sources') {
+        agentFlux = evt.agent || agentFlux;
+        sourcesFlux = mapCitations(evt.citations);
+        setMsgs([...baseMessages, { role: 'assistant', content: '__PENDING__', agent: agentFlux, sources: sourcesFlux, live: true }]);
       } else if (evt.step === 'delta') {
+        // Premier morceau de texte : le bandeau d'étapes a fini son travail.
+        retirerEtape();
         acc += evt.delta || '';
         setConversations((cs) => cs.map((c) => {
           if (c.id !== cid) return c;
           const last = c.messages[c.messages.length - 1] || {};
           return { ...c, messages: [...baseMessages, { ...last, role: 'assistant', content: acc, live: true }] };
         }));
-      } else if (evt.step === 'done' && evt.data && typeof evt.data.balance === 'number') {
+      } else if (evt.step === 'done') {
+        retirerEtape();
         // La pastille de crédits ne se rafraîchissait jamais après un envoi.
-        setAxBal(evt.data.balance);
+        if (evt.data && typeof evt.data.balance === 'number') setAxBal(evt.data.balance);
       }
     };
-    const final = await axStreamChatIn(cid, text, onEvent, { idempotencyKey: cleIdem });
-    setMsgs([...baseMessages, {
-      role: 'assistant', content: final.content, agent: final.agent,
-      sources: mapCitations(final.citations), viz: final.viz || null, live: false,
-      statut: final.statut || 'complet', credits: final.credits,
-      tokensEntree: final.tokens_entree, tokensSortie: final.tokens_sortie,
-      messageId: final.id,
-    }]);
-    // Repli sur la route bloquante : le payload ne porte pas de `balance`.
-    if (typeof final.balance !== 'number') {
-      axBalance().then((b) => setAxBal(b.available)).catch(() => {});
+
+    try {
+      const final = await axStreamChatIn(cid, text, onEvent, { idempotencyKey: cleIdem, signal: ctrl.signal });
+      setMsgs([...baseMessages, {
+        role: 'assistant', content: fusionnerContenu(acc, final.content), agent: final.agent || agentFlux,
+        sources: mapCitations(final.citations), viz: final.viz || null, live: false,
+        statut: final.statut || 'complet', credits: final.credits,
+        tokensEntree: final.tokens_entree, tokensSortie: final.tokens_sortie,
+        coutMicroEur: final.cout_micro_eur,
+        messageId: final.id,
+      }]);
+      // Repli sur la route bloquante : le payload ne porte pas de `balance`.
+      if (typeof final.balance !== 'number') {
+        axBalance().then((b) => setAxBal(b.available)).catch(() => {});
+      }
+      rafraichirCout(cid);
+    } catch (e) {
+      // Stop demandé : ce n'est pas une erreur. La bulle garde le texte partiel
+      // et porte le badge « Réponse partielle » — côté serveur le tour est
+      // archivé en `partiel` et n'est PAS facturé.
+      if (ctrl.signal.aborted) {
+        setMsgs([...baseMessages, {
+          role: 'assistant', content: acc, agent: agentFlux,
+          // Pas de `credits` : le flux a été coupé avant le payload, on n'a
+          // aucun compte de tokens à afficher. Le badge « Réponse partielle »
+          // dit déjà que rien n'a été débité.
+          sources: sourcesFlux, live: false, statut: 'partiel',
+        }]);
+        axBalance().then((b) => setAxBal(b.available)).catch(() => {});
+        rafraichirCout(cid);
+        return;
+      }
+      throw e;
+    } finally {
+      retirerEtape();
+      setFilsEnFlux((f) => {
+        if (!(cid in f)) return f;
+        const suivant = { ...f };
+        delete suivant[cid];
+        return suivant;
+      });
+      if (controleursFlux.current[cid] === ctrl) delete controleursFlux.current[cid];
     }
   };
 
-  // Retourne un booléen : le composer ne vide le brouillon QUE sur un envoi
-  // accepté (garde de crédits non déclenchée), jamais quand la modale
-  // s'ouvre — sinon le texte tapé disparaît sans avoir jamais été envoyé.
-  const handleSendInActive = async (text) => {
+  // Rend `false` quand la garde de crédits se déclenche (le composer garde son
+  // brouillon, la modale prend le relais), sinon la promesse de l'envoi.
+  // Volontairement NON `async` : ce `false` doit arriver SYNCHRONEMENT pour que
+  // le composer vide son brouillon dès l'envoi. Le composer étant désormais
+  // verrouillé pendant le flux, attendre la fin de la réponse laisserait le
+  // texte déjà envoyé dans un champ grisé pendant 20-40 s.
+  const handleSendInActive = (text) => {
     if (!activeId) return false;
     if (axBal != null && axBal < CREDITS_PAR_MESSAGE) { setModaleCredits(true); return false; }
     const cid = activeId;
@@ -6171,12 +6513,14 @@ function App() {
     } : c));
     const base = [...(((conversations.find((c) => c.id === cid) || {}).messages) || []),
                   { role: 'user', content: text }];
-    try {
-      await sendStreamed(cid, text, base, cleIdem);
-    } catch (e) {
-      poserErreur(cid, base, e, text, cleIdem);
-    }
-    return true;
+    return (async () => {
+      try {
+        await sendStreamed(cid, text, base, cleIdem);
+      } catch (e) {
+        poserErreur(cid, base, e, text, cleIdem);
+      }
+      return true;
+    })();
   };
 
   const handleSendNew = async (text) => {
@@ -6384,7 +6728,13 @@ function App() {
               t('conv.suggest.1'), t('conv.suggest.2'),
               t('conv.suggest.3'), t('conv.suggest.4'),
             ]}
-            streamingSpeed={40}
+            etapes={etapesFlux}
+            couts={coutsFils}
+            estAdmin={!!(axUser && axUser.is_admin)}
+            filsEnFlux={filsEnFlux}
+            onStop={arreterFlux}
+            onAgentChange={noterChangementAgent}
+            onChargerPrecedents={chargerMessagesPrecedents}
             showCitePanelFor={showCitePanelFor}
             setShowCitePanelFor={setShowCitePanelFor}
           />
