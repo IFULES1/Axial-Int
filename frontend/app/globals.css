@@ -1071,6 +1071,16 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .conv-item-title { font-size: 13.5px; font-weight: 600; color: var(--fg); }
 .conv-item-meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-3); letter-spacing: 0.04em; }
 
+/* Tableaux markdown des rapports et des réponses */
+.md-table-wrap { overflow-x: auto; margin: 10px 0 14px; border: 1px solid var(--border); border-radius: 8px; }
+.md-table { border-collapse: collapse; width: 100%; font-size: 13px; background: var(--surface-2); }
+.md-table th { text-align: left; padding: 8px 10px; font-size: 11px; text-transform: uppercase;
+               letter-spacing: .05em; color: var(--fg-3); border-bottom: 1px solid var(--v-soft); white-space: nowrap; }
+.md-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.45; }
+.md-table tr:last-child td { border-bottom: 0; }
+/* Source atteinte depuis une citation [N] */
+.src-flash { outline: 2px solid var(--v-bright); outline-offset: 2px; border-radius: 6px; transition: outline-color .6s; }
+
 /* thread */
 .thread-region {
   display: flex; flex-direction: column;

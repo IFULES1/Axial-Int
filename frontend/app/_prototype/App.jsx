@@ -3362,16 +3362,45 @@ function MarkdownView({ text, onCite }) {
       bullets = [];
     }
   };
-  lines.forEach((raw, idx) => {
-    const line = raw.replace(/\s+$/, '');
-    if (!line.trim()) { flush(idx); return; }
+  // Tableaux : une ligne « | … | » suivie d'une ligne de séparation « |---|---| ».
+  // La boucle est indexée (pas forEach) parce qu'il faut regarder la ligne suivante.
+  const isSep = (l) => /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/.test((l || '').trim());
+  const cells = (l) => {
+    let s = l.trim();
+    if (s.startsWith('|')) s = s.slice(1);
+    if (s.endsWith('|')) s = s.slice(0, -1);
+    return s.split('|').map((c) => c.trim());
+  };
+  let idx = 0;
+  while (idx < lines.length) {
+    const line = lines[idx].replace(/\s+$/, '');
+    if (!line.trim()) { flush(idx); idx += 1; continue; }
+    if (line.trim().startsWith('|') && isSep(lines[idx + 1])) {
+      flush(idx);
+      const head = cells(line);
+      const rows = [];
+      idx += 2;
+      while (idx < lines.length && lines[idx].trim().startsWith('|')) { rows.push(cells(lines[idx])); idx += 1; }
+      blocks.push(
+        <div key={'t' + idx} className="md-table-wrap">
+          <table className="md-table">
+            <thead><tr>{head.map((c, i) => <th key={i}>{renderInline(c, 'th' + idx + i, onCite)}</th>)}</tr></thead>
+            <tbody>{rows.map((r, ri) => (
+              <tr key={ri}>{head.map((_, ci) => <td key={ci}>{renderInline(r[ci] || '', 'td' + idx + ri + ci, onCite)}</td>)}</tr>
+            ))}</tbody>
+          </table>
+        </div>,
+      );
+      continue;
+    }
     if (line.startsWith('### ')) { flush(idx); blocks.push(<h3 key={idx} style={{ fontSize: 15, fontWeight: 700, margin: '14px 0 6px' }}>{renderInline(line.slice(4), 'h' + idx, onCite)}</h3>); }
     else if (line.startsWith('## ')) { flush(idx); blocks.push(<h2 key={idx} style={{ fontSize: 17, fontWeight: 700, margin: '18px 0 8px' }}>{renderInline(line.slice(3), 'h' + idx, onCite)}</h2>); }
     else if (line.startsWith('# ')) { flush(idx); blocks.push(<h1 key={idx} style={{ fontSize: 20, fontWeight: 800, margin: '8px 0 10px' }}>{renderInline(line.slice(2), 'h' + idx, onCite)}</h1>); }
     else if (line.trim() === '---' || line.trim() === '***') { flush(idx); blocks.push(<hr key={idx} style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '16px 0' }} />); }
     else if (/^\s*[-*]\s+/.test(line)) { bullets.push(line.replace(/^\s*[-*]\s+/, '')); }
     else { flush(idx); blocks.push(<p key={idx} style={{ margin: '6px 0', lineHeight: 1.6 }}>{renderInline(line, 'p' + idx, onCite)}</p>); }
-  });
+    idx += 1;
+  }
   flush('end');
   return <div>{blocks}</div>;
 }
@@ -3465,7 +3494,16 @@ function ReportsEditor({ data, onBack, openShare }) {
       </div>
 
       <div className="rep-doc" style={{ fontSize: 14, maxWidth: 820 }}>
-        {content ? <MarkdownView text={content} /> : (lang === 'fr' ? 'Aucun contenu.' : 'No content.')}
+        {content
+          ? <MarkdownView text={content}
+              onCite={(n) => {
+                const el = document.getElementById('src-' + n);
+                if (!el) return;
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.classList.add('src-flash');
+                setTimeout(() => el.classList.remove('src-flash'), 1200);
+              }} />
+          : (lang === 'fr' ? 'Aucun contenu.' : 'No content.')}
       </div>
 
       {sources.length > 0 && (
@@ -3475,7 +3513,7 @@ function ReportsEditor({ data, onBack, openShare }) {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {sources.map((s, i) => (
-              <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 13 }}>
+              <div key={i} id={'src-' + (i + 1)} style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 13 }}>
                 <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--v-bright)' }}>[{i + 1}]</span>
                 {s.url
                   ? <a href={s.url} target="_blank" rel="noreferrer" style={{ color: 'var(--fg)', textDecoration: 'none' }}>{s.title || s.url}</a>
