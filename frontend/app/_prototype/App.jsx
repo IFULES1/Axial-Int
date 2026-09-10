@@ -57,94 +57,6 @@ const REPORT_TEMPLATES = {
 };
 
 
-
-
-const AGENTS = {
-  fr: [
-    {
-      id: 'a1', name: 'Veille concurrentielle — Lucca, Payfit, Cegid',
-      desc: 'Surveille les communiqués, levées, recrutements et changements de pricing des trois acteurs clés.',
-      status: 'running', sources: 12,
-      lastFinding: 'Payfit a annoncé l\'acquisition de SmartFlow (4 nov). Impact estimé : +18 % de couverture sur la paie internationale.',
-      lastFindingTime: 'il y a 1 h', nextRun: 'dans 22 h', icon: 'users',
-    },
-    {
-      id: 'a2', name: 'Réglementation IA Act — secteur santé',
-      desc: 'Suit les actes délégués, lignes directrices et jurisprudence appliquée à l\'IA en santé.',
-      status: 'running', sources: 8,
-      lastFinding: 'Nouvelle ligne directrice CNIL sur le profilage clinique. À instruire avant le 15 décembre.',
-      lastFindingTime: 'il y a 4 h', nextRun: 'dans 20 h', icon: 'shield',
-    },
-    {
-      id: 'a3', name: 'Mouvements RH — talents IA seniors',
-      desc: 'Détecte les départs et arrivées de profils IA seniors dans 14 entreprises ciblées.',
-      status: 'paused', sources: 14,
-      lastFinding: 'Mise en pause manuelle — données en cours de validation.',
-      lastFindingTime: 'il y a 2 j', nextRun: '—', icon: 'briefcase',
-    },
-    {
-      id: 'a4', name: 'Signaux faibles — clients churn-risk',
-      desc: 'Croise activité produit, sentiment et événements externes pour signaler les comptes à risque.',
-      status: 'idle', sources: 6,
-      lastFinding: 'Aucune trouvaille depuis la dernière exécution. Score de bruit faible.',
-      lastFindingTime: 'il y a 6 j', nextRun: 'lundi', icon: 'trending',
-    },
-  ],
-  en: [
-    {
-      id: 'a1', name: 'Competitive watch — Lucca, Payfit, Cegid',
-      desc: 'Tracks releases, fundraising, hiring and pricing shifts for the three key players.',
-      status: 'running', sources: 12,
-      lastFinding: 'Payfit announced acquisition of SmartFlow (Nov 4). Estimated impact: +18% coverage on international payroll.',
-      lastFindingTime: '1 h ago', nextRun: 'in 22 h', icon: 'users',
-    },
-    {
-      id: 'a2', name: 'EU AI Act — healthcare sector',
-      desc: 'Watches delegated acts, guidance and case law applied to AI in healthcare.',
-      status: 'running', sources: 8,
-      lastFinding: 'New CNIL guidance on clinical profiling. To be reviewed before Dec 15.',
-      lastFindingTime: '4 h ago', nextRun: 'in 20 h', icon: 'shield',
-    },
-    {
-      id: 'a3', name: 'Talent moves — senior AI profiles',
-      desc: 'Detects departures and arrivals of senior AI profiles across 14 target companies.',
-      status: 'paused', sources: 14,
-      lastFinding: 'Manually paused — data being validated.',
-      lastFindingTime: '2 d ago', nextRun: '—', icon: 'briefcase',
-    },
-    {
-      id: 'a4', name: 'Weak signals — churn-risk accounts',
-      desc: 'Crosses product activity, sentiment and external events to flag at-risk accounts.',
-      status: 'idle', sources: 6,
-      lastFinding: 'No findings since last run. Noise score low.',
-      lastFindingTime: '6 d ago', nextRun: 'Monday', icon: 'trending',
-    },
-  ],
-};
-
-
-
-
-const CREDITS_DAYS = (() => {
-  // 14 days, in credit units, with reports/conv/agents split
-  const labels = ['12','13','14','15','16','17','18','19','20','21','22','23','24','25'];
-  const data = [
-    [80, 30, 12], [0, 18, 8], [120, 22, 10], [0, 12, 8],
-    [200, 45, 14], [80, 28, 10], [0, 12, 8], [160, 38, 12],
-    [40, 30, 14], [240, 52, 16], [80, 22, 12], [120, 32, 14],
-    [320, 64, 18], [180, 48, 16],
-  ];
-  return labels.map((d, i) => ({ d, reports: data[i][0], conv: data[i][1], agents: data[i][2] }));
-})();
-
-
-
-
-
-
-
-
-
 /* theme.js */
 /* theme.js — light/dark switch with persistence */
 
@@ -349,7 +261,6 @@ const STRINGS = {
     'share.link.private': 'Privé',
     'share.link.workspace': 'Espace de travail',
     'share.link.anyone': 'Toute personne avec le lien',
-    'share.recipient.read_only': 'Lecture seule',
     'share.thread.reply': 'Répondre',
     'share.thread.axial_replied': 'Axial a répondu',
 
@@ -550,7 +461,6 @@ const STRINGS = {
     'share.link.private': 'Private',
     'share.link.workspace': 'Workspace',
     'share.link.anyone': 'Anyone with the link',
-    'share.recipient.read_only': 'Read-only',
     'share.thread.reply': 'Reply',
     'share.thread.axial_replied': 'Axial replied',
 
@@ -1115,9 +1025,9 @@ function ResetPasswordPage({ token, onDone }) {
       <div className="bg-radial" />
       <div className="auth-card">
         <Lockup sub="Intelligence" />
-        <h1 className="auth-hook">Choisis un nouveau mot de passe.</h1>
+        <h1 className="auth-hook">Choisissez un nouveau mot de passe.</h1>
         <p className="caption" style={{ marginTop: -16, marginBottom: 22 }}>
-          Tu seras connecté automatiquement juste après.
+          Vous serez connecté automatiquement juste après.
         </p>
         <form onSubmit={submit} className="auth-fields">
           <div>
@@ -1129,7 +1039,7 @@ function ResetPasswordPage({ token, onDone }) {
           <div>
             <label className="label">CONFIRMATION</label>
             <input className="input" type="password" required minLength={8}
-              placeholder="Retape le même"
+              placeholder="Retapez le même"
               value={pwd2} onChange={(e) => setPwd2(e.target.value)} />
           </div>
           {err && <p className="caption" style={{ color: 'var(--error, #f87171)', margin: '2px 0 0' }}>{err}</p>}
@@ -1167,11 +1077,11 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
   // Le lien de réinitialisation part vers l'adresse saisie ; la réponse est
   // volontairement identique que le compte existe ou non.
   const askReset = async () => {
-    if (!email.trim()) { setResetMsg("Renseigne d'abord ton email ci-dessus."); return; }
+    if (!email.trim()) { setResetMsg("Renseignez d'abord votre email ci-dessus."); return; }
     setResetBusy(true); setResetMsg('');
     try {
       await axForgotPassword(email.trim());
-      setResetMsg("Si un compte existe pour cette adresse, un lien vient d'être envoyé. Vérifie ta boîte (et les indésirables).");
+      setResetMsg("Si un compte existe pour cette adresse, un lien vient d'être envoyé. Vérifiez votre boîte (et les indésirables).");
     } catch (e) {
       setResetMsg("Si un compte existe pour cette adresse, un lien vient d'être envoyé.");
     }
@@ -1220,7 +1130,7 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
           <div>
             <label className="label">{libelle("EMAIL")}</label>
             <input className="input" type="email" required
-              placeholder={libelle("ton@email.com")}
+              placeholder={libelle("vous@entreprise.com")}
               value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
           <div>
@@ -1352,11 +1262,11 @@ const LABELS_EN = {
   "abonnés Pro": "Pro subscribers",
   "Toutes les lignes ne portent pas encore leur coût : ce total ne couvre que celles mesurées. La colonne « Mesurées » dit sur quoi il porte.":
     "Not every row carries its cost yet: this total covers only the measured ones. The \"Measured\" column says what it is based on.",
-  "Tu gardes tes 40 crédits offerts. Cette option reste disponible jusqu'au":
+  "Vous gardez vos 40 crédits offerts. Cette option reste disponible jusqu'au":
     "You keep your 40 free credits. This option stays available until",
-  "Tu gardes tes 40 crédits offerts — de quoi lancer une étude complète.":
+  "Vous gardez vos 40 crédits offerts — de quoi lancer une étude complète.":
     "You keep your 40 free credits — enough for a full study.",
-  "Ta période d'essai est terminée. Ajoute une carte pour continuer à utiliser Axial — ou réponds à un de mes emails si tu as besoin de plus de temps.":
+  "Votre période d'essai est terminée. Ajoutez une carte pour continuer à utiliser Axial — ou répondez à l'un de nos emails si vous avez besoin de plus de temps.":
     "Your trial period is over. Add a card to keep using Axial — or reply to one of my emails if you need more time.",
   "Pilotage": "Metrics",
   "Coûts de production, rentabilité par type de rapport, activité réelle.":
@@ -1399,7 +1309,7 @@ const LABELS_EN = {
   "Lancer cette analyse": "Run this analysis",
   "Lancement…": "Starting…",
   "Je préfère poser ma propre question": "I would rather ask my own question",
-  "Ce premier rapport est offert : il ne consomme aucun de tes crédits. Tu reçois un email dès qu'il est prêt.":
+  "Ce premier rapport est offert : il ne consomme aucun de vos crédits. Vous recevez un email dès qu'il est prêt.":
     "This first report is on us — it uses none of your credits. You will get an email as soon as it is ready.",
   "SOURCES PROPOSÉES": "SUGGESTED SOURCES",
   "OU UNE AUTRE SOURCE": "OR ANOTHER SOURCE",
@@ -1417,7 +1327,7 @@ const LABELS_EN = {
   "Votre avis": "Your feedback",
   "Dis-nous ce que vaut ce rapport": "Tell us what this report is worth",
   "Continuer sans carte": "Continue without a card",
-  "Tu gardes tes 40 crédits offerts — de quoi lancer une étude complète. Tu pourras activer l'essai plus tard, depuis Crédits.":
+  "Vous gardez vos 40 crédits offerts — de quoi lancer une étude complète. Vous pourrez activer l'essai plus tard, depuis Crédits.":
     "You keep your 40 free credits — enough for a full study. You can start the trial later, from Credits.",
   "Continuer": "Continue",
   "CE QU'AXIAL RETIENDRA": "WHAT AXIAL WILL REMEMBER",
@@ -1441,11 +1351,11 @@ const LABELS_EN = {
   "Se connecter": "Sign in",
   "Continuer avec Google": "Continue with Google",
   "Se connecter avec Google": "Sign in with Google",
-  "Connexion Google bientôt disponible — utilise ton email professionnel.":
+  "Connexion Google bientôt disponible — utilisez votre email professionnel.":
     "Google sign-in is coming soon — use your work email for now.",
   "OU PAR EMAIL": "OR WITH EMAIL",
   "EMAIL": "EMAIL",
-  "ton@email.com": "you@email.com",
+  "vous@entreprise.com": "you@email.com",
   "MOT DE PASSE": "PASSWORD",
   "vous@votre-entreprise.com": "you@your-company.com",
   "8 caractères minimum": "8 characters minimum",
@@ -1898,7 +1808,7 @@ function OnbStep3({ ctx, onLaunch, onBack }) {
           </button>
         </div>
         <p style={{ margin: '14px 0 0', fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
-          {libelle("Ce premier rapport est offert : il ne consomme aucun de tes crédits. Tu reçois un email dès qu'il est prêt.")}
+          {libelle("Ce premier rapport est offert : il ne consomme aucun de vos crédits. Vous recevez un email dès qu'il est prêt.")}
         </p>
       </article>
 
@@ -2047,15 +1957,15 @@ function OnbStep4({ onBack, onSkip }) {
                   compte interne l'essai est passé, afficher une échéance
                   expirée ferait croire à un accès déjà perdu. */}
               {(essai.periode && finLisible)
-                ? `${libelle("Tu gardes tes 40 crédits offerts. Cette option reste disponible jusqu'au")} ${finLisible}.`
-                : libelle("Tu gardes tes 40 crédits offerts — de quoi lancer une étude complète.")}
+                ? `${libelle("Vous gardez vos 40 crédits offerts. Cette option reste disponible jusqu'au")} ${finLisible}.`
+                : libelle("Vous gardez vos 40 crédits offerts — de quoi lancer une étude complète.")}
             </p>
           </div>
         )}
         {essai && !essai.actif && (
           <div style={{ marginTop: 20, paddingTop: 18, borderTop: '1px solid var(--border)' }}>
             <p style={{ margin: 0, fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
-              {libelle("Ta période d'essai est terminée. Ajoute une carte pour continuer à utiliser Axial — ou réponds à un de mes emails si tu as besoin de plus de temps.")}
+              {libelle("Votre période d'essai est terminée. Ajoutez une carte pour continuer à utiliser Axial — ou répondez à l'un de nos emails si vous avez besoin de plus de temps.")}
             </p>
           </div>
         )}
@@ -3353,7 +3263,7 @@ function ReportsEditor({ data, onBack }) {
       }
       const res = await axDeliverReport(provider, id);
       setEnvoiMsg({ ok: true, url: res.url,
-                    texte: provider === 'notion' ? 'Page Notion créée' : 'Déposé dans ton Drive' });
+                    texte: provider === 'notion' ? 'Page Notion créée' : 'Déposé dans votre Drive' });
     } catch (e) {
       setEnvoiMsg({ ok: false, texte: (e && e.message) || 'Envoi impossible.' });
     }
@@ -3670,7 +3580,7 @@ function ActivityHistory({ onClose }) {
             <button className="icon-btn" onClick={onClose}><Icon name="x" size={16} /></button>
           </div>
           <p style={{ color: 'var(--fg-2)', fontSize: 13, margin: '6px 0 0' }}>
-            {lang === 'fr' ? "Tous les runs de tes agents (skill + résultat), du plus récent au plus ancien." : "All your agents' runs, newest first."}
+            {lang === 'fr' ? "Tous les runs de vos agents (skill + résultat), du plus récent au plus ancien." : "All your agents' runs, newest first."}
           </p>
         </div>
         <div className="wizard-body">
@@ -4135,7 +4045,7 @@ function DocumentsPanel() {
     <div style={{ maxWidth: 720, marginTop: 34 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 12 }}>
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase' }}>
-          {lang === 'fr' ? 'Tes documents (utilisés dans les analyses)' : 'Your documents (used in analyses)'}
+          {lang === 'fr' ? 'Vos documents (utilisés dans les analyses)' : 'Your documents (used in analyses)'}
         </div>
         <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current && fileRef.current.click()} disabled={busy}>
           <Icon name="plus" size={13} />{busy ? (lang === 'fr' ? 'Envoi…' : 'Uploading…') : (lang === 'fr' ? 'Ajouter' : 'Add')}
@@ -4203,7 +4113,7 @@ function MemorySurface() {
       <div className="surface-head">
         <div>
           <h1>{t('memory.title')}</h1>
-          <p>{lang === 'fr' ? "Ce qu'Axial sait de ton entreprise — injecté dans chaque analyse." : 'What Axial knows about your company — injected into every analysis.'}</p>
+          <p>{lang === 'fr' ? "Ce qu'Axial sait de votre entreprise — injecté dans chaque analyse." : 'What Axial knows about your company — injected into every analysis.'}</p>
         </div>
         <TopControls />
       </div>
@@ -4287,7 +4197,7 @@ function CreditsSurface() {
       <div className="surface-head">
         <div>
           <h1>{t('credits.title')}</h1>
-          <p>{lang === 'fr' ? "Ton solde, ton abonnement et l'achat de crédits." : 'Your balance, subscription and credit purchases.'}</p>
+          <p>{lang === 'fr' ? "Votre solde, votre abonnement et l'achat de crédits." : 'Your balance, subscription and credit purchases.'}</p>
         </div>
         <TopControls />
       </div>
@@ -4561,7 +4471,7 @@ function IntegrationsSettings({ lang, t }) {
   const OUTILS = [
     { id: 'notion', nom: 'Notion', icone: 'file',
       quoi: lang === 'fr'
-        ? "Axial consulte ton espace pendant la rédaction d'un rapport, et peut y publier le résultat."
+        ? "Axial consulte votre espace pendant la rédaction d'un rapport, et peut y publier le résultat."
         : 'Axial reads your workspace while writing a report, and can publish results there.' },
     // Google Drive : le backend est prêt (OAuth + dépôt du PDF), mais l'outil
     // reste masqué tant que Miradie n'ouvre pas cette intégration.
@@ -4583,7 +4493,7 @@ function IntegrationsSettings({ lang, t }) {
     <>
       <h2>{t('settings.connections')}</h2>
       <p>{lang === 'fr'
-        ? 'Connecte tes outils : Axial peut y puiser du contexte et y livrer ses rapports.'
+        ? 'Connectez vos outils : Axial peut y puiser du contexte et y livrer ses rapports.'
         : 'Connect your tools: Axial can draw context from them and deliver reports there.'}</p>
 
       {OUTILS.map((o) => {
@@ -5439,34 +5349,10 @@ window.DocsSurface = DocsSurface;
 
 
 
-// ── useTweaks ───────────────────────────────────────────────────────────────
-// Single source of truth for tweak values. setTweak persists via the host
-// (__edit_mode_set_keys → host rewrites the EDITMODE block on disk).
-function useTweaks(defaults) {
-  const [values, setValues] = React.useState(defaults);
-  // Accepts either setTweak('key', value) or setTweak({ key: value, ... }) so a
-  // useState-style call doesn't write a "[object Object]" key into the persisted
-  // JSON block.
-  const setTweak = React.useCallback((keyOrEdits, val) => {
-    const edits = typeof keyOrEdits === 'object' && keyOrEdits !== null
-      ? keyOrEdits : { [keyOrEdits]: val };
-    setValues((prev) => ({ ...prev, ...edits }));
-    window.parent.postMessage({ type: '__edit_mode_set_keys', edits }, '*');
-  }, []);
-  return [values, setTweak];
-}
-
 /* app.jsx */
 /* app.jsx — main router for Axial Intelligence prototype */
 
 var { useState, useEffect, useMemo, useRef } = React;
-
-const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
-  "glowAmount": 1,
-  "streamingSpeed": 40,
-  "showChecklistStrip": true,
-  "primaryAccent": "#7976F7"
-}/*EDITMODE-END*/;
 
 /* Top-level routes:
    'landing' | 'auth' | 'onb1' | 'onb2' | 'onb3' | 'app'
@@ -5506,14 +5392,13 @@ function App() {
   const [onbCtx, setOnbCtx] = useState({});
   const [authMode, setAuthMode] = useState('signup');
 
-  // tweaks
-  const [tweaks, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  // tweaks (defaults inlined — the editing panel that used to write these is gone)
   useEffect(() => {
-    document.documentElement.style.setProperty('--glow-amount', tweaks.glowAmount);
-  }, [tweaks.glowAmount]);
+    document.documentElement.style.setProperty('--glow-amount', 1);
+  }, []);
   useEffect(() => {
-    document.documentElement.style.setProperty('--v-bright', tweaks.primaryAccent);
-  }, [tweaks.primaryAccent]);
+    document.documentElement.style.setProperty('--v-bright', '#7976F7');
+  }, []);
 
   // conversations state
   // Start empty — real conversations are created as the user chats (no mock seeds).
@@ -5916,7 +5801,7 @@ function App() {
             onSendNew={handleSendNew}
             onNewChat={() => { setActiveId(null); }}
             suggestedPrompts={suggested}
-            streamingSpeed={tweaks.streamingSpeed}
+            streamingSpeed={40}
             showCitePanelFor={showCitePanelFor}
             setShowCitePanelFor={setShowCitePanelFor}
           />
