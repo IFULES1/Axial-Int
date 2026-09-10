@@ -176,8 +176,7 @@ def couts_totaux(db, jours: int = 30) -> dict:
             SELECT count(*) AS lignes,
                    count(cout_micro_eur) AS mesurees,
                    COALESCE(sum(cout_micro_eur), 0) AS modele_micro,
-                   COALESCE(sum({'cout_recherche_micro_eur'
-                                 if table != 'messages' else '0'}), 0) AS recherche_micro
+                   COALESCE(sum(cout_recherche_micro_eur), 0) AS recherche_micro
             FROM {table}
             WHERE created_at > now() - make_interval(days => :j)
         """), {"j": jours}).mappings().first()

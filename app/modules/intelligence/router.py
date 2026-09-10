@@ -63,26 +63,22 @@ class MessageOut(BaseModel):
     created_at: dt.datetime
 
 
-class RouteIn(BaseModel):
-    query: str = Field(min_length=1)
-    agent: str | None = None
-
-
 # --- agents ----------------------------------------------------------------
 
 @router.get("/agents")
-def list_agents() -> dict:
+def list_agents(_: AuthUser = Depends(get_current_user)) -> dict:
+    """Liste des agents disponibles. Authentifié comme le reste : il n'existe
+    aucun usage anonyme de cette liste, et le frontend ne l'appelle que connecté.
+    """
     return {"agents": [
         {"key": p.key, "name": p.name, "framework": p.framework}
         for p in personas.list_personas()
     ]}
 
 
-@router.post("/agents/route")
-def route_query(payload: RouteIn, _: AuthUser = Depends(get_current_user)) -> dict:
-    agent_key, note = personas.route(payload.query, requested=payload.agent)
-    persona = personas.get_persona(agent_key)
-    return {"agent": agent_key, "name": persona.name if persona else None, "redirect_note": note}
+# `POST /agents/route` (prévisualisation du routage, sans effet de bord) est
+# supprimé : le frontend ne l'a jamais appelé et le badge d'agent porté par
+# chaque réponse dit déjà qui a répondu.
 
 
 # --- projects --------------------------------------------------------------

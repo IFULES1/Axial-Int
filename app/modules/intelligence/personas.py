@@ -155,11 +155,15 @@ _REGISTRY: dict[str, AgentPersona] = {
     AXIAL_CONSEIL.key: AXIAL_CONSEIL,
 }
 
-DEFAULT_AGENT = MARKET_SCANNER.key
-
 # Mode "conversation libre" : le sélecteur du Workspace envoie cette valeur pour
 # laisser Axial router lui-même vers le bon agent selon l'intention.
 AUTO = "auto"
+
+# Défaut = routage réel. Market Scanner par défaut faisait dérouler PESTEL sur
+# des questions de pricing ou de recrutement : le cadre était choisi avant la
+# question. En `auto`, `route()` lit l'intention et le généraliste répond quand
+# aucun spécialiste ne s'impose.
+DEFAULT_AGENT = AUTO
 
 
 def get_persona(key: str) -> AgentPersona | None:

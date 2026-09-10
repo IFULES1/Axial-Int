@@ -43,10 +43,17 @@ class Conversation(Base):
     )
     user_id: Mapped[uuid.UUID] = mapped_column(SAUuid, index=True, nullable=False)
     title: Mapped[str] = mapped_column(String(300), default="Nouvelle conversation")
-    default_agent: Mapped[str] = mapped_column(String(64), default="market_scanner")
+    # `auto` : le routeur réel choisit l'agent à chaque tour. Market Scanner
+    # imposé par défaut faisait répondre PESTEL à des questions de pricing.
+    default_agent: Mapped[str] = mapped_column(String(64), default="auto")
     message_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Résumé roulant du fil au-delà de 8 messages (mémoire de conversation).
+    resume: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
     last_message_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    # Rangement du panneau : épinglé remonte en tête, archivé sort de la liste.
+    pinned_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
 
     project: Mapped[Project] = relationship(back_populates="conversations")
     messages: Mapped[list[Message]] = relationship(
@@ -74,6 +81,16 @@ class Message(Base):
     tokens_sortie: Mapped[int | None] = mapped_column(Integer)
     cout_micro_eur: Mapped[int | None] = mapped_column(Integer)
     modele: Mapped[str | None] = mapped_column(String(64))
+    # Coût de recherche web du tour, séparé du coût modèle : autre cause
+    # (fournisseurs actifs × requêtes) et autre courbe de croissance.
+    cout_recherche_micro_eur: Mapped[int | None] = mapped_column(Integer)
+    appels_recherche: Mapped[int | None] = mapped_column(Integer)
+    # complet | partiel | degrade. `partiel` (arrêt utilisateur ou coupure
+    # après le premier token) et `degrade` ne sont pas facturés.
+    statut: Mapped[str] = mapped_column(String(16), default="complet")
+    # Clé fournie par le client (un uuid par envoi) : un rejeu renvoie le
+    # message déjà produit au lieu d'en générer — et de débiter — un second.
+    cle_idempotence: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")

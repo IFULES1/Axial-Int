@@ -59,11 +59,12 @@ def test_free_chat_tier_heuristic():
 
 def test_intelligence_routes_mounted():
     paths = client.get("/openapi.json").json()["paths"]
-    for p in ["/intelligence/agents", "/intelligence/agents/route",
-              "/intelligence/projects",
+    for p in ["/intelligence/agents", "/intelligence/projects",
               "/intelligence/conversations/{conversation_id}/messages"]:
         assert p in paths
-    assert client.get("/intelligence/agents").status_code == 200          # public
+    # La prévisualisation de routage est supprimée (jamais appelée par le front).
+    assert "/intelligence/agents/route" not in paths
+    assert client.get("/intelligence/agents").status_code in (401, 403)    # protected
     assert client.get("/intelligence/projects").status_code in (401, 403)  # protected
 
 

@@ -65,9 +65,34 @@ def _texte_blocs(jeton: str, page_id: str) -> str:
 
 # Corpus mis en cache par utilisateur : recharger l'espace à chaque message
 # coûterait plusieurs secondes de latence pour un contenu qui bouge peu.
+#
+# Cache PROCESSUS, pas cache partagé : la production tourne avec un seul worker
+# uvicorn, donc une seule copie. Le jour où l'on passe à plusieurs workers,
+# chacun aura le sien (au pire une page Notion vieille de 10 minutes de plus)
+# et ce commentaire devra être relu. Borné en taille : sans plafond, le
+# dictionnaire grossissait avec le nombre d'utilisateurs sans jamais rendre la
+# mémoire d'un compte inactif.
 _cache: dict[str, tuple[float, list]] = {}
-CACHE_SECONDES = 900
+CACHE_SECONDES = 600
+CACHE_ENTREES_MAX = 200
 PAGES_MAX = 12
+
+
+def _ranger_cache(user_id: str, corpus: list, maintenant: float) -> None:
+    """Enregistre le corpus et purge : d'abord les entrées périmées, puis les
+    plus anciennes si le plafond est encore dépassé."""
+    _cache[user_id] = (maintenant, corpus)
+    if len(_cache) <= CACHE_ENTREES_MAX:
+        return
+    for cle in [c for c, (t, _) in _cache.items()
+                if c != user_id and (maintenant - t) >= CACHE_SECONDES]:
+        _cache.pop(cle, None)
+    while len(_cache) > CACHE_ENTREES_MAX:
+        plus_vieux = min((c for c in _cache if c != user_id),
+                         key=lambda c: _cache[c][0], default=None)
+        if plus_vieux is None:
+            break
+        _cache.pop(plus_vieux, None)
 
 
 def passages(jeton: str, requete: str, limite: int = 4) -> list[PassageNotion]:
@@ -124,9 +149,10 @@ def passages_pour(db, user_id: str, requete: str, limite: int = 4) -> list[Passa
     if not jeton:
         return []
 
+    maintenant = time.time()
     frais = _cache.get(user_id)
-    if frais and (time.time() - frais[0]) < CACHE_SECONDES:
+    if frais and (maintenant - frais[0]) < CACHE_SECONDES:
         return frais[1]
     corpus = passages(jeton, requete, limite)
-    _cache[user_id] = (time.time(), corpus)
+    _ranger_cache(user_id, corpus, time.time())
     return corpus

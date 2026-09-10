@@ -59,7 +59,11 @@ def _own_project(db: Session, user_id: str, project_id: str) -> Project:
 def create_conversation(db: Session, user_id: str, project_id: str,
                         title: str | None, default_agent: str | None) -> Conversation:
     _own_project(db, user_id, project_id)
-    agent = default_agent if personas.get_persona(default_agent or "") else personas.DEFAULT_AGENT
+    # `auto` n'est pas une persona du registre mais reste un choix valide :
+    # c'est celui qui laisse le routeur décider à chaque tour.
+    demande = default_agent or ""
+    agent = demande if (demande == personas.AUTO or personas.get_persona(demande)) \
+        else personas.DEFAULT_AGENT
     conv = Conversation(
         id=uuid.uuid4(), project_id=uuid.UUID(project_id), user_id=uuid.UUID(user_id),
         title=title or "Nouvelle conversation", default_agent=agent,
@@ -178,9 +182,17 @@ class _Turn:
     tier: str
     max_tokens: int
     blocked_answer: str | None = None  # set when no LLM is available at all
+    # Coût de recherche du tour, mesuré pendant la préparation : c'est là que
+    # les fournisseurs sont interrogés, pas à l'archivage.
+    appels_recherche: int | None = None
+    cout_recherche_micro_eur: int | None = None
 
 
-TITRES_GENERIQUES = {"", "workspace", "nouvelle conversation", "conversation", "new conversation"}
+# Titres qu'un utilisateur n'a jamais choisis : le frontend les pose à la
+# création. Seule source du projet — `export.py` importe cette constante au
+# lieu d'en tenir une copie qui divergeait.
+TITRES_GENERIQUES = {"", "workspace", "nouvelle conversation", "conversation",
+                     "new conversation", "nouvelle analyse", "new analysis"}
 
 
 def titre_depuis(question: str, longueur: int = 80) -> str:
@@ -193,20 +205,51 @@ def titre_depuis(question: str, longueur: int = 80) -> str:
     return coupe + "…"
 
 
+def _appels(compteur: dict[str, int]) -> int | None:
+    """Nombre total d'appels de recherche, ou None si aucun (une conversation
+    triviale n'a rien cherché : un 0 la ferait passer pour mesurée à zéro)."""
+    return sum(compteur.values()) or None
+
+
+def _cout_recherche(compteur: dict[str, int]) -> int | None:
+    from app.modules.billing.couts import cout_recherche_micro_eur
+
+    return cout_recherche_micro_eur(compteur) or None
+
+
+def _recompter(db: Session, conv: Conversation) -> int:
+    """Recale `message_count` sur un COUNT(*) réel.
+
+    Le compteur était incrémenté de 2 par tour et jamais corrigé : une
+    suppression ou une édition de message le laissait faux, et c'est lui qui
+    décide du titre de la conversation et du déclenchement du résumé.
+    """
+    from sqlalchemy import func
+
+    n = db.scalar(select(func.count()).select_from(Message)
+                  .where(Message.conversation_id == conv.id)) or 0
+    conv.message_count = int(n)
+    return conv.message_count
+
+
 def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
                   agent_override: str | None, *, is_admin: bool,
                   document_ids: list[str] | None) -> _Turn:
     conv = _own_conversation(db, user_id, conversation_id)
     requested = agent_override or conv.default_agent
-    # Conversation libre : AUCUN routing d'agent — discussion directe avec le LLM
-    # (Gemini réponses courtes / Sonnet réponses longues). Les personas spécialisées
-    # ne s'appliquent que sur choix explicite de l'utilisateur.
+    # Le routeur réel décide dans TOUS les cas : en `auto` il lit l'intention,
+    # sur choix explicite il respecte la demande et se contente d'une note de
+    # redirection. Le court-circuit précédent envoyait toute conversation libre
+    # à Axial Conseil — Market Scanner et Competitor Radar n'étaient joignables
+    # que par le sélecteur, alors que le routage était la fonctionnalité.
+    agent_key, redirect_note = personas.route(content, requested=requested)
+    persona = personas.get_persona(agent_key) or personas.AXIAL_CONSEIL
     free_chat = requested == personas.AUTO
-    if free_chat:
-        agent_key, redirect_note = personas.AXIAL_CONSEIL.key, None
-    else:
-        agent_key, redirect_note = personas.route(content, requested=requested)
-    persona = personas.get_persona(agent_key) or personas.get_persona(personas.DEFAULT_AGENT)
+    # `free_chat` dit seulement que l'utilisateur n'a rien imposé. Le ton de
+    # conversation (pas de bloc « AXIAL Recommande », tier selon la longueur de
+    # la demande) ne vaut que si le routeur a retenu le généraliste : un
+    # spécialiste choisi par le routeur répond avec son cadre complet.
+    conversation_libre = free_chat and agent_key == personas.AXIAL_CONSEIL.key
 
     # Affordability check before spending the API call (admins bypass).
     from app.modules.billing import service as billing
@@ -237,7 +280,12 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
 
     # Vitesse : très courts messages en conversation libre (« merci », « ok »)
     # → pas de recherche du tout, réponse immédiate du LLM.
-    trivial = free_chat and len(content.strip()) < 25 and not attached_context
+    trivial = conversation_libre and len(content.strip()) < 25 and not attached_context
+
+    # Rempli par l'orchestrateur, un compte par fournisseur interrogé : le coût
+    # de recherche d'une conversation n'apparaît sur aucune facture ventilée,
+    # il faut le compter à la source (même mécanique que `analysis`).
+    appels_recherche: dict[str, int] = {}
 
     if trivial:
         doc_passages, web_results = [], []
@@ -247,7 +295,8 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
 
         with ThreadPoolExecutor(max_workers=2) as ex:
             f_docs = ex.submit(_retrieve_context, content, user_id)
-            f_web = ex.submit(web_search.search, content, 6)
+            f_web = ex.submit(web_search.search, content, 6,
+                              compteur=appels_recherche)
             try:
                 web_results = f_web.result()
             except Exception as e:
@@ -285,14 +334,16 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
                      system="", prompt=prompt, citations=citations, tier="chat",
                      max_tokens=0,
                      blocked_answer=("⚠️ Aucun moteur de génération n'est disponible "
-                                     "pour le moment. Réessayez plus tard."))
+                                     "pour le moment. Réessayez plus tard."),
+                     appels_recherche=_appels(appels_recherche),
+                     cout_recherche_micro_eur=_cout_recherche(appels_recherche))
 
-    # Conversation libre = discussion naturelle (pas de bloc « AXIAL Recommande »
-    # imposé) ; agents spécialisés = persona complète avec cadre d'analyse.
-    # Conversation libre : pas de cadre ni de bloc « AXIAL Recommande », mais
-    # la consigne de visualisation, elle, vaut pour tous les chemins.
+    # Conversation avec le généraliste = échange naturel : ni cadre d'analyse
+    # ni bloc « AXIAL Recommande » imposé. Agent spécialisé (choisi par
+    # l'utilisateur OU retenu par le routeur) = persona complète. La consigne
+    # de visualisation, elle, vaut pour tous les chemins.
     system = (persona.system_prompt + personas.VIZ_INSTRUCTION
-              + personas.REGISTRE_INSTRUCTION) if free_chat \
+              + personas.REGISTRE_INSTRUCTION) if conversation_libre \
         else persona.full_system_prompt()
     # Rendre la mémoire PERCEPTIBLE : quand un contexte entreprise existe,
     # la réponse doit s'y ancrer explicitement (jamais un acteur générique).
@@ -310,7 +361,7 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
         )
     # Conversation libre : Gemini (chat) pour le court, Sonnet (report) pour le
     # long. Agents spécialisés : tier chat (comportement historique).
-    tier = "report" if (free_chat and _wants_long_answer(content)) else "chat"
+    tier = "report" if (conversation_libre and _wants_long_answer(content)) else "chat"
 
     # La langue de la QUESTION commande celle de la réponse : quelqu'un qui écrit
     # en anglais dans une interface française n'a pas à changer un réglage.
@@ -332,7 +383,9 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
                  system=system, prompt=prompt, citations=citations, tier=tier,
                  # 2500 pouvaient être entièrement absorbés par la réflexion
                  # adaptative du modèle, ne laissant rien pour la réponse.
-                 max_tokens=16000 if tier == "report" else 8000)
+                 max_tokens=16000 if tier == "report" else 8000,
+                 appels_recherche=_appels(appels_recherche),
+                 cout_recherche_micro_eur=_cout_recherche(appels_recherche))
 
 
 def _finalize_turn(db: Session, user_id: str, turn: _Turn, answer: str, *,
@@ -364,7 +417,10 @@ def _finalize_turn(db: Session, user_id: str, turn: _Turn, answer: str, *,
                             tokens_sortie=sortie or None,
                             modele=modele,
                             cout_micro_eur=(cout_micro_eur(modele, entree, sortie)
-                                            if modele else None) or None)
+                                            if modele else None) or None,
+                            appels_recherche=turn.appels_recherche,
+                            cout_recherche_micro_eur=turn.cout_recherche_micro_eur,
+                            statut="degrade" if degraded else "complet")
     db.add(assistant_msg)
 
     turn.conv.message_count += 2

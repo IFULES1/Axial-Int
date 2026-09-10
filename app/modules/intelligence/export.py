@@ -9,17 +9,15 @@ import datetime as dt
 
 from sqlalchemy import text
 
+from app.modules.intelligence.service import TITRES_GENERIQUES
+
 _ROLES = {"user": "Question", "assistant": "Axial"}
-
-
-_TITRES_PAR_DEFAUT = {"workspace", "conversation", "nouvelle conversation",
-                      "new conversation", "nouvelle analyse", "new analysis", ""}
 
 
 def _titre_utile(titre: str | None, messages) -> str:
     """Titre stocké s'il est parlant, sinon la première question posée."""
     t = (titre or "").strip()
-    if t.lower() not in _TITRES_PAR_DEFAUT:
+    if t.lower() not in TITRES_GENERIQUES:
         return t
     for m in messages:
         if m["role"] == "user" and (m["content"] or "").strip():
