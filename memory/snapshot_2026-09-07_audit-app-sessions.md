@@ -144,7 +144,15 @@ d'adresse du compte admin, écran carte), reprise le 07/09.
 - ⏳ **Prompt (règle 7, synthèse exécutive en tête)** : commité localement
   (`6a4870c`), **NON déployé** — diff à valider par Miradie avant tout scp de
   `app/modules/analysis/prompts.py`.
-- 101 tests verts en local, 97 sur le serveur (un test local absent du VPS).
+- ✓ **Règles 5 et 7 déployées (10/09 soir)** : chiffres → tableau ; graphique
+  = choix du modèle via la ligne « Graphique : <titre> » devant un tableau à
+  deux colonnes (le PDF le trace à la place du tableau, valeurs sur les barres ;
+  repli en tableau si unités mélangées). Plus aucun graphique automatique.
+- ✓ **Rapport de contrôle réel** (`da06223b`, compte de contrôle, 40 crédits) :
+  synthèse exécutive en tête, 6 877 mots, 40 sources, 2 graphiques choisis
+  par le modèle (répartition des ETI, TAM/SAM/SOM), 13 pages, 103 liens.
+  Réserve : libellés longs tronqués à 22 caractères sur l'axe des graphiques.
+- 107 tests verts en local, 105 sur le serveur.
 
 ## Décisions techniques prises
 
