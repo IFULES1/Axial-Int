@@ -43,3 +43,21 @@ def test_un_tableau_textuel_ne_donne_pas_de_graphique():
 
     c = [["Acteur", "Positionnement"], ["Alpha", "Premium"], ["Beta", "Low cost"]]
     assert serie_numerique(c) is None
+
+
+def test_une_ligne_graphique_devant_un_tableau_donne_un_bloc_graphique():
+    md = "Graphique : Parts de marché 2026\n| Acteur | Part |\n|---|---|\n| Alpha | 40 % |\n| Beta | 25 % |"
+    blocs = decouper(md)
+    assert [b.genre for b in blocs] == ["graphique"]
+    assert blocs[0].texte == "Parts de marché 2026"
+    assert blocs[0].cellules[1] == ["Alpha", "40 %"]
+
+
+def test_la_ligne_graphique_sans_tableau_reste_un_paragraphe():
+    blocs = decouper("Graphique : sans données\nUn paragraphe.")
+    assert [b.genre for b in blocs] == ["p", "p"]
+
+
+def test_un_tableau_sans_la_ligne_reste_un_tableau():
+    md = "| Acteur | Part |\n|---|---|\n| Alpha | 40 % |\n| Beta | 25 % |"
+    assert decouper(md)[0].genre == "tableau"

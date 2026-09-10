@@ -112,24 +112,31 @@ def render_pdf(title: str, markdown: str, sources: list[dict] | None = None) -> 
         ]))
         return t
 
-    def graphique(etiquettes, valeurs, unite):
-        # Barres sous le tableau, jamais à sa place : le graphique illustre
-        # des chiffres qui restent lisibles en clair juste au-dessus.
+    def graphique(etiquettes, valeurs, unite, titre=""):
+        # Le graphique remplace le tableau : chaque barre porte donc sa valeur
+        # en clair, pour que rien ne se perde par rapport aux chiffres.
         from reportlab.graphics.charts.barcharts import VerticalBarChart
         from reportlab.graphics.shapes import Drawing, String
 
-        d = Drawing(A4[0] - 4 * cm, 150)
+        d = Drawing(A4[0] - 4 * cm, 190)
         bc = VerticalBarChart()
-        bc.x, bc.y, bc.width, bc.height = 30, 25, d.width - 40, 100
+        bc.x, bc.y, bc.width, bc.height = 30, 30, d.width - 40, 115
         bc.data = [valeurs]
-        bc.categoryAxis.categoryNames = [e[:18] for e in etiquettes]
+        bc.categoryAxis.categoryNames = [e[:22] for e in etiquettes]
         bc.categoryAxis.labels.fontSize = 7
+        bc.categoryAxis.labels.angle = 0 if len(etiquettes) <= 6 else 20
         bc.valueAxis.labels.fontSize = 7
         bc.valueAxis.valueMin = 0
         bc.bars[0].fillColor = colors.HexColor("#7976F7")
+        bc.barLabelFormat = (lambda v: f"{v:g} {unite}".strip())
+        bc.barLabels.fontSize = 7
+        bc.barLabels.nudge = 6
         d.add(bc)
+        if titre:
+            d.add(String(0, 172, titre[:90], fontSize=9, fontName="Helvetica-Bold",
+                         fillColor=colors.HexColor("#222222")))
         if unite:
-            d.add(String(0, 135, unite, fontSize=8, fillColor=colors.HexColor("#555555")))
+            d.add(String(d.width - 30, 172, unite, fontSize=8, fillColor=colors.HexColor("#555555")))
         return d
 
     # Les [N] ne deviennent des liens que si une section Sources existe pour
@@ -161,9 +168,17 @@ def render_pdf(title: str, markdown: str, sources: list[dict] | None = None) -> 
                 bulletType="bullet", start="•"))
         elif b.genre == "tableau":
             story.append(tableau(b.cellules, liens))
+            story.append(Spacer(1, 8))
+        elif b.genre == "graphique":
+            # Le modèle a demandé un graphique. On ne le trace que si les
+            # données s'y prêtent (deux colonnes, une unité) ; sinon le tableau
+            # reste, avec son titre — mieux qu'un graphique faux.
             serie = serie_numerique(b.cellules)
             if serie and len(serie[0]) <= 12:
-                story.append(graphique(*serie))
+                story.append(graphique(*serie, titre=b.texte))
+            else:
+                story.append(Paragraph(_inline(b.texte, liens), h3))
+                story.append(tableau(b.cellules, liens))
             story.append(Spacer(1, 8))
         elif b.genre == "hr":
             story.append(Spacer(1, 10))

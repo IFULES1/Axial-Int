@@ -44,7 +44,20 @@ STYLE DE RÉDACTION (OBLIGATOIRE)
    bullet points pour les données factuelles. Jamais une section 100 % bullets.
    Viser 60-70 % de narration analytique fluide, 30-40 % de listes.
 4. Phrases complètes, ton professionnel et accessible, transitions entre sections.
-5. Tableaux markdown uniquement s'ils apportent une donnée clé (1-3 maximum).
+5. Toute partie chiffrée passe par un tableau markdown : TAM / SAM / SOM,
+   parts de marché, prévisions, comparatifs de concurrents, coûts. Un chiffre
+   dans un tableau est toujours plus parlant que dans une phrase. Format :
+   première colonne = libellé, colonnes suivantes = valeurs avec une seule
+   unité par colonne (« 40 % », « 3,2 Md€ »), 3 à 8 lignes. Pas de tableau
+   pour du texte qualitatif.
+   Choisir la forme la plus parlante : quand une COMPARAISON ou une
+   RÉPARTITION se lit d'un coup d'œil (parts de marché, TAM/SAM/SOM,
+   évolution sur 3 à 8 périodes, classement de concurrents sur un critère),
+   écrire la ligne « Graphique : <titre court> » seule, juste au-dessus du
+   tableau à deux colonnes (libellé, valeur d'une seule unité) : le document
+   final affiche alors un graphique à sa place. Quand les valeurs demandent
+   plusieurs colonnes ou une lecture précise ligne à ligne, garder le tableau
+   sans cette ligne. Jamais les deux pour la même donnée.
 6. Section finale : « ## Sources » — JAMAIS « Références Bibliographiques » ni
    « Bibliographie ».
 7. Le rapport s'ouvre par « ## Synthèse exécutive » (« ## Executive summary »

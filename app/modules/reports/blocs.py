@@ -9,6 +9,8 @@ import re
 from dataclasses import dataclass, field
 
 _SEPARATEUR = re.compile(r"^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$")
+# « Graphique : Parts de marché 2026 » / « Chart: Market share » — gras toléré.
+_GRAPHIQUE = re.compile(r"^\s*\**\s*(?:graphique|chart)\s*:\s*(.+?)\s*\**\s*$", re.IGNORECASE)
 
 
 @dataclass
@@ -45,6 +47,24 @@ def decouper(markdown: str) -> list[Bloc]:
             vider_puces()
             i += 1
             continue
+        # « Graphique : <titre> » seul sur sa ligne, immédiatement suivi d'un
+        # tableau : le modèle a jugé qu'un graphique parle mieux. Le bloc porte
+        # le titre et les cellules ; le rendu décide de la forme finale.
+        m_graph = _GRAPHIQUE.match(ligne)
+        if m_graph:
+            j = i + 1
+            while j < len(lignes) and not lignes[j].strip():
+                j += 1
+            if j + 1 < len(lignes) and lignes[j].lstrip().startswith("|") \
+                    and _SEPARATEUR.match(lignes[j + 1].strip()):
+                vider_puces()
+                cellules = [_cellules(lignes[j])]
+                i = j + 2
+                while i < len(lignes) and lignes[i].lstrip().startswith("|"):
+                    cellules.append(_cellules(lignes[i]))
+                    i += 1
+                blocs.append(Bloc("graphique", texte=m_graph.group(1).strip(), cellules=cellules))
+                continue
         # Tableau : une ligne « | … | » suivie d'une ligne de séparation.
         if ligne.lstrip().startswith("|") and i + 1 < len(lignes) \
                 and _SEPARATEUR.match(lignes[i + 1].strip()):

@@ -54,3 +54,23 @@ def test_sans_sources_fournies_la_section_du_modele_est_conservee():
     md = "## 1. Marché\nUn chiffre [1].\n\n## Sources\n1. Truc texte du modèle"
     t = _texte(render_pdf("T", md))
     assert "Truc texte du modèle" in t
+
+
+
+def test_un_tableau_marque_graphique_est_trace_et_le_tableau_disparait():
+    md = "Graphique : Parts de marché 2026\n| Acteur | Part |\n|---|---|\n| Alpha | 40 % |\n| Beta | 25 % |\n| Gamma | 15 % |"
+    t = _texte(render_pdf("T", md))
+    assert "Parts de marché 2026" in t          # le titre du graphique est là
+    assert "Acteur" not in t                    # l'en-tête du tableau n'est plus rendu
+
+
+def test_un_tableau_sans_marque_reste_un_tableau_sans_graphique():
+    md = "| Acteur | Part |\n|---|---|\n| Alpha | 40 % |\n| Beta | 25 % |\n| Gamma | 15 % |"
+    t = _texte(render_pdf("T", md))
+    assert "Acteur" in t and "Gamma" in t
+
+
+def test_une_marque_graphique_sur_des_donnees_heterogenes_garde_le_tableau():
+    md = "Graphique : Tailles\n| Pays | Taille |\n|---|---|\n| FR | 3 Md€ |\n| DE | 40 % |\n| IT | 2 Md€ |"
+    t = _texte(render_pdf("T", md))
+    assert "Tailles" in t and "Pays" in t and "3 Md€" in t
