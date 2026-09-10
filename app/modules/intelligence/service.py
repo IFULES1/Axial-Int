@@ -283,7 +283,10 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
 
     # Conversation libre = discussion naturelle (pas de bloc « AXIAL Recommande »
     # imposé) ; agents spécialisés = persona complète avec cadre d'analyse.
-    system = persona.system_prompt if free_chat else persona.full_system_prompt()
+    # Conversation libre : pas de cadre ni de bloc « AXIAL Recommande », mais
+    # la consigne de visualisation, elle, vaut pour tous les chemins.
+    system = (persona.system_prompt + personas.VIZ_INSTRUCTION) if free_chat \
+        else persona.full_system_prompt()
     # Rendre la mémoire PERCEPTIBLE : quand un contexte entreprise existe,
     # la réponse doit s'y ancrer explicitement (jamais un acteur générique).
     if company_context:

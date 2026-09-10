@@ -21,6 +21,13 @@ AXIAL_RECOMMENDE_INSTRUCTION = (
     "'**AXIAL Recommends**' si tu réponds en anglais. 2-3 phrases qui ne se "
     "contentent pas de rapporter les signaux, mais disent explicitement quoi en "
     "faire — quel mouvement de positionnement, quoi surveiller, quoi éviter."
+)
+
+# Consigne de visualisation — la même pour la conversation libre, les
+# spécialistes et la veille. Constante à part parce que la conversation libre
+# n'emploie PAS le bloc « AXIAL Recommande » : accrochée là, elle n'y arrivait
+# jamais (constaté le 11/09 : question comparative, tableau, zéro graphique).
+VIZ_INSTRUCTION = (
     "\n\nVISUALISATION : uniquement si ta réponse compare, classe, répartit ou "
     "fait évoluer des chiffres (parts, TAM/SAM/SOM, croissance sur plusieurs "
     "périodes, classement d'acteurs), ajoute UN bloc ```viz au format JSON "
@@ -29,8 +36,9 @@ AXIAL_RECOMMENDE_INSTRUCTION = (
     'positionnement>","title":"<titre court>","subtitle":"<insight en une '
     'phrase>","unit":"<% | M€ | Md€ | k | vide>","series":[{"label":"…",'
     '"value":<nombre nu>}],"sources":[<N>]} — 2 à 12 points, une seule unité, '
-    "les mêmes chiffres cités dans le texte. Sinon, aucun bloc : pas de "
-    "graphique pour du conseil qualitatif."
+    "les mêmes chiffres cités dans le texte. Un tableau reste un tableau quand "
+    "plusieurs colonnes sont nécessaires ; jamais les deux pour la même donnée. "
+    "Sinon, aucun bloc : pas de graphique pour du conseil qualitatif."
 )
 
 # Socle commun V4 (porté de l'ancienne plateforme) : rigueur, style, sources.
@@ -61,7 +69,7 @@ class AgentPersona:
     redirect_hint: str = ""
 
     def full_system_prompt(self) -> str:
-        return self.system_prompt + AXIAL_SHARED_RULES + AXIAL_RECOMMENDE_INSTRUCTION
+        return self.system_prompt + AXIAL_SHARED_RULES + AXIAL_RECOMMENDE_INSTRUCTION + VIZ_INSTRUCTION
 
 
 MARKET_SCANNER = AgentPersona(

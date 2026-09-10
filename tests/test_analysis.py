@@ -71,4 +71,10 @@ def test_le_style_demande_un_bloc_viz_et_plus_la_marque_graphique():
 def test_les_personas_de_chat_connaissent_le_bloc_viz():
     from app.modules.intelligence import personas
 
-    assert "```viz" in personas.AXIAL_RECOMMENDE_INSTRUCTION
+    assert "```viz" in personas.VIZ_INSTRUCTION
+    assert "```viz" not in personas.AXIAL_RECOMMENDE_INSTRUCTION
+    # La consigne doit atteindre les trois chemins : spécialistes, chat libre, veille.
+    assert "```viz" in personas.MARKET_SCANNER.full_system_prompt()
+    from app.modules.watches import engine
+
+    assert engine.VIZ_INSTRUCTION is personas.VIZ_INSTRUCTION

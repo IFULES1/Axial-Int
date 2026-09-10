@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 
+from app.modules.intelligence.personas import VIZ_INSTRUCTION
 from app.modules.watches.skills import VeilleSkill
 
 logger = logging.getLogger("axial.watches.engine")
@@ -117,7 +118,7 @@ def generate_veille(*, skill: VeilleSkill, subject: str, rolling_state: str | No
     from app.shared import langue as lg
 
     # Pas de question posée ici : c'est la langue du SUJET surveillé qui décide.
-    result = llm_client.generate(system=skill.system_prompt + lg.consigne_miroir(),
+    result = llm_client.generate(system=skill.system_prompt + lg.consigne_miroir() + VIZ_INSTRUCTION,
                                  prompt=prompt, tier="report", max_tokens=6000)
     parsed = _parse(result.text)
     # Robustness: never let a run land with an empty full report. On the first
