@@ -14,6 +14,25 @@ from fastapi.responses import JSONResponse
 logger = logging.getLogger("axial")
 
 
+def _email_utilisateur_courant(request: Request) -> str | None:
+    """Lit l'email du jeton porté par la requête, sans jamais lever.
+
+    Le jeton lui-même n'est jamais inclus dans la notification — seul l'email
+    qu'il porte, s'il est valide et lisible.
+    """
+    try:
+        entete = request.headers.get("authorization", "")
+        if not entete.lower().startswith("bearer "):
+            return None
+        from app.modules.auth.security import decode_token
+
+        claims = decode_token(entete[7:].strip())
+        user_md = claims.get("user_metadata") or {}
+        return claims.get("email") or user_md.get("email")
+    except Exception:  # noqa: BLE001
+        return None
+
+
 class AppError(Exception):
     """Expected, user-facing error. Carries an HTTP status and safe message."""
 
@@ -36,6 +55,17 @@ def install_error_handlers(app: FastAPI) -> None:
     async def _handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
         # Log the full traceback server-side; return an opaque message to clients.
         logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+        from app.shared.notifier import notifier_erreur
+
+        notifier_erreur(
+            titre="Erreur backend non gérée",
+            route=request.url.path,
+            methode=request.method,
+            user_email=_email_utilisateur_courant(request),
+            exc=exc,
+            action="Consulter les logs serveur pour la trace complète et "
+                   "identifier la route en cause.",
+        )
         return JSONResponse(
             status_code=500,
             content={"error": {"code": "internal_error", "message": "Erreur interne."}},

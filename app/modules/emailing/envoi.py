@@ -84,6 +84,40 @@ def en_html(texte: str, jeton: str, langue: str = "fr") -> str:
             + pixel + "</div>")
 
 
+def envoyer_brut(destinataire: str, sujet: str, texte: str, *,
+                  html: str | None = None) -> tuple[bool, str]:
+    """Envoi bas niveau via Resend, sans liste de suppression ni journal de
+    campagne : pour les emails techniques (notification d'erreur backend,
+    par exemple) qui n'ont ni jeton de désinscription ni suivi de doublon
+    par campagne. Retourne (envoyé, motif/identifiant)."""
+    destinataire = destinataire.lower().strip()
+    cle = get_settings().resend_api_key
+    if not cle:
+        return False, "RESEND_API_KEY absente"
+
+    payload = {"from": EXPEDITEUR, "to": [destinataire], "subject": sujet,
+               "text": texte, "reply_to": REPONSE_A}
+    if html is not None:
+        payload["html"] = html
+
+    try:
+        r = httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {cle}", "Content-Type": "application/json"},
+            json=payload,
+            timeout=30.0,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Envoi brut vers %s échoué : %s", destinataire, e)
+        return False, f"erreur réseau : {e}"
+
+    if r.status_code >= 300:
+        logger.warning("Resend a refusé l'envoi brut (%s) : %s", r.status_code, r.text[:200])
+        return False, f"HTTP {r.status_code} : {r.text[:120]}"
+
+    return True, (r.json().get("id") or "")
+
+
 def envoyer(db: Session, email: str, campagne: str, sujet: str, texte: str,
             langue: str = "fr", simulation: bool = True) -> tuple[bool, str]:
     """Envoie un email de séquence. Retourne (envoyé, motif/identifiant)."""
@@ -95,8 +129,7 @@ def envoyer(db: Session, email: str, campagne: str, sujet: str, texte: str,
     if simulation:
         return False, "simulation"
 
-    cle = get_settings().resend_api_key
-    if not cle:
+    if not get_settings().resend_api_key:
         return False, "RESEND_API_KEY absente"
 
     # Le jeton est posé AVANT l'appel réseau : si Resend répond mal ou que le
@@ -104,26 +137,13 @@ def envoyer(db: Session, email: str, campagne: str, sujet: str, texte: str,
     # même personne. Un email manquant est un incident tolérable ; un doublon
     # chez un utilisateur qui hésite déjà ne l'est pas.
     jeton = _jeton(db, email, campagne)
-    try:
-        r = httpx.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {cle}", "Content-Type": "application/json"},
-            json={"from": EXPEDITEUR, "to": [email], "subject": sujet,
-                  "text": texte, "html": en_html(texte, jeton, langue),
-                  "reply_to": REPONSE_A},
-            timeout=30.0,
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Envoi %s vers %s échoué : %s", campagne, email, e)
-        return False, f"erreur réseau : {e}"
-
-    if r.status_code >= 300:
-        logger.warning("Resend a refusé %s (%s) : %s", campagne, r.status_code, r.text[:200])
-        return False, f"HTTP {r.status_code} : {r.text[:120]}"
+    envoye, motif = envoyer_brut(email, sujet, texte, html=en_html(texte, jeton, langue))
+    if not envoye:
+        return False, motif
 
     ligne = db.scalar(select(EmailSend).where(EmailSend.token == jeton))
     if ligne is not None:
-        ligne.provider_id = (r.json().get("id") or "")[:64]
+        ligne.provider_id = motif[:64]
         ligne.sent_at = dt.datetime.now(dt.timezone.utc)
         db.commit()
     return True, ligne.provider_id if ligne else "envoyé"

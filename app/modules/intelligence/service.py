@@ -21,6 +21,7 @@ from app.errors import AppError
 from app.modules.intelligence import personas
 from app.modules.intelligence.models import Conversation, Message, Project
 from app.shared import llm_client
+from app.shared.notifier import notifier_erreur
 
 logger = logging.getLogger("axial.intelligence")
 
@@ -1168,6 +1169,13 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
         answer, statut = result.text, "complet"
     except Exception as e:
         logger.warning("Agent generation failed: %s", e)
+        notifier_erreur(
+            titre="Génération LLM échouée (post_message)",
+            route="intelligence.post_message", methode="POST",
+            user_email=user_id, exc=e,
+            action="Vérifier le fournisseur LLM (clés, quotas) puis relancer "
+                   "la question de l'utilisateur",
+        )
         answer = "⚠️ La génération a échoué. Réessayez dans un instant."
         statut = "degrade"
     msg = _finalize_turn(db, user_id, turn, answer, is_admin=is_admin,
@@ -1402,6 +1410,13 @@ def _stream_message(db: Session, user_id: str, conversation_id: str, content: st
         raise
     except Exception as e:
         logger.warning("Agent stream failed: %s", e)
+        notifier_erreur(
+            titre="Flux LLM coupé (stream_message)",
+            route="intelligence.stream_message", methode="POST",
+            user_email=user_id, exc=e,
+            action="Vérifier le fournisseur LLM (clés, quotas) puis relancer "
+                   "la question de l'utilisateur",
+        )
         # Même raison que ci-dessus : l'erreur peut venir d'ailleurs que du
         # fournisseur (un `yield` refusé, par exemple) et laisser son flux
         # ouvert, donc sa mesure non cumulée.

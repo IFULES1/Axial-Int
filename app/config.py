@@ -149,6 +149,12 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_from: str = "noreply@axial.com"
 
+    # --- Notification d'erreur backend -------------------------------------
+    # Désactivable en environnement de test (fixture) pour qu'aucun test ne
+    # déclenche un envoi réel.
+    erreurs_notif_actives: bool = True
+    erreurs_notif_destinataire: str = "miradie.buranturu@axial-ia.fr"
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.allowed_origins.split(",") if o.strip()]
