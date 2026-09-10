@@ -58,4 +58,5 @@ def export_pdf(db: Session, user_id: str, report_id: str) -> bytes:
     # `sources` est un JSON : liste de citations, ou parfois un scalaire sur
     # d'anciens rapports restaurés — dans ce cas, pas de section Sources.
     sources = report.sources if isinstance(report.sources, list) else None
-    return render_pdf(report.title, report.content, sources=sources)
+    vizs = report.viz if isinstance(report.viz, list) else None
+    return render_pdf(report.title, report.content, sources=sources, vizs=vizs)

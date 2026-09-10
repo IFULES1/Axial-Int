@@ -70,16 +70,22 @@ def _inline(text: str, liens: bool = False) -> str:
     return text
 
 
-def render_pdf(title: str, markdown: str, sources: list[dict] | None = None) -> bytes:
+def render_pdf(title: str, markdown: str, sources: list[dict] | None = None,
+               vizs: list[dict] | None = None) -> bytes:
+    """`vizs` : visualisations préparées à l'archivage (forme `viz.pipeline.Viz`,
+    indexées par `index`). Absentes — rapport d'avant la V1 —, elles sont
+    compilées à la volée : même moteur, même rendu."""
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_LEFT
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import cm
-    from reportlab.platypus import (ListFlowable, ListItem, Paragraph, SimpleDocTemplate,
-                                    Spacer, Table, TableStyle)
+    from reportlab.platypus import (Image, KeepTogether, ListFlowable, ListItem, Paragraph,
+                                    SimpleDocTemplate, Spacer, Table, TableStyle)
 
-    from app.modules.reports.blocs import decouper, serie_numerique
+    from app.modules.reports.blocs import decouper
+    from app.modules.viz import pipeline as viz_pipeline
+    from app.modules.viz.render import vers_png
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=2 * cm, bottomMargin=2 * cm,
@@ -91,6 +97,7 @@ def render_pdf(title: str, markdown: str, sources: list[dict] | None = None) -> 
     body = ParagraphStyle("Body", parent=styles["BodyText"], fontSize=10.5, leading=15,
                           alignment=TA_LEFT, spaceAfter=6)
     cellule = ParagraphStyle("Cellule", parent=body, fontSize=9, leading=12, spaceAfter=0)
+    petit = ParagraphStyle("Src", parent=body, fontSize=9, leading=12, spaceAfter=3)
 
     story: list = [Paragraph(_inline(title), h1), Spacer(1, 6)]
 
@@ -112,32 +119,24 @@ def render_pdf(title: str, markdown: str, sources: list[dict] | None = None) -> 
         ]))
         return t
 
-    def graphique(etiquettes, valeurs, unite, titre=""):
-        # Le graphique remplace le tableau : chaque barre porte donc sa valeur
-        # en clair, pour que rien ne se perde par rapport aux chiffres.
-        from reportlab.graphics.charts.barcharts import VerticalBarChart
-        from reportlab.graphics.shapes import Drawing, String
+    # Visualisations : celles préparées à l'archivage, sinon compilées ici.
+    # `par_index` relie chaque bloc du markdown (```viz ou « Graphique : »)
+    # à son rendu par rang d'apparition.
+    par_index = {v["index"]: v for v in (vizs or []) if isinstance(v, dict)}
+    if not par_index:
+        par_index = {v.index: v.dict() for v in viz_pipeline.extraire_et_compiler(markdown)}
 
-        d = Drawing(A4[0] - 4 * cm, 190)
-        bc = VerticalBarChart()
-        bc.x, bc.y, bc.width, bc.height = 30, 30, d.width - 40, 115
-        bc.data = [valeurs]
-        bc.categoryAxis.categoryNames = [e[:22] for e in etiquettes]
-        bc.categoryAxis.labels.fontSize = 7
-        bc.categoryAxis.labels.angle = 0 if len(etiquettes) <= 6 else 20
-        bc.valueAxis.labels.fontSize = 7
-        bc.valueAxis.valueMin = 0
-        bc.bars[0].fillColor = colors.HexColor("#7976F7")
-        bc.barLabelFormat = (lambda v: f"{v:g} {unite}".strip())
-        bc.barLabels.fontSize = 7
-        bc.barLabels.nudge = 6
-        d.add(bc)
-        if titre:
-            d.add(String(0, 172, titre[:90], fontSize=9, fontName="Helvetica-Bold",
-                         fillColor=colors.HexColor("#222222")))
-        if unite:
-            d.add(String(d.width - 30, 172, unite, fontSize=8, fillColor=colors.HexColor("#555555")))
-        return d
+    def figure(v: dict) -> list:
+        """Image du graphique + ligne de source, insécables."""
+        largeur = A4[0] - 4 * cm
+        hauteur = largeur * (v["vl"].get("height", 220) + 60) / (v["vl"].get("width", 520) + 20)
+        img = Image(io.BytesIO(vers_png(v["vl"])), width=largeur, height=hauteur)
+        elements: list = [img]
+        refs = (v.get("spec") or {}).get("sources") or []
+        if refs and liens:
+            elements.append(Paragraph("Source : " + ", ".join(
+                f'<a href="#src-{n}" color="#7976F7">[{n}]</a>' for n in refs), petit))
+        return elements
 
     # Les [N] ne deviennent des liens que si une section Sources existe pour
     # les recevoir : un lien vers une ancre absente est pire qu'un [N] inerte.
@@ -169,16 +168,16 @@ def render_pdf(title: str, markdown: str, sources: list[dict] | None = None) -> 
         elif b.genre == "tableau":
             story.append(tableau(b.cellules, liens))
             story.append(Spacer(1, 8))
-        elif b.genre == "graphique":
-            # Le modèle a demandé un graphique. On ne le trace que si les
-            # données s'y prêtent (deux colonnes, une unité) ; sinon le tableau
-            # reste, avec son titre — mieux qu'un graphique faux.
-            serie = serie_numerique(b.cellules)
-            if serie and len(serie[0]) <= 12:
-                story.append(graphique(*serie, titre=b.texte))
+        elif b.genre in ("viz", "graphique"):
+            v = par_index.get(b.index)
+            if v and v.get("vl"):
+                story.append(KeepTogether(figure(v)))
             else:
-                story.append(Paragraph(_inline(b.texte, liens), h3))
-                story.append(tableau(b.cellules, liens))
+                # Pas de graphique rendu : les données restent, en tableau.
+                if b.genre == "graphique" and b.texte:
+                    story.append(Paragraph(_inline(b.texte, liens), h3))
+                cellules = viz_pipeline.tableau_de_repli(v["spec"]) if v else (b.cellules or [["—"]])
+                story.append(tableau(cellules, liens))
             story.append(Spacer(1, 8))
         elif b.genre == "hr":
             story.append(Spacer(1, 10))
@@ -188,7 +187,6 @@ def render_pdf(title: str, markdown: str, sources: list[dict] | None = None) -> 
     if sources:
         story.append(Spacer(1, 14))
         story.append(Paragraph("Sources", h2))
-        petit = ParagraphStyle("Src", parent=body, fontSize=9, leading=12, spaceAfter=3)
         for n, s in enumerate(sources, start=1):
             titre = html.escape((s.get("title") or s.get("domain") or "Source").strip())
             url = (s.get("url") or "").strip()

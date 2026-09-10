@@ -59,9 +59,9 @@ def test_sans_sources_fournies_la_section_du_modele_est_conservee():
 
 def test_un_tableau_marque_graphique_est_trace_et_le_tableau_disparait():
     md = "Graphique : Parts de marché 2026\n| Acteur | Part |\n|---|---|\n| Alpha | 40 % |\n| Beta | 25 % |\n| Gamma | 15 % |"
-    t = _texte(render_pdf("T", md))
-    assert "Parts de marché 2026" in t          # le titre du graphique est là
-    assert "Acteur" not in t                    # l'en-tête du tableau n'est plus rendu
+    pdf = render_pdf("T", md)
+    assert b"/XObject" in pdf                   # le graphique est une image (titre inclus dedans)
+    assert "Acteur" not in _texte(pdf)          # l'en-tête du tableau n'est plus rendu
 
 
 def test_un_tableau_sans_marque_reste_un_tableau_sans_graphique():
@@ -74,3 +74,41 @@ def test_une_marque_graphique_sur_des_donnees_heterogenes_garde_le_tableau():
     md = "Graphique : Tailles\n| Pays | Taille |\n|---|---|\n| FR | 3 Md€ |\n| DE | 40 % |\n| IT | 2 Md€ |"
     t = _texte(render_pdf("T", md))
     assert "Tailles" in t and "Pays" in t and "3 Md€" in t
+
+
+def _vizs(md):
+    from app.modules.viz.pipeline import extraire_et_compiler
+
+    return [v.dict() for v in extraire_et_compiler(md)]
+
+
+VIZ_OK = ('```viz\n{"version":"1","intent":"domination","title":"Parts de marché","unit":"%",'
+          '"series":[{"label":"A","value":60},{"label":"B","value":40}],"sources":[1]}\n```')
+
+
+def test_un_bloc_viz_compile_devient_une_image_dans_le_pdf():
+    md = "## 1. Parts\n" + VIZ_OK
+    pdf = render_pdf("T", md, sources=[{"title": "S", "url": "https://s.fr", "domain": "s.fr", "source": "web"}],
+                     vizs=_vizs(md))
+    assert b"/XObject" in pdf                 # une image est embarquée
+    t = _texte(pdf)
+    assert "version" not in t and "intent" not in t   # le JSON brut n'apparaît jamais
+
+
+def test_un_bloc_viz_invalide_devient_un_tableau():
+    md = VIZ_OK.replace('"sources":[1]', '"sources":[1],"highlight":"Zeta"')
+    t = _texte(render_pdf("T", md, vizs=_vizs(md)))
+    assert "version" not in t
+
+
+def test_un_bloc_viz_sans_rendus_prepares_est_compile_a_la_volee():
+    md = "## 1\n" + VIZ_OK
+    pdf = render_pdf("T", md)           # vizs=None : ancien appel, rapport archivé avant la V1
+    assert b"/XObject" in pdf and "intent" not in _texte(pdf)
+
+
+def test_l_ancienne_marque_graphique_passe_par_le_meme_moteur():
+    md = "Graphique : Parts 2026\n| Acteur | Part |\n|---|---|\n| Alpha | 40 % |\n| Beta | 25 % |\n| Gamma | 15 % |"
+    pdf = render_pdf("T", md)
+    assert b"/XObject" in pdf
+    assert "Acteur" not in _texte(pdf)    # le tableau est remplacé par le graphique
