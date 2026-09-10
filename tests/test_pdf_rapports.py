@@ -1,6 +1,28 @@
 import io
 
-from app.modules.reports.pdf import render_pdf
+from app.modules.reports.pdf import _inline, render_pdf
+
+
+def test_les_citations_deviennent_des_liens_internes():
+    assert _inline("Le marché pèse 3 Md€ [2].", liens=True) == \
+        'Le marché pèse 3 Md€ <a href="#src-2" color="#7976F7">[2]</a>.'
+
+
+def test_les_citations_multiples_sont_toutes_liees():
+    out = _inline("vu [1][3]", liens=True)
+    assert 'href="#src-1"' in out and 'href="#src-3"' in out
+
+
+def test_sans_sources_les_citations_restent_du_texte():
+    assert _inline("vu [1]") == "vu [1]"
+
+
+def test_le_pdf_contient_une_section_sources_depuis_les_donnees():
+    sources = [{"title": "Rapport Xerfi", "url": "https://xerfi.com/a", "domain": "xerfi.com",
+                "source": "web", "excerpt": "…"}]
+    pdf = render_pdf("T", "Un chiffre [1].", sources=sources)
+    t = _texte(pdf)
+    assert "Sources" in t and "Rapport Xerfi" in t and "xerfi.com" in t
 
 
 def _texte(pdf: bytes) -> str:

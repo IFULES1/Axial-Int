@@ -54,10 +54,17 @@ def _draw_watermark(canvas, doc) -> None:
     canvas.restoreState()
 
 
-def _inline(text: str) -> str:
+_CITATION = re.compile(r"\[(\d+)\]")
+
+
+def _inline(text: str, liens: bool = False) -> str:
     text = html.escape(text)
     # **bold** → <b>bold</b>
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+    if liens:
+        # Lien interne vers l'entrée de la section Sources. ReportLab résout
+        # « #src-N » sur une ancre <a name="src-N"/> posée plus loin.
+        text = _CITATION.sub(r'<a href="#src-\1" color="#7976F7">[\1]</a>', text)
     return text
 
 
@@ -85,12 +92,13 @@ def render_pdf(title: str, markdown: str, sources: list[dict] | None = None) -> 
 
     story: list = [Paragraph(_inline(title), h1), Spacer(1, 6)]
 
-    def tableau(cellules: list[list[str]]):
+    def tableau(cellules: list[list[str]], liens: bool = False):
         largeur = A4[0] - 4 * cm
         n = max(len(ligne) for ligne in cellules)
         # Colonnes à largeur égale : lisible sans mesurer le texte, et une
         # cellule longue se replie dans son Paragraph au lieu de déborder.
-        donnees = [[Paragraph(_inline(c), cellule) for c in (ligne + [""] * (n - len(ligne)))]
+        donnees = [[Paragraph(_inline(c, liens), cellule)
+                    for c in (ligne + [""] * (n - len(ligne)))]
                    for ligne in cellules]
         t = Table(donnees, colWidths=[largeur / n] * n, repeatRows=1)
         t.setStyle(TableStyle([
@@ -102,22 +110,46 @@ def render_pdf(title: str, markdown: str, sources: list[dict] | None = None) -> 
         ]))
         return t
 
+    # Les [N] ne deviennent des liens que si une section Sources existe pour
+    # les recevoir : un lien vers une ancre absente est pire qu'un [N] inerte.
+    liens = bool(sources)
+
     for b in decouper(markdown):
         if b.genre in ("h1", "h2"):
-            story.append(Paragraph(_inline(b.texte), h2))
+            story.append(Paragraph(_inline(b.texte, liens), h2))
         elif b.genre == "h3":
-            story.append(Paragraph(_inline(b.texte), h3))
+            story.append(Paragraph(_inline(b.texte, liens), h3))
         elif b.genre == "puces":
             story.append(ListFlowable(
-                [ListItem(Paragraph(_inline(ligne), body), leftIndent=10) for ligne in b.lignes],
+                [ListItem(Paragraph(_inline(ligne, liens), body), leftIndent=10)
+                 for ligne in b.lignes],
                 bulletType="bullet", start="•"))
         elif b.genre == "tableau":
-            story.append(tableau(b.cellules))
+            story.append(tableau(b.cellules, liens))
             story.append(Spacer(1, 8))
         elif b.genre == "hr":
             story.append(Spacer(1, 10))
         else:
-            story.append(Paragraph(_inline(b.texte), body))
+            story.append(Paragraph(_inline(b.texte, liens), body))
+
+    if sources:
+        story.append(Spacer(1, 14))
+        story.append(Paragraph("Sources", h2))
+        petit = ParagraphStyle("Src", parent=body, fontSize=9, leading=12, spaceAfter=3)
+        for n, s in enumerate(sources, start=1):
+            titre = html.escape((s.get("title") or s.get("domain") or "Source").strip())
+            url = (s.get("url") or "").strip()
+            domaine = html.escape(s.get("domain") or "")
+            ligne = f'<a name="src-{n}"/><b>[{n}]</b> {titre}'
+            if domaine:
+                ligne += f" — {domaine}"
+            if url:
+                ligne += f' — <a href="{html.escape(url)}" color="#7976F7">{html.escape(url)}</a>'
+            elif s.get("source") == "notion":
+                ligne += " — espace Notion"
+            elif s.get("source") != "web":
+                ligne += " — document interne"
+            story.append(Paragraph(ligne, petit))
 
     doc.build(story, onFirstPage=_draw_watermark, onLaterPages=_draw_watermark)
     return buffer.getvalue()
