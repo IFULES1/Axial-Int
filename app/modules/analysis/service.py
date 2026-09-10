@@ -290,10 +290,17 @@ def finalize(db, user_id: str, analysis_type: str, result: AnalysisResult,
         analysis_type=analysis_type, sources=result.sources,
         cout=(result.metadata or {}).get("cout"),
     )
+    # Visualisations : préparées une fois ici, réutilisées par l'app et le PDF.
+    # Tolérant : un échec ne remet en cause ni la facturation ni l'archive.
+    from app.modules.viz import service as viz_service
+
+    report.viz = viz_service.preparer_sans_faute(db, result.content)
+    db.commit()
     analytics.increment_usage(user_id, analyses=1, credits=charged, reports=1)
 
     result.metadata["report_id"] = str(report.id)
     result.metadata["charged"] = charged
+    result.metadata["viz"] = report.viz or []
     return {"report_id": str(report.id), "charged": charged}
 
 
@@ -399,6 +406,7 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
     yield _sse({"progress": 90, "step": "finalize", "message": "Finalisation…"})
     payload = _result_payload(result)
     payload["report_id"] = info.get("report_id")
+    payload["viz"] = result.metadata.get("viz") or []
     yield _sse({"progress": 100, "step": "done", "done": True, "data": payload})
 
 

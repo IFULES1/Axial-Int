@@ -23,6 +23,7 @@ from app.modules.intelligence import models as _intelligence_models  # noqa: E40
 from app.modules.memory import models as _memory_models  # noqa: E402, F401
 from app.modules.reports import models as _reports_models  # noqa: E402, F401
 from app.modules.watches import models as _watches_models  # noqa: E402, F401
+from app.modules.viz import models as _viz_models  # noqa: E402, F401
 
 config = context.config
 if config.config_file_name is not None:

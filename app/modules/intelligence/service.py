@@ -342,9 +342,14 @@ def _finalize_turn(db: Session, user_id: str, turn: _Turn, answer: str, *,
     entree = getattr(mesure, "input_tokens", 0) or 0
     sortie = getattr(mesure, "output_tokens", 0) or 0
     modele = getattr(mesure, "model", None)
+    # Visualisations de la réponse, préparées maintenant pour que l'historique
+    # se recharge sans recompiler. Tolérant : jamais bloquant.
+    from app.modules.viz import service as viz_service
+
+    viz = viz_service.preparer_sans_faute(db, answer) if not degraded else None
     assistant_msg = Message(id=uuid.uuid4(), conversation_id=turn.conv.id,
                             role="assistant", agent=turn.agent_key, content=answer,
-                            citations=turn.citations or None,
+                            citations=turn.citations or None, viz=viz,
                             tokens_entree=entree or None,
                             tokens_sortie=sortie or None,
                             modele=modele,
@@ -475,5 +480,6 @@ def _stream_payload(msg: Message, turn: _Turn) -> dict:
         "agent": msg.agent,
         "content": msg.content,
         "citations": msg.citations or [],
+        "viz": getattr(msg, "viz", None) or [],
         "created_at": msg.created_at.isoformat() if msg.created_at else None,
     }

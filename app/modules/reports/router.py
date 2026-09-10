@@ -33,6 +33,7 @@ class ReportOut(BaseModel):
 class ReportDetail(ReportOut):
     content: str
     sources: list | None
+    viz: list | None = None
 
 
 @router.post("", response_model=ReportDetail)
@@ -41,7 +42,8 @@ def create(payload: ReportIn, user: AuthUser = Depends(get_current_user),
     r = service.create_report(db, user.id, title=payload.title, content=payload.content,
                               analysis_type=payload.analysis_type, sources=payload.sources)
     return ReportDetail(id=str(r.id), title=r.title, analysis_type=r.analysis_type,
-                        created_at=r.created_at, content=r.content, sources=r.sources)
+                        created_at=r.created_at, content=r.content, sources=r.sources,
+                        viz=r.viz)
 
 
 @router.get("", response_model=list[ReportOut])
@@ -59,7 +61,8 @@ def get_one(report_id: str, user: AuthUser = Depends(get_current_user),
             db: Session = Depends(get_db)) -> ReportDetail:
     r = service.get_report(db, user.id, report_id)
     return ReportDetail(id=str(r.id), title=r.title, analysis_type=r.analysis_type,
-                        created_at=r.created_at, content=r.content, sources=r.sources)
+                        created_at=r.created_at, content=r.content, sources=r.sources,
+                        viz=r.viz)
 
 
 @router.get("/{report_id}/pdf")

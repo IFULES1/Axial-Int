@@ -24,6 +24,9 @@ class Report(Base):
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     content: Mapped[str] = mapped_column(Text, default="")  # markdown
     sources: Mapped[list | None] = mapped_column(JSONType)
+    # Visualisations préparées à l'archivage (forme `viz.pipeline.Viz`) :
+    # spec du modèle, type choisi, Vega-Lite compilé, statut, empreinte.
+    viz: Mapped[list | None] = mapped_column(JSONType)
     # Coût de production. Nullable : les rapports antérieurs au 25/08 n'ont
     # jamais été mesurés, et un zéro les ferait passer pour gratuits dans les
     # moyennes.

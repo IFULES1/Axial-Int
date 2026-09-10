@@ -59,6 +59,7 @@ class MessageOut(BaseModel):
     agent: str | None
     content: str
     citations: list | None
+    viz: list | None = None
     created_at: dt.datetime
 
 
@@ -145,7 +146,7 @@ def stream_message(conversation_id: str, payload: MessageIn,
 
 def _msg_out(m) -> MessageOut:
     return MessageOut(id=str(m.id), role=m.role, agent=m.agent, content=m.content,
-                      citations=m.citations, created_at=m.created_at)
+                      citations=m.citations, viz=m.viz, created_at=m.created_at)
 
 
 @router.get("/conversations/{conversation_id}/messages", response_model=list[MessageOut])

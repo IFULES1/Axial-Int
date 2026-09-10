@@ -65,6 +65,9 @@ class Message(Base):
     agent: Mapped[str | None] = mapped_column(String(64))
     content: Mapped[str] = mapped_column(Text, default="")
     citations: Mapped[list | None] = mapped_column(JSONType)
+    # Visualisations du message (forme `viz.pipeline.Viz`), préparées à
+    # l'archivage pour que l'historique se recharge sans recompiler.
+    viz: Mapped[list | None] = mapped_column(JSONType)
     # Coût de production. Nullable : les lignes antérieures au 25/08 n'ont
     # jamais été mesurées, et un zéro les ferait passer pour gratuites.
     tokens_entree: Mapped[int | None] = mapped_column(Integer)
