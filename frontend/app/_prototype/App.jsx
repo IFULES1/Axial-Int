@@ -2077,7 +2077,7 @@ function deconnecter() {
    Sidebar sub-routes: 'conversations' | 'reports' | 'agents' | 'memory' | 'credits' | 'settings'
 */
 
-function AppShell({ user, onNewChat, onLogout, children, topbar, subRoute, onSubRoute }) {
+function AppShell({ user, onLogout, children, topbar, subRoute, onSubRoute }) {
   const t = window.useT();
   const lang = window.AXIAL_LANG || 'fr';
   const [sidebarMode, setSidebarMode] = window.useSidebar();
@@ -2120,8 +2120,15 @@ function AppShell({ user, onNewChat, onLogout, children, topbar, subRoute, onSub
       <aside className="sidebar">
         <Lockup sub="Intelligence" />
 
-        <button className="sidebar-newconv" title={t('nav.new_analysis')} onClick={() => { onNewChat(); setMobileOpen(false); }}>
-          <Icon name="plus" size={14} /> <span className="label">{t('nav.new_analysis')}</span>
+        {/* La bascule du menu vit en tête de barre ; « Nouvelle analyse »
+            reste dans le panneau des conversations. */}
+        <button
+          className="sidebar-newconv sidebar-toggle"
+          title={isRail ? t('nav.expand') : t('nav.collapse')}
+          aria-label={isRail ? t('nav.expand') : t('nav.collapse')}
+          onClick={() => setSidebarMode(isRail ? 'open' : 'rail')}>
+          <Icon name={isRail ? 'chevrons-right' : 'chevrons-left'} size={14} />
+          <span className="label">{isRail ? t('nav.expand') : t('nav.collapse')}</span>
         </button>
 
         {/* TOOLS (first) */}
@@ -2145,15 +2152,6 @@ function AppShell({ user, onNewChat, onLogout, children, topbar, subRoute, onSub
         </div>
 
         <div className="sidebar-foot">
-          <button
-            className="btn btn-ghost sidebar-toggle"
-            style={{ width: '100%' }}
-            title={isRail ? t('nav.expand') : t('nav.collapse')}
-            aria-label={isRail ? t('nav.expand') : t('nav.collapse')}
-            onClick={() => setSidebarMode(isRail ? 'open' : 'rail')}>
-            <Icon name={isRail ? 'chevrons-right' : 'chevrons-left'} size={14} />
-            <span className="label">{isRail ? t('nav.expand') : t('nav.collapse')}</span>
-          </button>
           {/* Ligne d'identité inerte : plus de déconnexion accidentelle au clic
               sur son propre nom. Le bouton dédié ci-dessous porte l'action,
               visible et accessible au clavier. */}
@@ -5677,14 +5675,6 @@ function App() {
   const [showWizard, setShowWizard] = useState(false);
   const [agentsRefresh, setAgentsRefresh] = useState(0);
 
-  const handleNewChat = () => {
-    setSubRoute('conversations');
-    const id = 'c-' + Date.now();
-    const newTitle = (window.AXIAL_LANG === 'en') ? 'New analysis' : 'Nouvelle analyse';
-    setConversations((cs) => [{ id, title: newTitle, lastUpdated: (window.AXIAL_LANG === 'en') ? 'now' : 'à l\'instant', messages: [] }, ...cs]);
-    setActiveId(id);
-  };
-
   // Citations backend -> format du panneau latéral (URL pour le web,
   // extrait pour les chunks internes/documents).
   const mapCitations = (cits) => (cits || []).map((c, idx) => ({
@@ -5895,7 +5885,6 @@ function App() {
     <>
       <AppShell
         user={axUser || { name: '', email: '', initials: '·' }}
-        onNewChat={handleNewChat}
         onLogout={deconnecter}
         topbar={topbar}
         subRoute={subRoute}
