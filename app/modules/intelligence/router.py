@@ -158,9 +158,11 @@ def create_project(payload: ProjectIn, user: AuthUser = Depends(get_current_user
 
 
 @router.get("/projects", response_model=list[ProjectOut])
-def list_projects(user: AuthUser = Depends(get_current_user),
+def list_projects(inclure_archives: bool = False,
+                  user: AuthUser = Depends(get_current_user),
                   db: Session = Depends(get_db)) -> list[ProjectOut]:
-    return [_project_out(p) for p in service.list_projects(db, user.id)]
+    return [_project_out(p) for p in
+            service.list_projects(db, user.id, inclure_archives=inclure_archives)]
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectOut)

@@ -2430,3 +2430,23 @@ def test_credits_verifies_avant_toute_suppression(monkeypatch):
 
         assert len(intel._messages_ordonnes(db, conv)) == 4
         assert db.get(intel.Conversation, conv.id).message_count == 4
+
+
+def test_les_dossiers_archives_restent_listables_sur_demande():
+    """Sans `inclure_archives`, un dossier archivé disparaissait de l'API et ne
+    pouvait plus être désarchivé."""
+    import uuid as uuidlib
+
+    from sqlalchemy.orm import Session
+
+    engine = _base()
+    with Session(engine) as db:
+        uid = str(uuidlib.uuid4())
+        actif = intel.create_project(db, uid, "Actif", None)
+        archive = intel.create_project(db, uid, "Ancien", None)
+        intel.update_project(db, uid, str(archive.id), archived=True)
+
+        ids = {str(p.id) for p in intel.list_projects(db, uid)}
+        assert ids == {str(actif.id)}
+        tous = {str(p.id) for p in intel.list_projects(db, uid, inclure_archives=True)}
+        assert tous == {str(actif.id), str(archive.id)}

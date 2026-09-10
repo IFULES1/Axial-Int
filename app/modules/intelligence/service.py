@@ -40,13 +40,12 @@ def create_project(db: Session, user_id: str, name: str, description: str | None
     return project
 
 
-def list_projects(db: Session, user_id: str) -> list[Project]:
-    stmt = (
-        select(Project)
-        .where(Project.user_id == uuid.UUID(user_id), Project.archived_at.is_(None))
-        .order_by(Project.created_at.desc())
-    )
-    return list(db.scalars(stmt))
+def list_projects(db: Session, user_id: str, *,
+                  inclure_archives: bool = False) -> list[Project]:
+    stmt = select(Project).where(Project.user_id == uuid.UUID(user_id))
+    if not inclure_archives:
+        stmt = stmt.where(Project.archived_at.is_(None))
+    return list(db.scalars(stmt.order_by(Project.created_at.desc())))
 
 
 def _own_project(db: Session, user_id: str, project_id: str) -> Project:
