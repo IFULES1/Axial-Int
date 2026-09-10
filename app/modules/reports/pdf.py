@@ -55,6 +55,8 @@ def _draw_watermark(canvas, doc) -> None:
 
 
 _CITATION = re.compile(r"\[(\d+)\]")
+# « Sources », « 8. Sources », « Sources et références », « References »…
+_TITRE_SOURCES = re.compile(r"^\s*(\d+[.)]\s*)?(sources?|r[ée]f[ée]rences?)\b", re.IGNORECASE)
 
 
 def _inline(text: str, liens: bool = False) -> str:
@@ -134,7 +136,20 @@ def render_pdf(title: str, markdown: str, sources: list[dict] | None = None) -> 
     # les recevoir : un lien vers une ancre absente est pire qu'un [N] inerte.
     liens = bool(sources)
 
-    for b in decouper(markdown):
+    # Le modèle rédige lui-même une section « Sources » en texte (règle 6 du
+    # prompt). Quand on en génère une depuis les données — avec ancres et URL
+    # cliquables — la sienne ferait doublon : on l'écarte jusqu'au prochain titre.
+    blocs = decouper(markdown)
+    if sources:
+        garder, sauter = [], False
+        for b in blocs:
+            if b.genre in ("h1", "h2"):
+                sauter = bool(_TITRE_SOURCES.match(b.texte))
+            if not sauter:
+                garder.append(b)
+        blocs = garder
+
+    for b in blocs:
         if b.genre in ("h1", "h2"):
             story.append(Paragraph(_inline(b.texte, liens), h2))
         elif b.genre == "h3":

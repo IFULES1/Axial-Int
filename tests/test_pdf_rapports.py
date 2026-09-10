@@ -38,3 +38,19 @@ def test_un_tableau_est_rendu_cellule_par_cellule():
     t = _texte(pdf)
     assert "Alpha" in t and "40 %" in t
     assert "|---|" not in t  # la ligne de séparation ne fuit pas dans le document
+
+
+def test_la_section_sources_du_modele_est_remplacee_par_celle_des_donnees():
+    md = "## 1. Marché\nUn chiffre [1].\n\n## Sources\n1. Truc texte du modèle\n2. Machin"
+    pdf = render_pdf("T", md, sources=[{"title": "Vraie source", "url": "https://x.fr",
+                                        "domain": "x.fr", "source": "web"}])
+    t = _texte(pdf)
+    assert "Vraie source" in t
+    assert "Truc texte du modèle" not in t  # la liste textuelle du modèle ne double pas la nôtre
+    assert t.count("Sources") == 1
+
+
+def test_sans_sources_fournies_la_section_du_modele_est_conservee():
+    md = "## 1. Marché\nUn chiffre [1].\n\n## Sources\n1. Truc texte du modèle"
+    t = _texte(render_pdf("T", md))
+    assert "Truc texte du modèle" in t
