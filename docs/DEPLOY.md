@@ -78,6 +78,14 @@ sudo systemctl restart axial-qdrant
 *(alternative : ré-ingérer sur le VPS avec `scripts/ingest_knowledge_base.py` ~2$.)*
 
 ## 7. Front (build avec l'URL API) + services
+
+> **L'URL de l'API est figée dans le bundle à la compilation.** Un `npm run build`
+> lancé sans `NEXT_PUBLIC_API_URL` fige `http://127.0.0.1:8090` et casse l'app
+> pour tous les utilisateurs (vécu du 04 au 07/09/2026). Le `.env.local` du VPS
+> porte désormais la valeur de production ; après chaque build, vérifier quand
+> même : `grep -c '127.0.0.1:8090' .next/static/chunks/*.js` doit valoir 0, puis
+> tester une inscription depuis un compte neuf dans le navigateur.
+
 ```bash
 cd /opt/axial-intelligence/frontend
 NEXT_PUBLIC_API_URL=https://app.axial-ia.fr/api npm ci && \

@@ -174,6 +174,19 @@ class _Turn:
     blocked_answer: str | None = None  # set when no LLM is available at all
 
 
+TITRES_GENERIQUES = {"", "workspace", "nouvelle conversation", "conversation", "new conversation"}
+
+
+def titre_depuis(question: str, longueur: int = 80) -> str:
+    """Première ligne utile de la question, coupée proprement — le titre qu'un
+    humain donnerait en relisant l'historique."""
+    texte = " ".join((question or "").split())
+    if len(texte) <= longueur:
+        return texte or "Conversation"
+    coupe = texte[:longueur].rsplit(" ", 1)[0].rstrip(" ,;:")
+    return coupe + "…"
+
+
 def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
                   agent_override: str | None, *, is_admin: bool,
                   document_ids: list[str] | None) -> _Turn:
@@ -204,6 +217,11 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
     user_msg = Message(id=uuid.uuid4(), conversation_id=conv.id, role="user",
                        agent=agent_key, content=content)
     db.add(user_msg)
+    # Première question = titre. Le frontend crée chaque conversation sous
+    # « Workspace » et rien ne le remplaçait : 14 conversations sur 19 portaient
+    # ce nom, l'historique existait mais restait illisible.
+    if conv.message_count == 0 and (conv.title or "").strip().lower() in TITRES_GENERIQUES:
+        conv.title = titre_depuis(content)
 
     from app.modules.memory import service as memory
     from app.shared import search as web_search

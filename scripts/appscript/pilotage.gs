@@ -79,6 +79,14 @@ function synchroniser() {
       ['cout_modele_eur', 'Coût modèle (€)'], ['cout_recherche_eur', 'Coût recherche (€)'],
       ['cout_eur', 'Coût total (€)']]);
 
+    // DASHBOARD_AUTO : les agrégats calculés par l'API (30 jours glissants),
+    // aplatis en trois colonnes. L'onglet DASHBOARD rédigé à la main du 27/08
+    // n'est plus la référence : lui ne bouge pas, celui-ci se réécrit chaque heure.
+    lues += ecrire_(feuille, 'DASHBOARD_AUTO', aplatir_(d.tableau, ''), [
+      ['bloc', 'Bloc'], ['indicateur', 'Indicateur'], ['valeur', 'Valeur']]);
+    feuille.getSheetByName('DASHBOARD_AUTO')
+      .getRange(1, 5).setValue('Extrait le ' + d.extrait_le + ' — fenêtre ' + d.tableau.fenetre_jours + ' j');
+
     journal_(feuille, 'succès', lues, d.extrait_le, secondes_(debut), '');
   } catch (e) {
     // Une erreur est écrite dans le journal AVANT d'être relancée : sans ça,
@@ -89,6 +97,26 @@ function synchroniser() {
 }
 
 // ---------------------------------------------------------------- outils
+// {couts: {rapports: 12, cout_eur: 0.5}, revenus: {...}} → lignes
+// {bloc, indicateur, valeur}. Les sous-objets sont préfixés par leur clé, les
+// listes sont ignorées (elles ont leurs propres onglets).
+function aplatir_(objet, prefixe) {
+  var lignes = [];
+  for (var cle in objet) {
+    var v = objet[cle];
+    if (v === null || v === undefined) {
+      lignes.push({bloc: prefixe, indicateur: cle, valeur: 'non mesurable'});
+    } else if (Array.isArray(v)) {
+      continue;
+    } else if (typeof v === 'object') {
+      lignes = lignes.concat(aplatir_(v, prefixe ? prefixe + '.' + cle : cle));
+    } else {
+      lignes.push({bloc: prefixe, indicateur: cle, valeur: v});
+    }
+  }
+  return lignes;
+}
+
 function recuperer_() {
   var r = UrlFetchApp.fetch(API, {
     method: 'get',

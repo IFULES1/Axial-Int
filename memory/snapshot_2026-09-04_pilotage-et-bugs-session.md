@@ -159,8 +159,20 @@ message de chat ≈ 0,001-0,005 € (chemin non-streaming uniquement).
 - **Chat en streaming = coût non mesurable** : le fournisseur ne renvoie pas de
   compteur d'usage. Ces messages restent à `null` plutôt que de porter une
   estimation indistinguable d'une mesure.
-- **`admin@axial.com` n'est pas une vraie boîte mail** : la réinitialisation de
-  mot de passe ne peut pas l'atteindre. À rattacher à une adresse réelle.
+- **Le compte d'administration a été rattaché à `miradie.buranturu@axial-ia.fr`**
+  (ancien `admin@axial.com`, qui n'était pas une boîte mail : la réinitialisation
+  de mot de passe ne pouvait pas l'atteindre). Même identifiant, mêmes crédits,
+  mêmes rapports. Les journaux `email_sends` et `password_resets` gardent
+  l'ancienne adresse — ils enregistrent ce qui s'est réellement passé.
+- **Aucun compte n'a `is_admin`** : tous portent `role: "user"`. L'écran
+  Pilotage et `/metrics/tableau` sont donc inaccessibles depuis l'app.
+- **« Compte interne » est défini dans `app/shared/comptes.py`**, une seule fois,
+  et sert à deux choses : exclure des statistiques d'activation (métriques) et
+  dispenser de l'écran carte une fois l'essai terminé (`carte_contournable`
+  dans `/billing/balance`). Ne pas dupliquer cette liste.
+- **`frontend/app/_prototype/App.jsx` est compilé par Next.js.** Redémarrer
+  `axial-frontend` ne suffit pas : `npm run build` puis redémarrage, sinon
+  `next start` continue de servir l'ancien bundle.
 - Vérifier l'onboarding **depuis un compte neuf**, jamais connecté.
 - Toujours lancer la simulation avant un envoi d'emails.
 - Deux Qdrant sur le serveur : le bon est le **6355**.

@@ -11,6 +11,7 @@ from app.modules.auth.schemas import AuthUser
 from app.modules.auth.security import get_current_user
 from app.modules.billing import service, stripe_gateway
 from app.modules.billing.catalog import PLANS
+from app.shared.comptes import est_interne
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -26,6 +27,9 @@ class BalanceOut(BaseModel):
     # c'est elle qui décide si la carte peut encore être remise à plus tard.
     periode_essai_active: bool = False
     essai_expire_le: str | None = None
+    # Décidé côté serveur, jamais côté écran : l'exemption tient à qui est le
+    # compte, pas à ce que le navigateur croit savoir de lui.
+    carte_contournable: bool = False
 
 
 class CheckoutIn(BaseModel):
@@ -51,12 +55,16 @@ def plans() -> dict:
 def balance(user: AuthUser = Depends(get_current_user), db: Session = Depends(get_db)) -> BalanceOut:
     b = service.get_or_create_balance(db, user.id)
     expire = service._as_aware(b.trial_expires_at)
+    periode = bool(expire and expire > service._now())
     return BalanceOut(
         available=service.available_credits(b), trial_credits=b.trial_credits,
         free_credits=b.free_credits, purchased_credits=b.purchased_credits,
         trial_active=service._trial_active(b),
-        periode_essai_active=bool(expire and expire > service._now()),
+        periode_essai_active=periode,
         essai_expire_le=expire.isoformat() if expire else None,
+        # Un compte interne n'a pas de carte à donner : l'écran resterait un mur
+        # définitif une fois l'essai fini.
+        carte_contournable=periode or est_interne(user.email),
     )
 
 

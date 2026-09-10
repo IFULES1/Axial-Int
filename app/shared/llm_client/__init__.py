@@ -5,6 +5,8 @@ Business code imports `web_search_provider()` / `enrich_provider()` and the
 """
 from __future__ import annotations
 
+import re
+
 from app.shared.llm_client.base import (
     EnrichProvider,
     LLMResult,
@@ -16,6 +18,15 @@ from app.shared.llm_client.perplexity import PerplexityProvider
 
 _web = PerplexityProvider()
 _enrich = ClaudeProvider()
+
+# httpx met l'URL complète dans le message d'erreur — clé d'API comprise quand
+# elle voyage en paramètre de requête (Gemini). Elle finissait en clair dans
+# le journal systemd à chaque bascule de fournisseur.
+_SECRET_DANS_URL = re.compile(r"([?&](?:key|api_key|apikey|token)=)[^&'\"\s]+", re.IGNORECASE)
+
+
+def _sans_secret(err: BaseException) -> str:
+    return _SECRET_DANS_URL.sub(r"\1<masqué>", str(err))
 
 
 def web_search_provider() -> WebSearchProvider:
@@ -64,7 +75,7 @@ def generate(*, system: str, prompt: str, tier: str = "chat",
             return mod.generate(system=system, prompt=prompt, max_tokens=max_tokens)
         except Exception as e:  # noqa: BLE001 — try the next provider, whatever the cause
             last_err = e
-            logger.warning("LLM %s a échoué, bascule sur le suivant : %s", name, e)
+            logger.warning("LLM %s a échoué, bascule sur le suivant : %s", name, _sans_secret(e))
     if last_err:
         raise last_err
     raise ProviderUnavailable("Aucun LLM de génération configuré (Gemini/Claude).")
@@ -102,10 +113,10 @@ def stream_text(*, system: str, prompt: str, tier: str = "chat",
             return
         except Exception as e:  # noqa: BLE001
             if started:
-                logger.warning("LLM %s a coupé en cours de réponse : %s", name, e)
+                logger.warning("LLM %s a coupé en cours de réponse : %s", name, _sans_secret(e))
                 raise
             last_err = e
-            logger.warning("LLM %s a échoué avant le 1er mot, bascule : %s", name, e)
+            logger.warning("LLM %s a échoué avant le 1er mot, bascule : %s", name, _sans_secret(e))
     if last_err:
         raise last_err
     raise ProviderUnavailable("Aucun LLM de génération configuré (Gemini/Claude).")

@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import types
 
-import pytest
-
 from app.modules.analysis.service import AnalysisResult, finalize
 from app.shared.llm_client import claude
 from app.shared.llm_client.base import LLMResult

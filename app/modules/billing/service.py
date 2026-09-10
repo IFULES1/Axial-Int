@@ -150,6 +150,38 @@ def grant_subscription(db: Session, user_id: str, monthly_credits: int) -> Credi
     return balance
 
 
+# --- Gestes d'administration ---------------------------------------------------
+# Jusqu'ici, recharger un compte ou prolonger un essai passait par un accès
+# direct à la base. Ces deux fonctions portent le même geste, tracé dans
+# credit_events avec un motif lisible, depuis l'écran Pilotage.
+
+def crediter_admin(db: Session, user_id: str, credits: int, motif: str) -> CreditBalance:
+    """Ajoute des crédits offerts (jamais des crédits achetés : ils n'ont pas
+    été payés). Le motif finit dans l'action de l'événement, tronqué."""
+    if credits <= 0 or credits > 500:
+        raise AppError("Entre 1 et 500 crédits.", 400, code="credits_invalides")
+    balance = get_or_create_balance(db, user_id)
+    balance.free_credits += credits
+    _log_event(db, user_id, credits, f"admin:{(motif or 'geste commercial')[:48]}")
+    db.commit()
+    db.refresh(balance)
+    return balance
+
+
+def prolonger_essai(db: Session, user_id: str, jours: int) -> CreditBalance:
+    """Repousse la fin d'essai de `jours` à partir d'aujourd'hui ou de la fin
+    actuelle si elle est encore devant — jamais depuis une date passée."""
+    if jours <= 0 or jours > 90:
+        raise AppError("Entre 1 et 90 jours.", 400, code="jours_invalides")
+    balance = get_or_create_balance(db, user_id)
+    base = max(_as_aware(balance.trial_expires_at) or _now(), _now())
+    balance.trial_expires_at = base + dt.timedelta(days=jours)
+    _log_event(db, user_id, 0, f"admin:essai +{jours} j")
+    db.commit()
+    db.refresh(balance)
+    return balance
+
+
 # --- Abonnement (miroir applicatif de Stripe) --------------------------------
 
 def upsert_subscription(db: Session, user_id: str, **fields) -> UserSubscription:

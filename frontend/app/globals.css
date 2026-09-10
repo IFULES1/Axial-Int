@@ -1058,6 +1058,13 @@ input, select, textarea { font-family: inherit; color: inherit; }
   border-radius: 9px;
   cursor: pointer;
   transition: background 140ms ease-out;
+  /* C'est un <button> : sans ces trois lignes il garde le fond gris et la
+     bordure natifs du navigateur, et le titre clair devient invisible. */
+  background: transparent;
+  border: 0;
+  font: inherit;
+  width: 100%;
+  text-align: left;
 }
 .conv-item:hover { background: rgba(121,118,247,0.06); }
 .conv-item.active { background: rgba(121,118,247,0.12); }

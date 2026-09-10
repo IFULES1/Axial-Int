@@ -11,12 +11,15 @@ from __future__ import annotations
 
 from sqlalchemy import text
 
+from app.shared.comptes import DOMAINES_INTERNES
+
 # Valeur d'un crédit, déduite du catalogue : Pro = 50 € pour 120 crédits.
 # Sert à valoriser une consommation qui n'a pas donné lieu à un paiement direct.
 EURO_PAR_CREDIT = 50 / 120
 
-INTERNES = ("%axial-ia.fr", "%axial.com", "%axial-qa.fr", "%skema.edu",
-            "%francedigitale.org")
+# Dérivé de la liste partagée : métriques et facturation doivent s'accorder sur
+# ce qu'est un compte interne (voir app/shared/comptes.py).
+INTERNES = tuple(f"%@{d}" for d in DOMAINES_INTERNES)
 
 
 def _clause_externes(alias: str = "u") -> str:
@@ -229,7 +232,8 @@ _CLAUSE_INTERNES = (
 
 _REQUETES = {
     "utilisateurs": f"""
-        SELECT u.email,
+        SELECT u.id::text AS user_id,
+               u.email,
                u.created_at::date::text AS inscrit_le,
                u.last_sign_in_at::date::text AS derniere_connexion,
                CASE WHEN {_CLAUSE_INTERNES} THEN 'client' ELSE 'interne' END AS categorie,
@@ -312,3 +316,12 @@ def export(db) -> dict:
     sortie["couts_agreges"] = couts_totaux(db, jours=3650)["postes"]
     sortie["tableau"] = tableau(db, jours=30)
     return sortie
+
+
+def comptes(db) -> list[dict]:
+    """Une ligne par compte, mêmes colonnes que l'onglet UTILISATEURS du
+    classeur — l'écran d'administration et le tableur disent la même chose."""
+    return [
+        {k: (float(v) if hasattr(v, "quantize") else v) for k, v in r.items()}
+        for r in db.execute(text(_REQUETES["utilisateurs"])).mappings().all()
+    ]

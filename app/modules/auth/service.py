@@ -19,7 +19,7 @@ from app.errors import AppError
 from app.modules.analytics import client as analytics
 from app.modules.auth.freemail import is_professional_email
 from app.modules.auth.schemas import AuthUser, LoginRequest, RegisterRequest, TokenResponse
-from app.modules.auth.supabase_client import admin_client, public_client
+from app.modules.auth.supabase_client import admin_client, oublier_session, public_client
 
 logger = logging.getLogger("axial.auth")
 
@@ -126,6 +126,8 @@ def _sign_in(email: str, password: str):
     except Exception as e:
         logger.warning("Sign-in failed for %s: %s", email, e)
         raise AppError("Email ou mot de passe invalide.", 401, code="bad_credentials") from e
+    # Le client est partagé entre toutes les requêtes : il ne doit rien retenir.
+    oublier_session(public_client())
     if not resp or not resp.session:
         raise AppError("Email ou mot de passe invalide.", 401, code="bad_credentials")
     return resp.session
@@ -145,6 +147,8 @@ def refresh(refresh_token: str, db=None) -> TokenResponse:
     except Exception as e:
         raise AppError("Session expirée — reconnecte-toi.", 401,
                        code="refresh_invalid") from e
+    finally:
+        oublier_session(public_client())
     if not resp or not resp.session or not resp.user:
         raise AppError("Session expirée — reconnecte-toi.", 401, code="refresh_invalid")
     return _token_response(resp.session, resp.user)

@@ -35,7 +35,11 @@ async function tryRefresh() {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refresh_token: rt }),
       });
-      if (!res.ok) { axClearToken(); return false; }
+      // N'effacer les jetons QUE sur un refus avéré du refresh token. Un 502
+      // pendant un redémarrage ou un 500 passager laissait l'utilisateur
+      // dehors pour de bon, alors que ses jetons étaient encore valides.
+      if (res.status === 401 || res.status === 400) { axClearToken(); return false; }
+      if (!res.ok) return false;
       const d = await res.json();
       axSetToken(d.access_token, d.refresh_token);
       return true;
@@ -247,7 +251,9 @@ export async function axStreamChatIn(cid, text, onEvent) {
       headers: { "Content-Type": "application/json", ...(tok ? { Authorization: "Bearer " + tok } : {}) },
       body: JSON.stringify(body),
     });
-    if (res.status === 401 && !retried) {
+    // 401 ou 403 : même règle que dans axFetch — FastAPI répond 403 quand
+    // l'en-tête Authorization manque, ce qui est précisément le cas à réessayer.
+    if ((res.status === 401 || res.status === 403) && !retried) {
       const ok = await tryRefresh();
       if (ok) return run(true);
     }
@@ -292,11 +298,18 @@ export async function axStreamChatIn(cid, text, onEvent) {
 export async function axCreateConversation() {
   return ensureConversation(true);
 }
-/** List the user's conversations (first project). */
+/** List the user's conversations across ALL their projects.
+ * Ne lire que `projects[0]` cachait tout l'historique logé dans un projet
+ * plus ancien — ce qui arrive dès que deux appels concurrents créent chacun
+ * leur « Workspace » au premier chargement. */
 export async function axListConversations() {
   const projects = await axFetch("/intelligence/projects");
   if (!projects.length) return [];
-  return axFetch(`/intelligence/projects/${projects[0].id}/conversations`);
+  const listes = await Promise.all(
+    projects.map((p) => axFetch(`/intelligence/projects/${p.id}/conversations`).catch(() => [])),
+  );
+  return listes.flat().sort((a, b) =>
+    String(b.last_message_at || "").localeCompare(String(a.last_message_at || "")));
 }
 /** Full message history of one conversation. */
 export async function axMessages(cid) {
@@ -332,6 +345,14 @@ export async function axPauseWatch(id) { return axFetch(`/watches/${id}/pause`, 
 export async function axResumeWatch(id) { return axFetch(`/watches/${id}/resume`, { method: "POST", body: {} }); }
 export async function axDeleteWatch(id) { return axFetch(`/watches/${id}`, { method: "DELETE" }); }
 export async function axMetrics(jours = 30) { return axFetch(`/metrics/tableau?jours=${jours}`); }
+// Administration des comptes (écran Pilotage, onglet Comptes).
+export async function axComptes() { return axFetch("/metrics/comptes"); }
+export async function axCrediterCompte(userId, credits, motif) {
+  return axFetch(`/metrics/comptes/${userId}/crediter`, { method: "POST", body: { credits, motif } });
+}
+export async function axProlongerEssai(userId, jours) {
+  return axFetch(`/metrics/comptes/${userId}/prolonger`, { method: "POST", body: { jours } });
+}
 export async function axPremierRapport() { return axFetch("/analysis/premier-rapport", { method: "POST" }); }
 // Export d'une conversation : on télécharge des octets, pas du JSON — axFetch
 // ne convient pas, il parse la réponse.
@@ -370,7 +391,7 @@ export async function axUploadDocument(file, _retried = false) {
     headers: tok ? { Authorization: "Bearer " + tok } : {},
     body: fd,
   });
-  if (res.status === 401 && !_retried) {
+  if ((res.status === 401 || res.status === 403) && !_retried) {
     const ok = await tryRefresh();
     if (ok) return axUploadDocument(file, true);
   }
@@ -396,7 +417,9 @@ export async function axStreamAnalysis(body, onEvent) {
       headers: { "Content-Type": "application/json", ...(tok ? { Authorization: "Bearer " + tok } : {}) },
       body: JSON.stringify(body),
     });
-    if (res.status === 401 && !retried) {
+    // 401 ou 403 : même règle que dans axFetch — FastAPI répond 403 quand
+    // l'en-tête Authorization manque, ce qui est précisément le cas à réessayer.
+    if ((res.status === 401 || res.status === 403) && !retried) {
       const ok = await tryRefresh();
       if (ok) return run(true);
     }

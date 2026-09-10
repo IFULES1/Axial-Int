@@ -4,6 +4,7 @@ from __future__ import annotations
 import hmac
 
 from fastapi import APIRouter, Depends, Header
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -23,6 +24,47 @@ def tableau(jours: int = 30, user: AuthUser = Depends(get_current_user),
     if not user.is_admin:
         raise AppError("Réservé à l'administration.", 403, code="forbidden")
     return service.tableau(db, jours=max(1, min(jours, 365)))
+
+
+def _admin_requis(user: AuthUser) -> None:
+    if not user.is_admin:
+        raise AppError("Réservé à l'administration.", 403, code="forbidden")
+
+
+class CrediterIn(BaseModel):
+    credits: int
+    motif: str = ""
+
+
+class ProlongerIn(BaseModel):
+    jours: int
+
+
+@router.get("/comptes")
+def comptes(user: AuthUser = Depends(get_current_user), db: Session = Depends(get_db)) -> list[dict]:
+    """Une ligne par compte — identique à l'onglet UTILISATEURS du classeur."""
+    _admin_requis(user)
+    return service.comptes(db)
+
+
+@router.post("/comptes/{user_id}/crediter")
+def crediter(user_id: str, payload: CrediterIn, user: AuthUser = Depends(get_current_user),
+             db: Session = Depends(get_db)) -> dict:
+    _admin_requis(user)
+    from app.modules.billing import service as billing
+
+    b = billing.crediter_admin(db, user_id, payload.credits, payload.motif)
+    return {"solde": billing.available_credits(b)}
+
+
+@router.post("/comptes/{user_id}/prolonger")
+def prolonger(user_id: str, payload: ProlongerIn, user: AuthUser = Depends(get_current_user),
+              db: Session = Depends(get_db)) -> dict:
+    _admin_requis(user)
+    from app.modules.billing import service as billing
+
+    b = billing.prolonger_essai(db, user_id, payload.jours)
+    return {"essai_expire_le": b.trial_expires_at.date().isoformat()}
 
 
 @router.get("/export")

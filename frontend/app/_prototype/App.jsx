@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -1612,6 +1612,7 @@ const LABELS_EN = {
   "8 caractères minimum": "8 characters minimum",
   "Votre mot de passe": "Your password",
   "Mot de passe oublié ?": "Forgot your password?",
+  "Se déconnecter": "Sign out",
   "Création du compte…": "Creating your account…",
   "Créer mon compte": "Create my account",
   "En créant un compte, vous acceptez nos": "By creating an account you accept our",
@@ -2134,12 +2135,15 @@ function OnbStep4({ onBack, onSkip }) {
   React.useEffect(() => {
     axBalance()
       .then((b) => setEssai({
-        actif: !!b.periode_essai_active,
+        // `carte_contournable` est calculé par le serveur : période d'essai en
+        // cours OU compte interne, qui n'a pas de carte à donner.
+        actif: !!(b.carte_contournable ?? b.periode_essai_active),
+        periode: !!b.periode_essai_active,
         // Sans date connue, on reste permissif : refuser l'accès sur une
         // information manquante serait le pire des deux défauts.
         fin: b.essai_expire_le || null,
       }))
-      .catch(() => setEssai({ actif: true, fin: null }));
+      .catch(() => setEssai({ actif: true, periode: true, fin: null }));
   }, []);
   const finLisible = (essai && essai.fin)
     ? new Date(essai.fin).toLocaleDateString(
@@ -2200,7 +2204,10 @@ function OnbStep4({ onBack, onSkip }) {
               {libelle("Continuer sans carte")} <Icon name="arrow-right" size={13} />
             </button>
             <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--fg-3)', lineHeight: 1.5 }}>
-              {finLisible
+              {/* La date n'est annoncée que si elle est encore devant : sur un
+                  compte interne l'essai est passé, afficher une échéance
+                  expirée ferait croire à un accès déjà perdu. */}
+              {(essai.periode && finLisible)
                 ? `${libelle("Tu gardes tes 40 crédits offerts. Cette option reste disponible jusqu'au")} ${finLisible}.`
                 : libelle("Tu gardes tes 40 crédits offerts — de quoi lancer une étude complète.")}
             </p>
@@ -2222,6 +2229,36 @@ window.OnbStep1 = OnbStep1;
 window.OnbStep2 = OnbStep2;
 window.OnbStep3 = OnbStep3;
 window.OnbStep4 = OnbStep4;
+
+/* Étiquette d'ancienneté prête à afficher — durée relative jusqu'à 7 jours,
+   date au-delà. L'ancien rendu préfixait « IL Y A » à une DATE
+   (« il y a 7 sept. ») : le préfixe vit ici, jamais dans le JSX. */
+function depuisLabel(iso, lang) {
+  const en = lang === 'en';
+  if (!iso) return en ? 'now' : 'à l\'instant';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const s = Math.max(0, (Date.now() - d.getTime()) / 1000);
+  if (s < 60) return en ? 'just now' : 'à l\'instant';
+  const min = Math.floor(s / 60);
+  if (min < 60) return en ? `${min} min ago` : `il y a ${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return en ? `${h} h ago` : `il y a ${h} h`;
+  const j = Math.floor(h / 24);
+  if (j < 7) return en ? `${j} d ago` : `il y a ${j} j`;
+  return d.toLocaleDateString(en ? 'en-GB' : 'fr-FR', { day: 'numeric', month: 'short' });
+}
+window.depuisLabel = depuisLabel;
+
+/* Déconnexion = rechargement complet. Effacer le jeton puis router vers la
+   page d'accueil laissait TOUT l'état React en place (conversations, rapports,
+   profil, suggestions) : le compte suivant, dans le même onglet, héritait de
+   l'historique du précédent et le sien venait s'y ajouter. */
+function deconnecter() {
+  axClearToken();
+  try { sessionStorage.clear(); } catch (e) {}
+  window.location.replace('/');
+}
 
 
 
@@ -2287,7 +2324,7 @@ function AppShell({ user, conversations, activeId, onPickConv, onNewChat, onLogo
                     onClick={() => onPickConv(c.id)}
                     style={{ width: '100%', textAlign: 'left' }}>
                     <span className="conv-item-title">{c.title}</span>
-                    <span className="conv-item-meta">{lang === 'fr' ? 'IL Y A ' : ''}{c.lastUpdated.toUpperCase()}{lang === 'en' ? ' AGO' : ''}</span>
+                    <span className="conv-item-meta">{(c.lastUpdated || '').toUpperCase()}</span>
                   </button>
                 </li>
               ))}
@@ -2296,7 +2333,13 @@ function AppShell({ user, conversations, activeId, onPickConv, onNewChat, onLogo
         )}
 
         <div className="sidebar-foot">
-          <div className="user-row" onClick={onLogout} style={{ cursor: 'pointer' }}>
+          {/* Toute la ligne déconnecte. Sans rôle ni libellé, ce contrôle était
+              invisible au clavier et aux lecteurs d'écran — et introuvable
+              par une recherche textuelle dans l'audit du 07/09. */}
+          <div className="user-row" onClick={onLogout} style={{ cursor: 'pointer' }}
+               role="button" tabIndex={0}
+               title={libelle('Se déconnecter')} aria-label={libelle('Se déconnecter')}
+               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLogout(); } }}>
             <div className="user-avatar">{user.initials}</div>
             <div className="user-meta">
               <span className="user-name">{user.name}</span>
@@ -2397,7 +2440,7 @@ function ConvListPanel({ conversations, activeId, onPick, onNew }) {
               onClick={() => onPick(c.id)}
               style={{ width: '100%', textAlign: 'left', border: 'none' }}>
               <span className="conv-item-title">{c.title}</span>
-              <span className="conv-item-meta">IL Y A {c.lastUpdated.toUpperCase()}</span>
+              <span className="conv-item-meta">{(c.lastUpdated || '').toUpperCase()}</span>
             </button>
           </li>
         ))}
@@ -2767,14 +2810,98 @@ function Composer({ value, onChange, onSend }) {
 /* ============================================================
    Pilotage — coûts, rentabilité, activité (administration)
    ============================================================ */
+/* Onglet Comptes du Pilotage : une ligne par compte, les mêmes colonnes que
+   l'onglet UTILISATEURS du classeur Google Sheets, et les deux gestes qui
+   passaient jusqu'ici par un accès direct à la base — recharger, prolonger. */
+function ComptesAdmin() {
+  const [lignes, setLignes] = React.useState(null);
+  const [err, setErr] = React.useState('');
+  const [enCours, setEnCours] = React.useState('');
+  const charger = React.useCallback(() => {
+    axComptes().then(setLignes).catch((e) => setErr((e && e.message) || 'Erreur'));
+  }, []);
+  React.useEffect(() => { charger(); }, [charger]);
+
+  const geste = async (l, action) => {
+    const cle = l.user_id + action;
+    if (enCours) return;
+    let saisie;
+    if (action === 'credits') {
+      saisie = window.prompt(`${libelle('Crédits à offrir à')} ${l.email} ?`, '20');
+      if (!saisie) return;
+      const motif = window.prompt(libelle('Motif (visible dans le journal des crédits)'), libelle('geste commercial'));
+      setEnCours(cle);
+      try { await axCrediterCompte(l.user_id, parseInt(saisie, 10), motif || ''); charger(); }
+      catch (e) { window.alert((e && e.message) || 'Erreur'); }
+    } else {
+      saisie = window.prompt(`${libelle("Prolonger l'essai de")} ${l.email} ${libelle('de combien de jours ?')}`, '7');
+      if (!saisie) return;
+      setEnCours(cle);
+      try { await axProlongerEssai(l.user_id, parseInt(saisie, 10)); charger(); }
+      catch (e) { window.alert((e && e.message) || 'Erreur'); }
+    }
+    setEnCours('');
+  };
+
+  const cols = [
+    ['email', 'Email'], ['categorie', 'Cat.'], ['inscrit_le', 'Inscrit'],
+    ['derniere_connexion', 'Dern. connexion'], ['company_name', 'Entreprise'],
+    ['rapports_produits', 'Rapports'], ['questions', 'Questions'], ['veilles', 'Veilles'],
+    ['solde_credits', 'Crédits'], ['essai_expire_le', 'Essai →'], ['abonnement', 'Abonnement'],
+  ];
+  const th = { textAlign: 'left', padding: '8px 10px', fontSize: 11, textTransform: 'uppercase',
+               letterSpacing: '.05em', color: 'var(--fg-3)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' };
+  const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' };
+  const perime = (l) => l.essai_expire_le && l.essai_expire_le < new Date().toISOString().slice(0, 10)
+                        && l.abonnement !== 'active';
+
+  return (
+    <section>
+      {err && <p style={{ color: 'var(--error, #e5484d)', fontSize: 13 }}>{err}</p>}
+      {!lignes && !err && <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>…</p>}
+      {lignes && (
+        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', background: 'var(--surface-2)' }}>
+            <thead><tr>{cols.map(([k, h]) => <th key={k} style={th}>{libelle(h)}</th>)}<th style={th}></th></tr></thead>
+            <tbody>
+              {lignes.map((l) => (
+                <tr key={l.user_id} style={{ opacity: l.categorie === 'interne' ? .6 : 1 }}>
+                  {cols.map(([k]) => (
+                    <td key={k} style={{ ...td,
+                        color: (k === 'essai_expire_le' && perime(l)) ? 'var(--error, #e5484d)' : undefined,
+                        fontFamily: ['solde_credits', 'rapports_produits', 'questions', 'veilles'].includes(k) ? 'var(--font-mono)' : undefined }}>
+                      {l[k] == null || l[k] === false ? '' : String(l[k])}
+                    </td>
+                  ))}
+                  <td style={{ ...td, textAlign: 'right' }}>
+                    <button className="btn btn-sm btn-secondary" disabled={!!enCours}
+                            onClick={() => geste(l, 'credits')} style={{ marginRight: 6 }}>+ {libelle('crédits')}</button>
+                    <button className="btn btn-sm btn-secondary" disabled={!!enCours}
+                            onClick={() => geste(l, 'essai')}>+ {libelle('essai')}</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: 10, lineHeight: 1.5 }}>
+        {libelle("Mêmes colonnes que l'onglet UTILISATEURS du classeur de pilotage. Chaque geste est tracé dans le journal des crédits du compte.")}
+      </p>
+    </section>
+  );
+}
+
 function PilotageSurface() {
   const [jours, setJours] = React.useState(30);
+  const [vue, setVue] = React.useState('chiffres'); // chiffres | comptes
   const [d, setD] = React.useState(null);
   const [err, setErr] = React.useState('');
   React.useEffect(() => {
     setD(null); setErr('');
+    if (vue !== 'chiffres') return;
     axMetrics(jours).then(setD).catch((e) => setErr((e && e.message) || 'Erreur'));
-  }, [jours]);
+  }, [jours, vue]);
 
   const eur = (v) => (v == null ? '—' : `${Number(v).toFixed(2)} €`);
   const eur4 = (v) => (v == null ? '—' : `${Number(v).toFixed(4)} €`);
@@ -2807,16 +2934,21 @@ function PilotageSurface() {
           <h1>{libelle('Pilotage')}</h1>
           <p>{libelle("Coûts de production, rentabilité par type de rapport, activité réelle.")}</p>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {[7, 30, 90].map((n) => (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button className={'btn btn-sm ' + (vue === 'chiffres' ? 'btn-primary' : 'btn-secondary')}
+            onClick={() => setVue('chiffres')}>{libelle('Chiffres')}</button>
+          <button className={'btn btn-sm ' + (vue === 'comptes' ? 'btn-primary' : 'btn-secondary')}
+            onClick={() => setVue('comptes')} style={{ marginRight: 12 }}>{libelle('Comptes')}</button>
+          {vue === 'chiffres' && [7, 30, 90].map((n) => (
             <button key={n} className={'btn btn-sm ' + (jours === n ? 'btn-primary' : 'btn-secondary')}
               onClick={() => setJours(n)}>{n} j</button>
           ))}
         </div>
       </div>
 
+      {vue === 'comptes' && <ComptesAdmin />}
       {err && <p style={{ color: 'var(--error, #e5484d)', fontSize: 13 }}>{err}</p>}
-      {!d && !err && <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>…</p>}
+      {vue === 'chiffres' && !d && !err && <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>…</p>}
 
       {d && (
         <>
@@ -6135,8 +6267,9 @@ function App() {
     try { cardPending = localStorage.getItem('axial_onb_card_pending') === '1'; } catch (e) {}
     if (cardPending) { go('onb4'); return; }
     // L'écran carte revient à chaque connexion tant qu'aucun abonnement n'est
-    // actif. Il reste contournable PENDANT la période d'essai et seulement
-    // pendant : passé l'échéance, la carte devient la condition d'accès.
+    // actif. Il reste contournable pendant la période d'essai — et sans limite
+    // de temps pour les comptes internes, qui n'ont pas de carte à donner.
+    // Passé l'échéance, pour un client, la carte devient la condition d'accès.
     axMe().then(async (u) => {
       if (!u.onboarding_complete) { go('onb1'); return; }
       try {
@@ -6151,7 +6284,7 @@ function App() {
       // réseau ou un 500 passager effaçait le jeton définitivement : le
       // 03/09, un utilisateur s'est retrouvé dehors au milieu de sa session
       // et toutes ses requêtes suivantes sont parties sans jeton (403).
-      if (e && (e.status === 401 || e.status === 403)) { axClearToken(); go('landing'); }
+      if (e && (e.status === 401 || e.status === 403)) { deconnecter(); }
       else { go('app'); }
     });
   }, []);
@@ -6189,7 +6322,7 @@ function App() {
           const fetched = list.filter((c) => !known.has(c.id)).map((c) => ({
             id: c.id,
             title: c.title || 'Conversation',
-            lastUpdated: c.last_message_at ? new Date(c.last_message_at).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : '',
+            lastUpdated: c.last_message_at ? depuisLabel(c.last_message_at, window.AXIAL_LANG) : '',
             loaded: false,
             messages: [],
           }));
@@ -6466,7 +6599,7 @@ function App() {
         activeId={activeId}
         onPickConv={(id) => { setSubRoute('conversations'); openConversation(id); }}
         onNewChat={handleNewChat}
-        onLogout={() => { axClearToken(); go('landing'); }}
+        onLogout={deconnecter}
         topbar={topbar}
         subRoute={subRoute}
         onSubRoute={(r) => {
