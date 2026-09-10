@@ -19,6 +19,10 @@ class Bloc:
     texte: str = ""
     lignes: list[str] = field(default_factory=list)
     cellules: list[list[str]] = field(default_factory=list)
+    # Rang d'apparition parmi les blocs de visualisation (```viz et
+    # « Graphique : »), tous types confondus ; -1 pour les autres blocs. C'est
+    # cet index qui relie un bloc du markdown à son rendu stocké.
+    index: int = -1
 
 
 def _cellules(ligne: str) -> list[str]:
@@ -40,12 +44,27 @@ def decouper(markdown: str) -> list[Bloc]:
             blocs.append(Bloc("puces", lignes=list(puces)))
             puces.clear()
 
+    compteur_viz = 0
     i = 0
     while i < len(lignes):
         ligne = lignes[i].rstrip()
         if not ligne.strip():
             vider_puces()
             i += 1
+            continue
+        # Bloc fencé ```viz … ``` : la description JSON d'une visualisation
+        # (VizSpec). Le contenu brut est gardé tel quel ; c'est le module viz
+        # qui le valide et le compile.
+        if ligne.strip().startswith("```viz"):
+            vider_puces()
+            j = i + 1
+            contenu: list[str] = []
+            while j < len(lignes) and not lignes[j].strip().startswith("```"):
+                contenu.append(lignes[j])
+                j += 1
+            blocs.append(Bloc("viz", texte="\n".join(contenu).strip(), index=compteur_viz))
+            compteur_viz += 1
+            i = j + 1
             continue
         # « Graphique : <titre> » seul sur sa ligne, immédiatement suivi d'un
         # tableau : le modèle a jugé qu'un graphique parle mieux. Le bloc porte
@@ -63,7 +82,9 @@ def decouper(markdown: str) -> list[Bloc]:
                 while i < len(lignes) and lignes[i].lstrip().startswith("|"):
                     cellules.append(_cellules(lignes[i]))
                     i += 1
-                blocs.append(Bloc("graphique", texte=m_graph.group(1).strip(), cellules=cellules))
+                blocs.append(Bloc("graphique", texte=m_graph.group(1).strip(), cellules=cellules,
+                                  index=compteur_viz))
+                compteur_viz += 1
                 continue
         # Tableau : une ligne « | … | » suivie d'une ligne de séparation.
         if ligne.lstrip().startswith("|") and i + 1 < len(lignes) \

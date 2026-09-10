@@ -61,3 +61,11 @@ def test_la_ligne_graphique_sans_tableau_reste_un_paragraphe():
 def test_un_tableau_sans_la_ligne_reste_un_tableau():
     md = "| Acteur | Part |\n|---|---|\n| Alpha | 40 % |\n| Beta | 25 % |"
     assert decouper(md)[0].genre == "tableau"
+
+
+def test_un_bloc_viz_est_un_bloc_type_avec_son_index():
+    md = "## 1\n```viz\n{\"a\": 1}\n```\ntexte\n```viz\n{\"b\": 2}\n```"
+    vizs = [b for b in decouper(md) if b.genre == "viz"]
+    assert [b.index for b in vizs] == [0, 1]
+    assert vizs[0].texte == '{"a": 1}'
+    assert [b.genre for b in decouper(md)] == ["h2", "viz", "p", "viz"]
