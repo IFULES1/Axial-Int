@@ -137,10 +137,10 @@ def prefill_from_website(url: str) -> dict:
     try:
         page_text = _fetch_website_text(url)
     except Exception as e:
-        raise AppError("Site injoignable — remplis les champs à la main.", 422,
+        raise AppError("Site injoignable — remplissez les champs à la main.", 422,
                        code="prefill_fetch_failed") from e
     if len(page_text) < 80:
-        raise AppError("Page trop pauvre pour être analysée — remplis les champs à la main.",
+        raise AppError("Page trop pauvre pour être analysée — remplissez les champs à la main.",
                        422, code="prefill_empty_page")
 
     try:
@@ -156,7 +156,7 @@ def prefill_from_website(url: str) -> dict:
     except AppError:
         raise
     except Exception as e:
-        raise AppError("Extraction impossible — remplis les champs à la main.", 422,
+        raise AppError("Extraction impossible — remplissez les champs à la main.", 422,
                        code="prefill_extract_failed") from e
 
     return {

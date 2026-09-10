@@ -119,7 +119,7 @@ def refresh(db: Session, refresh_token: str) -> TokenResponse:
         claims = jwt.decode(refresh_token, settings.supabase_jwt_secret,
                             algorithms=["HS256"])
     except jwt.InvalidTokenError as e:
-        raise AppError("Session expirée — reconnecte-toi.", 401,
+        raise AppError("Session expirée — reconnectez-vous.", 401,
                        code="refresh_invalid") from e
     if claims.get("type") != "refresh":
         raise AppError("Jeton invalide.", 401, code="refresh_invalid")

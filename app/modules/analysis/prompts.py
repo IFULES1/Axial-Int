@@ -73,7 +73,10 @@ STYLE DE RÉDACTION (OBLIGATOIRE)
 7. Le rapport s'ouvre par « ## Synthèse exécutive » (« ## Executive summary »
    si le rapport est en anglais) : 5 à 8 phrases, les chiffres clés et la
    conclusion principale, lisibles sans le reste du document. Cette section
-   précède la section 1 et ne contient ni puce ni tableau."""
+   précède la section 1 et ne contient ni puce ni tableau.
+8. Registre : le rapport s'adresse au lecteur en le VOUVOYANT (« votre marché »,
+   « vous pouvez »), jamais de tutoiement. En anglais, registre professionnel
+   neutre."""
 
 ACTIONABLE_KPIS = """\
 KPIs & INDICATEURS

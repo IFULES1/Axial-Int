@@ -73,12 +73,12 @@ def vers_notion(jeton: str, titre: str, contenu: str) -> str:
                    json={"filter": {"property": "object", "value": "page"},
                          "page_size": 1}, timeout=30.0)
     if r.status_code >= 300:
-        raise AppError("Notion a refusé la connexion. Reconnecte l'outil.", 502,
+        raise AppError("Notion a refusé la connexion. Reconnectez l'outil.", 502,
                        code="notion_unreachable")
     resultats = r.json().get("results") or []
     if not resultats:
-        raise AppError("Aucune page Notion partagée avec Axial. Partage une page "
-                       "avec l'intégration, puis réessaie.", 400,
+        raise AppError("Aucune page Notion partagée avec Axial. Partagez une page "
+                       "avec l'intégration, puis réessayez.", 400,
                        code="notion_no_target")
 
     creation = httpx.post(
@@ -105,6 +105,6 @@ def vers_drive(jeton: str, titre: str, pdf: bytes) -> str:
                    headers=limites, files=fichiers, timeout=120.0)
     if r.status_code >= 300:
         logger.warning("Envoi Drive refusé : %s", r.text[:200])
-        raise AppError("Google Drive a refusé le dépôt. Reconnecte l'outil.", 502,
+        raise AppError("Google Drive a refusé le dépôt. Reconnectez l'outil.", 502,
                        code="drive_upload_failed")
     return f"https://drive.google.com/file/d/{r.json().get('id')}/view"

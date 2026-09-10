@@ -279,13 +279,14 @@ def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
                      system="", prompt=prompt, citations=citations, tier="chat",
                      max_tokens=0,
                      blocked_answer=("⚠️ Aucun moteur de génération n'est disponible "
-                                     "pour le moment. Réessaie plus tard."))
+                                     "pour le moment. Réessayez plus tard."))
 
     # Conversation libre = discussion naturelle (pas de bloc « AXIAL Recommande »
     # imposé) ; agents spécialisés = persona complète avec cadre d'analyse.
     # Conversation libre : pas de cadre ni de bloc « AXIAL Recommande », mais
     # la consigne de visualisation, elle, vaut pour tous les chemins.
-    system = (persona.system_prompt + personas.VIZ_INSTRUCTION) if free_chat \
+    system = (persona.system_prompt + personas.VIZ_INSTRUCTION
+              + personas.REGISTRE_INSTRUCTION) if free_chat \
         else persona.full_system_prompt()
     # Rendre la mémoire PERCEPTIBLE : quand un contexte entreprise existe,
     # la réponse doit s'y ancrer explicitement (jamais un acteur générique).
@@ -392,7 +393,7 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
         answer, degraded = result.text, False
     except Exception as e:
         logger.warning("Agent generation failed: %s", e)
-        answer, degraded = "⚠️ La génération a échoué. Réessaie dans un instant.", True
+        answer, degraded = "⚠️ La génération a échoué. Réessayez dans un instant.", True
     return _finalize_turn(db, user_id, turn, answer, is_admin=is_admin,
                           degraded=degraded, mesure=result)
 
@@ -446,7 +447,7 @@ def stream_message(db: Session, user_id: str, conversation_id: str, content: str
         logger.warning("Agent stream failed: %s", e)
         if not chunks:
             msg = _finalize_turn(db, user_id, turn,
-                                 "⚠️ La génération a échoué. Réessaie dans un instant.",
+                                 "⚠️ La génération a échoué. Réessayez dans un instant.",
                                  is_admin=is_admin, degraded=True)
             yield _sse({"step": "done", "done": True, "degraded": True,
                         "data": _stream_payload(msg, turn)})
@@ -465,7 +466,7 @@ def stream_message(db: Session, user_id: str, conversation_id: str, content: str
                        turn.agent_key, turn.tier)
         msg = _finalize_turn(
             db, user_id, turn,
-            "⚠️ La réponse n'a pas abouti. Repose ta question — aucun crédit "
+            "⚠️ La réponse n'a pas abouti. Reposez votre question — aucun crédit "
             "n'a été débité.",
             is_admin=is_admin, degraded=True)
         yield _sse({"step": "done", "done": True, "degraded": True,

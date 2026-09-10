@@ -91,7 +91,7 @@ def echanger_code(provider: str, code: str) -> dict:
                        timeout=30.0)
     if r.status_code >= 300:
         logger.warning("Échange de code %s échoué : %s", provider, r.text[:200])
-        raise AppError("L'autorisation a échoué. Réessaie.", 400,
+        raise AppError("L'autorisation a échoué. Réessayez.", 400,
                        code="oauth_exchange_failed")
     return r.json()
 

@@ -61,7 +61,7 @@ def register(data: RegisterRequest, db=None) -> TokenResponse:
     if not settings.allow_freemail and not returning \
             and not is_professional_email(data.email):
         raise AppError(
-            "Merci d'utiliser ton email professionnel. Les adresses Gmail, Yahoo, "
+            "Merci d'utiliser votre email professionnel. Les adresses Gmail, Yahoo, "
             "Outlook, Hotmail, iCloud et similaires ne sont pas acceptées.",
             400, code="freemail_blocked",
         )
@@ -89,7 +89,7 @@ def register(data: RegisterRequest, db=None) -> TokenResponse:
         if "already" in msg and "regist" in msg:
             raise AppError("Cet email est déjà utilisé.", 400, code="email_taken") from e
         logger.exception("Supabase create_user failed")
-        raise AppError("Erreur lors de la création du compte. Réessaie.", 400,
+        raise AppError("Erreur lors de la création du compte. Réessayez.", 400,
                        code="register_failed") from e
 
     user_obj = created.user
@@ -145,10 +145,10 @@ def refresh(refresh_token: str, db=None) -> TokenResponse:
     try:
         resp = public_client().auth.refresh_session(refresh_token)
     except Exception as e:
-        raise AppError("Session expirée — reconnecte-toi.", 401,
+        raise AppError("Session expirée — reconnectez-vous.", 401,
                        code="refresh_invalid") from e
     finally:
         oublier_session(public_client())
     if not resp or not resp.session or not resp.user:
-        raise AppError("Session expirée — reconnecte-toi.", 401, code="refresh_invalid")
+        raise AppError("Session expirée — reconnectez-vous.", 401, code="refresh_invalid")
     return _token_response(resp.session, resp.user)

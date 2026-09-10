@@ -44,11 +44,11 @@ def ingest(db: Session, *, user_id: str, filename: str, data: bytes,
         raise
     except Exception as e:
         logger.warning("Extraction failed for %s: %s", filename, e)
-        raise AppError("Fichier illisible ou corrompu — vérifie qu'il s'ouvre "
-                       "correctement puis réessaie.", 422, code="extraction_failed") from e
+        raise AppError("Fichier illisible ou corrompu — vérifiez qu'il s'ouvre "
+                       "correctement puis réessayez.", 422, code="extraction_failed") from e
     if not text:
         msg = ("Aucun texte détecté dans ce PDF (document scanné ?). "
-               "L'OCR n'a rien pu en tirer — réessaie avec une version texte."
+               "L'OCR n'a rien pu en tirer — réessayez avec une version texte."
                if lowered.endswith(".pdf")
                else "Impossible d'extraire du texte de ce fichier.")
         raise AppError(msg, 422, code="extraction_failed")
@@ -76,7 +76,7 @@ def ingest(db: Session, *, user_id: str, filename: str, data: bytes,
             # which is exactly the "mes documents ne servent à rien" bug.
             db.rollback()
             logger.warning("Indexation failed for %s: %s", filename, e)
-            raise AppError("Indexation momentanément indisponible — réessaie dans "
+            raise AppError("Indexation momentanément indisponible — réessayez dans "
                            "un instant.", 503, code="indexing_failed") from e
     db.commit()
     db.refresh(doc)

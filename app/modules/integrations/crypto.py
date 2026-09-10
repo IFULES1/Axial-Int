@@ -34,5 +34,5 @@ def dechiffrer(valeur: str) -> str:
     try:
         return _fernet().decrypt((valeur or "").encode()).decode()
     except InvalidToken as e:
-        raise AppError("Connexion illisible — reconnecte l'outil.", 400,
+        raise AppError("Connexion illisible — reconnectez l'outil.", 400,
                        code="connection_corrupt") from e

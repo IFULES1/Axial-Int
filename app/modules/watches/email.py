@@ -113,7 +113,7 @@ def _md_to_html(md: str, vizs: list[dict] | None = None) -> str:
         'margin:0 auto;color:#1a1a2e;line-height:1.55;font-size:14px">'
         f"{body}"
         '<hr style="margin-top:28px;border:none;border-top:1px solid #e5e5ef">'
-        '<p style="color:#8888a0;font-size:12px">Envoyé par votre agent de veille Axial.</p>'
+        '<p style="color:#8888a0;font-size:12px">Envoyé par ton agent de veille Axial.</p>'
         "</div>"
     )
 

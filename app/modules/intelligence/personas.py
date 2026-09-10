@@ -41,6 +41,14 @@ VIZ_INSTRUCTION = (
     "Sinon, aucun bloc : pas de graphique pour du conseil qualitatif."
 )
 
+# Registre — s'applique à TOUT contenu généré (conversation libre, agents
+# spécialisés, veille) : le lecteur est vouvoyé, jamais tutoyé. Distinct des
+# emails de Miradie, qui tutoient (voix personnelle, règle du 22/08).
+REGISTRE_INSTRUCTION = (
+    "\n\nREGISTRE : vouvoie toujours l'utilisateur (« vous », « votre ») — "
+    "jamais « tu ». Ton professionnel et direct."
+)
+
 # Socle commun V4 (porté de l'ancienne plateforme) : rigueur, style, sources.
 AXIAL_SHARED_RULES = (
     "\n\nRÈGLES COMMUNES AXIAL :\n"
@@ -69,7 +77,8 @@ class AgentPersona:
     redirect_hint: str = ""
 
     def full_system_prompt(self) -> str:
-        return self.system_prompt + AXIAL_SHARED_RULES + AXIAL_RECOMMENDE_INSTRUCTION + VIZ_INSTRUCTION
+        return (self.system_prompt + AXIAL_SHARED_RULES + AXIAL_RECOMMENDE_INSTRUCTION
+                + VIZ_INSTRUCTION + REGISTRE_INSTRUCTION)
 
 
 MARKET_SCANNER = AgentPersona(

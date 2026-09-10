@@ -170,7 +170,7 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
         return AnalysisResult(
             analysis_type=analysis_type, title=label_title,
             content=("⚠️ Aucun moteur de génération n'est disponible pour le moment. "
-                     "Réessaie une fois le service rétabli."),
+                     "Réessayez une fois le service rétabli."),
             degraded=True, status_note="llm_unavailable",
             metadata={"passages": len(passages), "web_sources": len(web_results)},
         )
@@ -185,7 +185,7 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
         logger.warning("Generation failed: %s", e)
         return AnalysisResult(
             analysis_type=analysis_type, title=label_title,
-            content=f"⚠️ La génération a échoué ({type(e).__name__}). Réessaie dans un instant.",
+            content=f"⚠️ La génération a échoué ({type(e).__name__}). Réessayez dans un instant.",
             degraded=True, status_note="generation_failed",
             metadata={"passages": len(passages), "web_sources": len(web_results)},
         )
@@ -195,7 +195,7 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
                        result.model)
         return AnalysisResult(
             analysis_type=analysis_type, title=label_title,
-            content=("⚠️ La génération n'a pas abouti. Réessaie dans un instant — "
+            content=("⚠️ La génération n'a pas abouti. Réessayez dans un instant — "
                      "aucun crédit n'a été débité."),
             degraded=True, status_note="empty_generation",
             metadata={"passages": len(passages), "web_sources": len(web_results)},
@@ -213,7 +213,7 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
             content=(result.text or "") + (
                 "\n\n---\n\n⚠️ **Ce rapport est incomplet.** La rédaction a atteint "
                 "la limite de sortie du modèle avant sa conclusion. Aucun crédit "
-                "n'a été débité — relance la génération."),
+                "n'a été débité — relancez la génération."),
             sources=citations, degraded=True, status_note="truncated_generation",
             metadata={"passages": len(passages), "web_sources": len(web_results),
                       "stop_reason": result.stop_reason},
@@ -393,7 +393,7 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
         except Exception as e:
             logger.warning("Stream generation failed: %s", e)
             yield _sse({"step": "error", "done": True,
-                        "error": "La génération a échoué. Réessaie dans un instant."})
+                        "error": "La génération a échoué. Réessayez dans un instant."})
             return
 
     if result.degraded:

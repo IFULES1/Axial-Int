@@ -52,17 +52,17 @@ def desinscription(t: str, db: Session = Depends(get_db)) -> Response:
     et il est déjà dans l'email. Exiger une connexion pour se désinscrire,
     c'est garantir des plaintes pour spam à la place.
     """
-    message = "Adresse retirée. Tu ne recevras plus d'email d'Axial."
+    message = "Adresse retirée. Vous ne recevrez plus d'email d'Axial."
     try:
         row = db.scalar(select(EmailSend).where(EmailSend.token == t))
         if row is None:
-            message = "Ce lien n'est plus valide. Réponds à l'email et je te retire à la main."
+            message = "Ce lien n'est plus valide. Répondez à l'email et nous vous retirerons à la main."
         elif db.get(EmailSuppression, row.email) is None:
             db.add(EmailSuppression(email=row.email, reason="désinscription en un clic"))
             db.commit()
     except Exception as e:  # noqa: BLE001
         logger.warning("Désinscription échouée (%s) : %s", t, e)
-        message = "Une erreur est survenue. Réponds à l'email et je te retire à la main."
+        message = "Une erreur est survenue. Répondez à l'email et nous vous retirerons à la main."
     return Response(
         content=("<!doctype html><meta charset=utf-8>"
                  "<title>Désinscription — Axial</title>"

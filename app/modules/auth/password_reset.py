@@ -236,13 +236,13 @@ def reinitialiser(db: Session, token: str, nouveau_mot_de_passe: str) -> str:
     ligne = db.scalar(select(PasswordReset).where(
         PasswordReset.token_hash == _empreinte(token or "")))
     if ligne is None or ligne.used_at is not None:
-        raise AppError("Ce lien n'est plus valable. Redemande-en un.", 400,
+        raise AppError("Ce lien n'est plus valable. Redemandez-en un.", 400,
                        code="reset_invalid")
     expire = ligne.expires_at
     if expire.tzinfo is None:
         expire = expire.replace(tzinfo=dt.timezone.utc)
     if expire < _now():
-        raise AppError("Ce lien a expiré. Redemande-en un.", 400, code="reset_expired")
+        raise AppError("Ce lien a expiré. Redemandez-en un.", 400, code="reset_expired")
 
     _appliquer(db, ligne.email, nouveau_mot_de_passe)
     ligne.used_at = _now()
