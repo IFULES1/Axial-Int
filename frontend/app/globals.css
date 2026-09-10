@@ -2898,3 +2898,123 @@ html[data-theme="light"] .sidebar {
 /* Fix lisibilité : titres des types de rapport invisibles en thème sombre */
 .rep-type-tile h4 { color: var(--fg); }
 .rep-type-tile.active h4 { color: var(--fg); }
+
+/* ============================================================
+   Conversations v2 — garde-fous et retours à l'utilisateur
+   ============================================================ */
+
+/* Modale « Plus de crédits » : même voile que le wizard (.wizard-modal),
+   carte plus étroite parce qu'il n'y a qu'un message et trois boutons. */
+.ax-modale-etroite {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  width: 100%;
+  max-width: 440px;
+  overflow: hidden;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.55);
+}
+.ax-modale-head { padding: 26px 26px 18px; }
+.ax-modale-icone {
+  width: 40px; height: 40px;
+  border-radius: 12px;
+  background: rgba(121, 118, 247, 0.16);
+  color: var(--v-soft);
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-bottom: 14px;
+}
+.ax-modale-head h3 { margin: 0 0 8px; font-size: 18px; letter-spacing: -0.01em; }
+.ax-modale-head p { margin: 0; font-size: 13.5px; color: var(--fg-2); line-height: 1.55; }
+.ax-modale-solde { margin-top: 12px; font-size: 11.5px; color: var(--fg-3); }
+.ax-modale-actions {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 16px 26px 22px;
+  border-top: 1px solid var(--border);
+}
+
+/* Bandeau « profil entreprise vide », au-dessus du composer. */
+.ax-bandeau-profil {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-bottom: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(121, 118, 247, 0.07);
+  color: var(--fg-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.ax-bandeau-profil > button {
+  background: none; border: none; padding: 0;
+  color: var(--v-soft); font-size: 12.5px; font-weight: 600;
+  cursor: pointer; text-decoration: underline;
+}
+
+/* Compteur de caractères (à partir de 5 000). */
+.ax-compteur-carac {
+  margin-top: 6px;
+  text-align: right;
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+/* Carte d'erreur dans le fil, à la place de la bulle de réponse. */
+.ax-carte-erreur {
+  border: 1px solid var(--error, #e5484d);
+  border-radius: 12px;
+  background: rgba(229, 72, 77, 0.07);
+  padding: 14px 16px;
+  max-width: 100%;
+}
+.ax-carte-erreur-titre {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 13.5px; font-weight: 600;
+  color: var(--error, #e5484d);
+}
+.ax-carte-erreur p {
+  margin: 6px 0 0;
+  font-size: 13px; color: var(--fg-2); line-height: 1.55;
+}
+.ax-carte-erreur .btn { margin-top: 12px; }
+
+/* Badge « Réponse partielle » sur une bulle dont le statut n'est pas complet. */
+.ax-badge-partiel {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-bottom: 10px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--warning, #f0a020);
+  color: var(--warning, #f0a020);
+  font-family: var(--font-mono);
+  font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase;
+}
+
+/* Document importé mais non indexé (chunk_count = 0). */
+.ax-badge-illisible {
+  display: inline-flex; align-items: center; gap: 4px;
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(229, 72, 77, 0.12);
+  color: var(--error, #e5484d);
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+}
+
+/* Avis « session expirée » sur l'écran de connexion. */
+.ax-avis-session {
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  border: 1px solid var(--warning, #f0a020);
+  border-radius: 10px;
+  background: rgba(240, 160, 32, 0.08);
+  color: var(--fg-2);
+  font-size: 12.5px; line-height: 1.45;
+  text-align: left;
+}
+
+@media (max-width: 767px) {
+  .ax-modale-actions { flex-direction: column; }
+  .ax-modale-actions .btn { width: 100%; justify-content: center; }
+}

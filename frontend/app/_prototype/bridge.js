@@ -49,8 +49,37 @@ async function tryRefresh() {
   return _refreshing;
 }
 
-export async function axFetch(path, { method = "GET", body, auth = true, _retried = false } = {}) {
-  const headers = { "Content-Type": "application/json" };
+/** Clé d'idempotence : le backend rejoue le même tour au lieu de re-facturer.
+ * `crypto.randomUUID` manque sur les contextes non sécurisés (http://<ip>) et
+ * les navigateurs anciens — un repli est obligatoire, sinon « Réessayer »
+ * partirait sans clé et paierait deux fois. */
+export function nouvelleCleIdempotence() {
+  try {
+    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  } catch (e) {}
+  const r = () => Math.random().toString(16).slice(2, 10);
+  return `${r()}-${r()}-${r()}-${r()}`;
+}
+
+/** Lit le corps d'erreur d'une réponse HTTP dans les DEUX formes rencontrées :
+ * l'enveloppe maison `{error:{code,message}}` (app/errors.py) et le `detail`
+ * de FastAPI. Sans le premier cas, `insufficient_credits` et
+ * `message_trop_long` arrivaient au front sans code : impossible de les nommer. */
+async function erreurDepuisReponse(res, msgDefaut, codeDefaut) {
+  let msg = msgDefaut || res.statusText, code;
+  try {
+    const d = await res.json();
+    msg = d.error?.message || d.detail?.message || d.detail || d.message || msg;
+    code = d.error?.code || d.detail?.code || d.code;
+  } catch (e) {}
+  const err = new Error(msg);
+  err.status = res.status;
+  err.code = code || codeDefaut;
+  return err;
+}
+
+export async function axFetch(path, { method = "GET", body, auth = true, headers: extra, _retried = false } = {}) {
+  const headers = { "Content-Type": "application/json", ...(extra || {}) };
   const tok = auth ? axGetToken() : null;
   if (tok) headers["Authorization"] = "Bearer " + tok;
   const res = await fetch(AX_API + path, {
@@ -63,20 +92,14 @@ export async function axFetch(path, { method = "GET", body, auth = true, _retrie
   if ((res.status === 401 || res.status === 403) && auth && !_retried
       && path !== "/auth/refresh") {
     const ok = await tryRefresh();
-    if (ok) return axFetch(path, { method, body, auth, _retried: true });
+    if (ok) return axFetch(path, { method, body, auth, headers: extra, _retried: true });
+    // Rafraîchissement refusé : la session est bel et bien terminée. Le
+    // marquer explicitement, parce que le seul code HTTP ne suffit pas —
+    // FastAPI rend 403 (et non 401) quand l'en-tête manque, et `decrireErreur`
+    // conclurait « réessayer » là où il faut renvoyer vers la connexion.
+    throw await erreurDepuisReponse(res, "Session expirée.", "refresh_invalid");
   }
-  if (!res.ok) {
-    let msg = res.statusText, code;
-    try {
-      const d = await res.json();
-      msg = d.detail?.message || d.detail || d.message || msg;
-      code = d.detail?.code || d.code;
-    } catch (e) {}
-    const err = new Error(msg);
-    err.status = res.status;
-    err.code = code;
-    throw err;
-  }
+  if (!res.ok) throw await erreurDepuisReponse(res);
   if (res.status === 204) return null;
   return res.json();
 }
@@ -180,140 +203,231 @@ export async function axPortal() {
   return axFetch("/billing/portal", { method: "POST", body: { return_url: base + "/" } });
 }
 
-// --- chat / analysis (Workspace) ---
-let _convId = null;
+// --- chat / conversations (Workspace) ---
 
-async function ensureConversation(forceNew = false) {
-  if (_convId && !forceNew) return _convId;
-  let projects = await axFetch("/intelligence/projects");
-  if (!projects.length) {
-    projects = [await axFetch("/intelligence/projects", { method: "POST", body: { name: "Workspace" } })];
+/** Lecture d'un flux SSE, partagée par le chat et les rapports.
+ *
+ * Découpe les trames sur la ligne vide, extrait la ligne `data:`, transmet
+ * CHAQUE événement à `onEvent` sans le filtrer (le front décide quoi en
+ * faire : étapes, avertissements, deltas) et renvoie le `data` du `done`
+ * final. `messageInterrompu` distingue « le serveur a coupé avant le done »
+ * d'un flux normal.
+ */
+export async function lireFluxSSE(res, onEvent, messageInterrompu = "Réponse interrompue.") {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "", final = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() || "";
+    for (const frame of frames) {
+      const line = frame.split("\n").find((l) => l.startsWith("data:"));
+      if (!line) continue;
+      let evt;
+      try { evt = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+      if (onEvent) onEvent(evt);
+      if (evt.done) {
+        if (evt.error) { const e = new Error(evt.error); e.code = evt.code; throw e; }
+        final = evt.data || null;
+      }
+    }
   }
-  const pid = projects[0].id;
-  if (forceNew) {
-    const created = await axFetch(`/intelligence/projects/${pid}/conversations`, {
-      method: "POST", body: { title: "Workspace" },
-    });
-    _convId = created.id;
-    return _convId;
-  }
-  const convs = await axFetch(`/intelligence/projects/${pid}/conversations`);
-  const conv = convs.length
-    ? convs[0]
-    : await axFetch(`/intelligence/projects/${pid}/conversations`, {
-        method: "POST", body: { title: "Workspace" },
-      });
-  _convId = conv.id;
-  return _convId;
+  if (!final) throw new Error(messageInterrompu);
+  return final;
 }
 
-/** Force the next axChat to target a brand-new backend conversation. */
-export async function axNewConversation() {
-  return ensureConversation(true);
-}
-
-/** Send a chat message; returns the assistant reply { content, agent, citations }.
- * The workspace mode selector persists the chosen agent in localStorage:
- * "auto" (conversation libre, routing par intention) or an explicit persona key. */
-export async function axChat(text) {
-  const cid = await ensureConversation();
-  return axChatIn(cid, text);
-}
-/** Send a chat message into a SPECIFIC backend conversation.
- * Attaches any documents queued via the composer (window.AXIAL_PENDING_DOCS):
- * they are injected directly into THIS message's context, like an attachment. */
-export async function axChatIn(cid, text) {
-  let agent = "auto";
-  try { agent = localStorage.getItem("axial_agent_mode") || "auto"; } catch (e) {}
-  const pending = (typeof window !== "undefined" && window.AXIAL_PENDING_DOCS) || [];
-  const document_ids = pending.map((d) => d.id);
-  const r = await axFetch(`/intelligence/conversations/${cid}/messages`, {
-    method: "POST", body: { content: text, agent, document_ids: document_ids.length ? document_ids : null },
-  });
-  if (typeof window !== "undefined") window.AXIAL_PENDING_DOCS = [];
-  try { window.dispatchEvent(new Event("axial-pending-docs")); } catch (e) {}
-  return r;
-}
-/** Streamed chat answer: onEvent({step, delta, citations}) fires as words arrive.
- * Returns the final persisted message. Falls back to the blocking route if the
- * stream can't be opened. */
-export async function axStreamChatIn(cid, text, onEvent) {
-  let agent = "auto";
-  try { agent = localStorage.getItem("axial_agent_mode") || "auto"; } catch (e) {}
-  const pending = (typeof window !== "undefined" && window.AXIAL_PENDING_DOCS) || [];
-  const document_ids = pending.map((d) => d.id);
-  const body = { content: text, agent, document_ids: document_ids.length ? document_ids : null };
-
+/** Ouvre une route SSE authentifiée et la lit avec `lireFluxSSE`.
+ *
+ * - rejoue UNE fois après rafraîchissement du jeton sur 401/403 ;
+ * - `X-Idempotency-Key` : sur un « Réessayer », la MÊME clé fait rejouer le
+ *   tour côté serveur au lieu de le refacturer ;
+ * - un refus 4xx ne se replie PAS sur la route bloquante : rejouer un 402 ou
+ *   un 413 ne ferait qu'ajouter un aller-retour avant la même erreur. Seule
+ *   une indisponibilité du flux (5xx, corps absent) lève
+ *   `stream_unavailable`, que l'appelant peut replier.
+ */
+async function ouvrirFluxSSE(path, { body, onEvent, signal, idempotencyKey,
+                                     messageInterrompu } = {}) {
   const run = async (retried) => {
     const tok = axGetToken();
-    const res = await fetch(AX_API + `/intelligence/conversations/${cid}/messages/stream`, {
+    const res = await fetch(AX_API + path, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...(tok ? { Authorization: "Bearer " + tok } : {}) },
-      body: JSON.stringify(body),
+      headers: {
+        "Content-Type": "application/json",
+        ...(tok ? { Authorization: "Bearer " + tok } : {}),
+        ...(idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {}),
+      },
+      body: JSON.stringify(body || {}),
+      signal,
     });
     // 401 ou 403 : même règle que dans axFetch — FastAPI répond 403 quand
     // l'en-tête Authorization manque, ce qui est précisément le cas à réessayer.
     if ((res.status === 401 || res.status === 403) && !retried) {
       const ok = await tryRefresh();
       if (ok) return run(true);
+      throw await erreurDepuisReponse(res, "Session expirée.", "refresh_invalid");
     }
-    if (!res.ok || !res.body) { const e = new Error("stream_unavailable"); e.status = res.status; throw e; }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "", final = null;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const frames = buffer.split("\n\n");
-      buffer = frames.pop() || "";
-      for (const frame of frames) {
-        const line = frame.split("\n").find((l) => l.startsWith("data:"));
-        if (!line) continue;
-        let evt;
-        try { evt = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
-        if (onEvent) onEvent(evt);
-        if (evt.done) {
-          if (evt.error) { const e = new Error(evt.error); e.code = evt.code; throw e; }
-          final = evt.data || null;
-        }
-      }
+    if (res.status >= 400 && res.status < 500) throw await erreurDepuisReponse(res);
+    if (!res.ok || !res.body) {
+      const e = new Error("stream_unavailable");
+      e.status = res.status;
+      throw e;
     }
-    if (!final) throw new Error("Réponse interrompue.");
-    return final;
+    return lireFluxSSE(res, onEvent, messageInterrompu);
   };
-
-  try {
-    const r = await run(false);
-    if (typeof window !== "undefined") window.AXIAL_PENDING_DOCS = [];
-    try { window.dispatchEvent(new Event("axial-pending-docs")); } catch (e) {}
-    return r;
-  } catch (e) {
-    if (e && e.message === "stream_unavailable") return axChatIn(cid, text);  // repli
-    throw e;
-  }
+  return run(false);
 }
 
-/** Create a fresh backend conversation and return its id. */
-export async function axCreateConversation() {
-  return ensureConversation(true);
+// --- projets (dossiers) ---
+export async function axProjets(inclureArchives = false) {
+  return axFetch(`/intelligence/projects?inclure_archives=${inclureArchives ? "true" : "false"}`);
+}
+export async function axCreerProjet(nom) {
+  return axFetch("/intelligence/projects", { method: "POST", body: { name: nom } });
+}
+export async function axRenommerProjet(id, nom) {
+  return axFetch(`/intelligence/projects/${id}`, { method: "PATCH", body: { name: nom } });
+}
+export async function axArchiverProjet(id, archive = true) {
+  return axFetch(`/intelligence/projects/${id}`, { method: "PATCH", body: { archived: !!archive } });
+}
+export async function axSupprimerProjet(id) {
+  return axFetch(`/intelligence/projects/${id}`, { method: "DELETE" });
+}
+
+/** Dossier d'accueil des conversations sans dossier choisi.
+ * Remplace l'ancien `ensureConversation` : plus d'état module mutable, plus de
+ * création implicite de conversation — seulement le dossier « Général ». */
+export async function axProjetParDefaut() {
+  const projets = await axProjets();
+  if (projets.length) return projets[0].id;
+  const cree = await axCreerProjet("Général");
+  return cree.id;
+}
+
+// --- conversations ---
+/** Crée une conversation vide dans un dossier (« Général » par défaut). */
+export async function axCreateConversation(projectId, titre) {
+  const pid = projectId || (await axProjetParDefaut());
+  const c = await axFetch(`/intelligence/projects/${pid}/conversations`, {
+    method: "POST", body: { title: titre || null },
+  });
+  return c.id;
 }
 /** List the user's conversations across ALL their projects.
  * Ne lire que `projects[0]` cachait tout l'historique logé dans un projet
  * plus ancien — ce qui arrive dès que deux appels concurrents créent chacun
- * leur « Workspace » au premier chargement. */
-export async function axListConversations() {
-  const projects = await axFetch("/intelligence/projects");
+ * leur dossier au premier chargement. */
+export async function axListConversations({ inclureArchivees = false } = {}) {
+  const projects = await axProjets();
   if (!projects.length) return [];
   const listes = await Promise.all(
-    projects.map((p) => axFetch(`/intelligence/projects/${p.id}/conversations`).catch(() => [])),
+    projects.map((p) => axFetch(
+      `/intelligence/projects/${p.id}/conversations?inclure_archivees=${inclureArchivees ? "true" : "false"}`,
+    ).catch(() => [])),
   );
   return listes.flat().sort((a, b) =>
     String(b.last_message_at || "").localeCompare(String(a.last_message_at || "")));
 }
-/** Full message history of one conversation. */
-export async function axMessages(cid) {
-  return axFetch(`/intelligence/conversations/${cid}/messages`);
+export async function axRenommerConversation(id, titre) {
+  return axFetch(`/intelligence/conversations/${id}`, { method: "PATCH", body: { title: titre } });
+}
+export async function axSupprimerConversation(id) {
+  return axFetch(`/intelligence/conversations/${id}`, { method: "DELETE" });
+}
+export async function axEpinglerConversation(id, epingle = true) {
+  return axFetch(`/intelligence/conversations/${id}`, { method: "PATCH", body: { pinned: !!epingle } });
+}
+export async function axArchiverConversation(id, archive = true) {
+  return axFetch(`/intelligence/conversations/${id}`, { method: "PATCH", body: { archived: !!archive } });
+}
+export async function axDeplacerConversation(id, projectId) {
+  return axFetch(`/intelligence/conversations/${id}`, { method: "PATCH", body: { project_id: projectId } });
+}
+/** Recherche plein texte (titre + contenu des messages), 3 caractères minimum. */
+export async function axRechercherConversations(q) {
+  return axFetch(`/intelligence/conversations/search?q=${encodeURIComponent(q || "")}`);
+}
+/** Total du fil : crédits, tokens (et coût € pour les admins). */
+export async function axCoutConversation(cid) {
+  return axFetch(`/intelligence/conversations/${cid}/cout`);
+}
+/** Fenêtre paginée de messages → `{ items, has_more }`.
+ * `before` = identifiant du plus ancien message déjà affiché. */
+export async function axMessagesPage(cid, { limit = 50, before } = {}) {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (before) q.set("before", before);
+  return axFetch(`/intelligence/conversations/${cid}/messages?${q.toString()}`);
+}
+
+// --- envoi d'un message ---
+/** Documents mis en file par le composer, joints à CE message. */
+function documentsEnAttente() {
+  const pending = (typeof window !== "undefined" && window.AXIAL_PENDING_DOCS) || [];
+  return pending.map((d) => d.id);
+}
+function viderDocumentsEnAttente() {
+  if (typeof window === "undefined") return;
+  window.AXIAL_PENDING_DOCS = [];
+  try { window.dispatchEvent(new Event("axial-pending-docs")); } catch (e) {}
+}
+function modeAgent() {
+  try { return localStorage.getItem("axial_agent_mode") || "auto"; } catch (e) { return "auto"; }
+}
+
+/** Send a chat message into a SPECIFIC backend conversation (route bloquante).
+ * Sert de repli quand le flux n'est pas disponible. */
+export async function axChatIn(cid, text, { idempotencyKey } = {}) {
+  const document_ids = documentsEnAttente();
+  const r = await axFetch(`/intelligence/conversations/${cid}/messages`, {
+    method: "POST",
+    body: { content: text, agent: modeAgent(), document_ids: document_ids.length ? document_ids : null },
+    headers: idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : undefined,
+  });
+  viderDocumentsEnAttente();
+  return r;
+}
+
+/** Streamed chat answer : `onEvent` reçoit chaque événement du flux
+ * (`etape`, `avertissement`, `sources`, `delta`, `done`) tel quel.
+ * Renvoie le message persisté final. Repli sur la route bloquante quand le
+ * flux ne s'ouvre pas. */
+export async function axStreamChatIn(cid, text, onEvent, { signal, idempotencyKey } = {}) {
+  const document_ids = documentsEnAttente();
+  const body = {
+    content: text, agent: modeAgent(),
+    document_ids: document_ids.length ? document_ids : null,
+  };
+  try {
+    const r = await ouvrirFluxSSE(
+      `/intelligence/conversations/${cid}/messages/stream`,
+      { body, onEvent, signal, idempotencyKey },
+    );
+    viderDocumentsEnAttente();
+    return r;
+  } catch (e) {
+    if (e && e.message === "stream_unavailable") return axChatIn(cid, text, { idempotencyKey });
+    throw e;
+  }
+}
+
+/** Rejoue le dernier tour : supprime la réponse et relance le même flux. */
+export async function axRegenerer(cid, msgId, onEvent, { signal, idempotencyKey } = {}) {
+  return ouvrirFluxSSE(
+    `/intelligence/conversations/${cid}/messages/${msgId}/regenerer`,
+    { body: {}, onEvent, signal, idempotencyKey },
+  );
+}
+
+/** Remplace un message envoyé, supprime la suite du fil et relance le flux. */
+export async function axEditerMessage(cid, msgId, content, onEvent, { signal, idempotencyKey } = {}) {
+  return ouvrirFluxSSE(
+    `/intelligence/conversations/${cid}/messages/${msgId}/editer`,
+    { body: { content }, onEvent, signal, idempotencyKey },
+  );
 }
 
 // --- intégrations (Notion, Google) ---
@@ -384,6 +498,12 @@ export async function axDeleteFeed(id) { return axFetch(`/watches/feeds/${id}`, 
 // --- documents (user RAG) ---
 export async function axListDocuments() { return axFetch("/documents"); }
 export async function axDeleteDocument(id) { return axFetch(`/documents/${id}`, { method: "DELETE" }); }
+/** Relance l'indexation d'un document déjà importé (`chunk_count = 0`).
+ * Renvoie le `DocumentOut` à jour : le front sait tout de suite si la
+ * seconde tentative a produit des chunks. */
+export async function axReindexerDocument(id) {
+  return axFetch(`/documents/${id}/reindexer`, { method: "POST", body: {} });
+}
 export async function axUploadDocument(file, _retried = false) {
   const tok = axGetToken();
   const fd = new FormData();
@@ -412,51 +532,10 @@ export async function axRunAnalysis(body) { return axFetch("/analysis/run", { me
  * Returns the final report payload. Falls back to the blocking route on 401
  * retry or when streaming isn't available. */
 export async function axStreamAnalysis(body, onEvent) {
-  const run = async (retried) => {
-    const tok = axGetToken();
-    const res = await fetch(AX_API + "/analysis/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(tok ? { Authorization: "Bearer " + tok } : {}) },
-      body: JSON.stringify(body),
-    });
-    // 401 ou 403 : même règle que dans axFetch — FastAPI répond 403 quand
-    // l'en-tête Authorization manque, ce qui est précisément le cas à réessayer.
-    if ((res.status === 401 || res.status === 403) && !retried) {
-      const ok = await tryRefresh();
-      if (ok) return run(true);
-    }
-    if (!res.ok || !res.body) {
-      const err = new Error("stream_unavailable");
-      err.status = res.status;
-      throw err;
-    }
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "", final = null;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      // SSE frames are separated by a blank line.
-      const frames = buffer.split("\n\n");
-      buffer = frames.pop() || "";
-      for (const frame of frames) {
-        const line = frame.split("\n").find((l) => l.startsWith("data:"));
-        if (!line) continue;
-        let evt;
-        try { evt = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
-        if (onEvent) onEvent(evt);
-        if (evt.done) {
-          if (evt.error) { const e = new Error(evt.error); e.code = evt.code; throw e; }
-          final = evt.data || null;
-        }
-      }
-    }
-    if (!final) throw new Error("Génération interrompue.");
-    return final;
-  };
   try {
-    return await run(false);
+    return await ouvrirFluxSSE("/analysis/stream", {
+      body, onEvent, messageInterrompu: "Génération interrompue.",
+    });
   } catch (e) {
     if (e && e.message === "stream_unavailable") return axRunAnalysis(body);  // repli
     throw e;

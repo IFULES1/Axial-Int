@@ -4,20 +4,12 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, AX_API, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, AX_API, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument } from "./bridge";
 
 
 /* data.js */
 /* data.js — mock state for the prototype */
 
-const SUGGESTED_PROMPTS = [
-  "Mes 3 concurrents directs sur le SaaS RH en France",
-  "Combien lever en Série A pour un SaaS Seed à 1,2M ARR",
-  "Risques d'un go-to-market Allemagne avant France",
-  "Comment positionner un produit IA face à un incumbent",
-];
-
-window.AXIAL_DATA = { SUGGESTED_PROMPTS };
 
 
 
@@ -134,7 +126,6 @@ const STRINGS = {
     'common.new': 'Nouveau',
     'common.delete': 'Supprimer',
     'common.edit': 'Modifier',
-    'common.share': 'Partager',
     'common.copy': 'Copier',
     'common.upgrade': 'Améliorer',
     'common.invite': 'Inviter',
@@ -287,7 +278,6 @@ const STRINGS = {
     'settings.billing': 'Facturation',
 
     // sharing
-    'share.title': 'Partager',
     'share.tab.people': 'Personnes',
     'share.tab.link': 'Lien',
     'share.tab.embed': 'Intégrer',
@@ -337,6 +327,46 @@ const STRINGS = {
     'landing.cta.body': 'Trois minutes pour configurer votre contexte. Aucune carte de crédit pour explorer.',
     'landing.cta.btn': 'Démarrer maintenant',
     'landing.footer.note': '© 2026 AXIAL · PARIS · CONÇU POUR LES FONDATEURS FRANCOPHONES',
+
+    // conversations v2 — suggestions de repli, garde-fous, erreurs nommées
+    'conv.suggest.1': 'Mes 3 concurrents directs et comment m\u2019en différencier',
+    'conv.suggest.2': 'Combien lever en Série A pour un SaaS Seed à 1,2 M€ d\u2019ARR',
+    'conv.suggest.3': 'Les risques d\u2019un go-to-market Allemagne avant la France',
+    'conv.suggest.4': 'Comment positionner un produit IA face à un acteur installé',
+    'conv.profil.vide': 'Votre profil entreprise est vide : les réponses ne seront pas personnalisées.',
+    'conv.profil.lien': 'Compléter',
+    'conv.partielle': 'Réponse partielle',
+    'conv.partielle.aide': 'La réponse a été interrompue ou produite sans toutes ses sources. Aucun crédit n\u2019a été débité.',
+    'conv.compteur.aide': 'Caractères utilisés',
+    'conv.doc.max': '3 documents maximum par message',
+    'conv.doc.importer': 'Importer un document',
+    'conv.doc.importer.aide': 'Importer un document (PDF, DOCX, XLSX, CSV, TXT — utilisé dans les analyses)',
+    'conv.doc.retirer': 'Retirer',
+    'conv.doc.joint': 'joint au prochain message',
+    'conv.doc.echec': 'Échec de l\u2019import.',
+    'conv.doc.illisible': 'Document importé, mais aucun contenu n\u2019a pu être extrait : il ne servira pas aux réponses.',
+    'doc.badge.illisible': 'non lisible',
+    'doc.reindexer': 'Réindexer',
+    'doc.reindexer.aide': 'Relancer l\u2019indexation de ce document',
+    'credits.modale.titre': 'Plus de crédits disponibles',
+    'credits.modale.detail': 'Il faut au moins 2 crédits pour poser une question. Rechargez votre compte ou choisissez un abonnement pour continuer.',
+    'credits.modale.acheter': 'Acheter des crédits',
+    'credits.modale.abos': 'Voir les abonnements',
+    'err.action.credits': 'Voir les crédits',
+    'err.action.reconnexion': 'Se reconnecter',
+    'err.action.reessayer': 'Réessayer',
+    'err.credits.titre': 'Plus de crédits disponibles',
+    'err.credits.detail': 'Votre solde ne couvre pas cette question (2 crédits).',
+    'err.session.titre': 'Session expirée',
+    'err.session.detail': 'Votre session a expiré, reconnectez-vous.',
+    'err.trop_long.titre': 'Message trop long',
+    'err.trop_long.detail': 'Raccourcissez votre question : 6 000 caractères au maximum.',
+    'err.reseau.titre': 'Connexion perdue pendant la réponse',
+    'err.reseau.detail': 'La réponse a été interrompue. Réessayez : vous ne serez pas débité deux fois.',
+    'err.trop_court.titre': 'Question trop courte',
+    'err.trop_court.detail': 'Écrivez au moins quelques mots pour qu\u2019Axial puisse chercher.',
+    'err.defaut.titre': 'La réponse a échoué',
+    'err.defaut.detail': 'Une erreur inattendue est survenue.',
   },
   en: {
     'common.continue': 'Continue',
@@ -349,7 +379,6 @@ const STRINGS = {
     'common.new': 'New',
     'common.delete': 'Delete',
     'common.edit': 'Edit',
-    'common.share': 'Share',
     'common.copy': 'Copy',
     'common.upgrade': 'Upgrade',
     'common.invite': 'Invite',
@@ -494,7 +523,6 @@ const STRINGS = {
     'settings.connections': 'Connections',
     'settings.billing': 'Billing',
 
-    'share.title': 'Share',
     'share.tab.people': 'People',
     'share.tab.link': 'Link',
     'share.tab.embed': 'Embed',
@@ -544,10 +572,59 @@ const STRINGS = {
     'landing.cta.body': 'Three minutes to configure your context. No credit card to explore.',
     'landing.cta.btn': 'Start now',
     'landing.footer.note': '© 2026 AXIAL · PARIS · BUILT FOR FOUNDERS',
+
+    // conversations v2 — fallback prompts, guardrails, named errors
+    'conv.suggest.1': 'My 3 direct competitors and how to stand out from them',
+    'conv.suggest.2': 'How much to raise in Series A for a Seed SaaS at €1.2M ARR',
+    'conv.suggest.3': 'The risks of going to market in Germany before France',
+    'conv.suggest.4': 'How to position an AI product against an incumbent',
+    'conv.profil.vide': 'Your company profile is empty: answers will not be personalised.',
+    'conv.profil.lien': 'Complete it',
+    'conv.partielle': 'Partial answer',
+    'conv.partielle.aide': 'The answer was interrupted or produced without all of its sources. No credit was charged.',
+    'conv.compteur.aide': 'Characters used',
+    'conv.doc.max': '3 documents maximum per message',
+    'conv.doc.importer': 'Import a document',
+    'conv.doc.importer.aide': 'Import a document (PDF, DOCX, XLSX, CSV, TXT — used in analyses)',
+    'conv.doc.retirer': 'Remove',
+    'conv.doc.joint': 'attached to the next message',
+    'conv.doc.echec': 'Import failed.',
+    'conv.doc.illisible': 'Document imported, but no content could be extracted: it will not feed any answer.',
+    'doc.badge.illisible': 'unreadable',
+    'doc.reindexer': 'Reindex',
+    'doc.reindexer.aide': 'Run the indexing of this document again',
+    'credits.modale.titre': 'No credits left',
+    'credits.modale.detail': 'You need at least 2 credits to ask a question. Top up your account or pick a subscription to continue.',
+    'credits.modale.acheter': 'Buy credits',
+    'credits.modale.abos': 'See subscriptions',
+    'err.action.credits': 'See credits',
+    'err.action.reconnexion': 'Sign in again',
+    'err.action.reessayer': 'Try again',
+    'err.credits.titre': 'No credits left',
+    'err.credits.detail': 'Your balance does not cover this question (2 credits).',
+    'err.session.titre': 'Session expired',
+    'err.session.detail': 'Your session has expired, please sign in again.',
+    'err.trop_long.titre': 'Message too long',
+    'err.trop_long.detail': 'Shorten your question: 6,000 characters maximum.',
+    'err.reseau.titre': 'Connection lost while answering',
+    'err.reseau.detail': 'The answer was interrupted. Try again: you will not be charged twice.',
+    'err.trop_court.titre': 'Question too short',
+    'err.trop_court.detail': 'Write at least a few words so Axial can search.',
+    'err.defaut.titre': 'The answer failed',
+    'err.defaut.detail': 'An unexpected error occurred.',
   },
 };
 
 window.AXIAL_I18N = STRINGS;
+
+/* Même dictionnaire que `t()`, mais sans hook : indispensable dans les
+   branches de rendu situées AVANT l'appel des hooks d'un composant (AiMsg
+   sort tôt sur l'état « en attente »), où ajouter un `useT()` déséquilibrerait
+   l'ordre des hooks entre les deux branches. */
+function texteI18n(cle) {
+  const lang = window.AXIAL_LANG || 'fr';
+  return (STRINGS[lang] && STRINGS[lang][cle]) || STRINGS.fr[cle] || cle;
+}
 
 window.useT = function useT() {
   const [, force] = React.useReducer((x) => x + 1, 0);
@@ -1107,7 +1184,7 @@ function ResetPasswordPage({ token, onDone }) {
   );
 }
 
-function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
+function AuthPage({ initialMode = 'signup', onSubmit, onBack, notice }) {
   const [mode, setMode] = useAuthState(initialMode); // 'signup' | 'login'
   const [email, setEmail] = useAuthState('');
   const [pwd, setPwd] = useAuthState('');
@@ -1170,6 +1247,12 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack }) {
             ? libelle("Trois minutes pour configurer votre contexte, puis 14 jours d'essai.")
             : libelle("Reprenez vos analyses là où vous les avez laissées.")}
         </p>
+
+        {notice && (
+          <div className="ax-avis-session" role="status">
+            <Icon name="alert" size={13} /> {notice}
+          </div>
+        )}
 
         <div className="auth-tabs" role="tablist">
           <button role="tab" aria-selected={mode === 'signup'}
@@ -2199,11 +2282,114 @@ window.AppShell = AppShell;
 var { useRef: useConvRef, useMemo: useConvMemo } = React;
 
 /* ============================================================
+   Erreurs nommées + modale crédits (spec §2, §8)
+   ============================================================ */
+
+// Coût d'un tour de conversation, aligné sur CREDIT_COSTS backend. Sert de
+// garde AVANT l'envoi : lancer une requête vouée à un 402 fait perdre 30 s.
+const CREDITS_PAR_MESSAGE = 2;
+
+/* Une erreur d'envoi n'est plus « ⚠️ + e.message » : on la nomme, on explique
+   quoi faire, et on rend l'action possible. `action` dit quel bouton poser :
+   'credits' (modale), 'reconnexion' (session expirée), 'reessayer' (même clé
+   d'idempotence, donc pas de double débit) ou rien. */
+function decrireErreur(e, t) {
+  const code = (e && e.code) || '';
+  const statut = (e && e.status) || 0;
+  const msg = (e && e.message) || '';
+
+  if (code === 'insufficient_credits' || statut === 402) {
+    return { titre: t('err.credits.titre'), detail: t('err.credits.detail'), action: 'credits' };
+  }
+  if (code === 'refresh_invalid' || statut === 401) {
+    return { titre: t('err.session.titre'), detail: t('err.session.detail'), action: 'reconnexion' };
+  }
+  if (code === 'message_trop_long' || statut === 413) {
+    return { titre: t('err.trop_long.titre'), detail: t('err.trop_long.detail'), action: null };
+  }
+  if (code === 'requete_trop_courte') {
+    return { titre: t('err.trop_court.titre'), detail: t('err.trop_court.detail'), action: null };
+  }
+  // Panne réseau : `fetch` lève un TypeError (« Failed to fetch »), et un flux
+  // coupé avant son `done` remonte le message de `lireFluxSSE`.
+  const reseau = (e instanceof TypeError)
+    || /failed to fetch|networkerror|load failed/i.test(msg)
+    || msg === 'Réponse interrompue.'
+    || msg === 'Génération interrompue.';
+  if (reseau) {
+    return { titre: t('err.reseau.titre'), detail: t('err.reseau.detail'), action: 'reessayer' };
+  }
+  // Message du backend s'il existe : il est déjà rédigé pour l'utilisateur.
+  return {
+    titre: t('err.defaut.titre'),
+    detail: msg || t('err.defaut.detail'),
+    action: 'reessayer',
+  };
+}
+
+/* Modale « Plus de crédits » — posée avant l'envoi (solde connu) ET sur un 402
+   (solde connu en retard, par exemple après un rapport dans un autre onglet). */
+function ModaleCredits({ solde, onCredits, onClose }) {
+  const t = window.useT();
+  return (
+    <div className="wizard-modal" onClick={onClose} role="presentation">
+      <div className="ax-modale-etroite" role="dialog" aria-modal="true"
+        aria-label={t('credits.modale.titre')} onClick={(e) => e.stopPropagation()}>
+        <div className="ax-modale-head">
+          <div className="ax-modale-icone"><Icon name="zap" size={18} /></div>
+          <h3>{t('credits.modale.titre')}</h3>
+          <p>{t('credits.modale.detail')}</p>
+          {solde != null && (
+            <p className="mono ax-modale-solde">{solde} {t('topbar.credits')}</p>
+          )}
+        </div>
+        <div className="ax-modale-actions">
+          <button className="btn btn-primary" onClick={onCredits}>
+            <Icon name="zap" size={13} /> {t('credits.modale.acheter')}
+          </button>
+          <button className="btn btn-secondary" onClick={onCredits}>
+            {t('credits.modale.abos')}
+          </button>
+          <button className="btn btn-ghost" onClick={onClose}>{t('common.close')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Carte d'erreur dans le fil, à la place de la bulle de réponse. */
+function CarteErreur({ erreur, onAction }) {
+  const t = window.useT();
+  const libelleAction = {
+    credits: t('err.action.credits'),
+    reconnexion: t('err.action.reconnexion'),
+    reessayer: t('err.action.reessayer'),
+  }[erreur.action];
+  return (
+    <div className="msg-ai-wrap">
+      <div className="msg-ai-mark" />
+      <div className="ax-carte-erreur" role="alert">
+        <div className="ax-carte-erreur-titre">
+          <Icon name="alert" size={14} /> {erreur.titre}
+        </div>
+        <p>{erreur.detail}</p>
+        {libelleAction && (
+          <button className="btn btn-secondary btn-sm" onClick={onAction}>
+            {libelleAction}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
    Conversations region — combines list-panel, thread, composer
    ============================================================ */
 function ConversationsRegion({
   conversations, activeId, setActiveId, onSendInActive, onSendNew, onNewChat,
   suggestedPrompts, streamingSpeed, showCitePanelFor, setShowCitePanelFor,
+  profil, onCompleterProfil, onErreurAction,
 }) {
   const active = conversations.find((c) => c.id === activeId);
 
@@ -2220,10 +2406,14 @@ function ConversationsRegion({
           conversation={active}
           onSend={onSendInActive}
           streamingSpeed={streamingSpeed}
+          profil={profil}
+          onCompleterProfil={onCompleterProfil}
+          onErreurAction={(m) => onErreurAction(active.id, m)}
           openCite={(srcId) => setShowCitePanelFor({ convId: active.id, sourceId: srcId })}
         />
       ) : (
-        <EmptyConvState onSend={onSendNew} suggestedPrompts={suggestedPrompts} />
+        <EmptyConvState onSend={onSendNew} suggestedPrompts={suggestedPrompts}
+          profil={profil} onCompleterProfil={onCompleterProfil} />
       )}
       {showCitePanelFor && (
         <CitationPanel
@@ -2282,7 +2472,7 @@ function ConvListPanel({ conversations, activeId, onPick, onNew }) {
 /* ============================================================
    Empty state — no conversation selected
    ============================================================ */
-function EmptyConvState({ onSend, suggestedPrompts }) {
+function EmptyConvState({ onSend, suggestedPrompts, profil, onCompleterProfil }) {
   const t = window.useT();
   // La question suggérée de l'onboarding pré-remplit le composer (jamais
   // envoyée automatiquement — l'utilisateur garde la main).
@@ -2321,9 +2511,10 @@ function EmptyConvState({ onSend, suggestedPrompts }) {
         </div>
       </div>
 
-      <Composer value={draft} onChange={setDraft} onSend={() => {
-        if (draft.trim()) { onSend(draft); setDraft(''); }
-      }} />
+      <Composer value={draft} onChange={setDraft} profil={profil}
+        onCompleterProfil={onCompleterProfil} onSend={() => {
+          if (draft.trim()) { onSend(draft); setDraft(''); }
+        }} />
     </div>
   );
 }
@@ -2361,7 +2552,8 @@ function BoutonCopier({ texte, libelleCourt }) {
   );
 }
 
-function ConvThread({ conversation, onSend, streamingSpeed, openCite }) {
+function ConvThread({ conversation, onSend, streamingSpeed, openCite, profil,
+                     onCompleterProfil, onErreurAction }) {
   const [draft, setDraft] = React.useState('');
   const scrollRef = useConvRef(null);
 
@@ -2408,16 +2600,19 @@ function ConvThread({ conversation, onSend, streamingSpeed, openCite }) {
           {conversation.messages.map((m, i) => (
             m.role === 'user'
               ? <UserMsg key={i} text={m.content} />
-              : <AiMsg key={i} content={m.content} sources={m.sources || []} agent={m.agent}
-                  streamingSpeed={streamingSpeed} openCite={openCite} live={m.live} viz={m.viz || null}
-                  isLast={i === conversation.messages.length - 1} />
+              : m.erreur
+                ? <CarteErreur key={i} erreur={m.erreur} onAction={() => onErreurAction(m)} />
+                : <AiMsg key={i} content={m.content} sources={m.sources || []} agent={m.agent}
+                    streamingSpeed={streamingSpeed} openCite={openCite} live={m.live} viz={m.viz || null}
+                    statut={m.statut} isLast={i === conversation.messages.length - 1} />
           ))}
         </div>
       </div>
 
-      <Composer value={draft} onChange={setDraft} onSend={() => {
-        if (draft.trim()) { onSend(draft); setDraft(''); }
-      }} />
+      <Composer value={draft} onChange={setDraft} profil={profil}
+        onCompleterProfil={onCompleterProfil} onSend={() => {
+          if (draft.trim()) { onSend(draft); setDraft(''); }
+        }} />
     </div>
   );
 }
@@ -2434,7 +2629,7 @@ function UserMsg({ text }) {
 // (clé "conseiller") reste une discussion simple, sans badge.
 const AGENT_LABELS = { market_scanner: 'Market Scanner · PESTEL', competitor_radar: 'Competitor Radar · Porter' };
 
-function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast, live, viz }) {
+function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast, live, viz, statut }) {
   // Pending state: a real backend answer is on its way (search + RAG + LLM can
   // take 20-40s). Show a clear "thinking" indicator instead of a mute placeholder.
   if (content === '__PENDING__') {
@@ -2484,6 +2679,11 @@ function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast, live
             <Icon name="cpu" size={10} /> {AGENT_LABELS[agent]}
           </div>
         )}
+        {statut && statut !== 'complet' && (
+          <div className="ax-badge-partiel" title={texteI18n('conv.partielle.aide')}>
+            <Icon name="alert" size={11} /> {texteI18n('conv.partielle')}
+          </div>
+        )}
         <MarkdownView text={shownText} onCite={openCite} vizs={viz} live={!!live || stillStreaming} />
         {stillStreaming && <span className="typing-cursor" />}
         {!stillStreaming && (
@@ -2500,15 +2700,21 @@ function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast, live
    Composer
    ============================================================ */
 /* Sélecteur de mode du Workspace (modèle Perplexity) : Conversation libre
-   (routing par intention) ou un agent spécialisé explicite. Persisté pour que
-   bridge.axChat l'envoie avec chaque message. */
+   (routing par intention) ou un agent spécialisé explicite. Persisté dans
+   localStorage, relu par bridge.axStreamChatIn à chaque envoi. */
 const AGENT_MODES = [
   { key: 'auto', label: 'Conversation', icon: 'message' },
   { key: 'market_scanner', label: 'Market Scanner', icon: 'trending' },
   { key: 'competitor_radar', label: 'Competitor Radar', icon: 'users' },
 ];
 
-function Composer({ value, onChange, onSend }) {
+// Limites explicites côté client (spec §2) : le backend refuse au-delà de
+// 6 000 caractères (413) et le contexte n'accepte que 3 documents par message.
+const MAX_CARACTERES = 6000;
+const SEUIL_COMPTEUR = 5000;
+const MAX_DOCS_PAR_MESSAGE = 3;
+
+function Composer({ value, onChange, onSend, profil, onCompleterProfil }) {
   const t = window.useT();
   const en = window.AXIAL_LANG === 'en';
   const ref = useConvRef(null);
@@ -2532,6 +2738,10 @@ function Composer({ value, onChange, onSend }) {
     const f = e.target.files && e.target.files[0];
     e.target.value = '';
     if (!f || uploading) return;
+    if ((window.AXIAL_PENDING_DOCS || []).length >= MAX_DOCS_PAR_MESSAGE) {
+      setUploadMsg({ ok: false, text: t('conv.doc.max') });
+      return;
+    }
     setUploading(true); setUploadMsg(null);
     try {
       const d = await axUploadDocument(f);
@@ -2539,8 +2749,11 @@ function Composer({ value, onChange, onSend }) {
       // rester durablement dans la mémoire documentaire.
       window.AXIAL_PENDING_DOCS = [...(window.AXIAL_PENDING_DOCS || []), { id: d.id, filename: d.filename }];
       window.dispatchEvent(new Event('axial-pending-docs'));
+      // Import réussi mais zéro chunk : le fichier est stocké et n'alimentera
+      // aucune réponse. Le dire tout de suite, pas au moment de la déception.
+      if (d && d.chunk_count === 0) setUploadMsg({ ok: false, text: t('conv.doc.illisible') });
     } catch (ex) {
-      setUploadMsg({ ok: false, text: (ex && ex.message) || libelle('Échec de l’import.') });
+      setUploadMsg({ ok: false, text: (ex && ex.message) || t('conv.doc.echec') });
     }
     setUploading(false);
   };
@@ -2558,14 +2771,26 @@ function Composer({ value, onChange, onSend }) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onSend(); }
   };
 
+  const docsPleins = pendingDocs.length >= MAX_DOCS_PAR_MESSAGE;
+  // `profil === undefined` = pas encore chargé : ne pas faire clignoter le
+  // bandeau au montage. Chargé et sans nom d'entreprise = contexte absent.
+  const profilVide = profil !== undefined && !(profil && profil.company_name);
+
   return (
     <div className="composer-shell">
+      {profilVide && (
+        <div className="ax-bandeau-profil">
+          <Icon name="alert" size={13} />
+          <span>{t('conv.profil.vide')}</span>
+          <button type="button" onClick={onCompleterProfil}>{t('conv.profil.lien')}</button>
+        </div>
+      )}
       <div className="composer">
         <input ref={fileRef} type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.md"
           style={{ display: 'none' }} onChange={onPickFile} />
         <button className="icon-btn" onClick={() => fileRef.current && fileRef.current.click()}
-          disabled={uploading} aria-label="Importer un document"
-          title="Importer un document (PDF, DOCX, XLSX, CSV, TXT — utilisé dans les analyses)"
+          disabled={uploading || docsPleins} aria-label={t('conv.doc.importer')}
+          title={docsPleins ? t('conv.doc.max') : t('conv.doc.importer.aide')}
           style={{ alignSelf: 'flex-end', marginBottom: 6, flexShrink: 0 }}>
           <Icon name={uploading ? 'clock' : 'plus'} size={15} />
         </button>
@@ -2573,22 +2798,29 @@ function Composer({ value, onChange, onSend }) {
           ref={ref}
           rows={1}
           value={value}
+          maxLength={MAX_CARACTERES}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKey}
           placeholder={t('conv.placeholder')}
         />
         <button className="composer-send" onClick={onSend} disabled={!value.trim()}
-          aria-label="Envoyer">
+          aria-label={t('common.send')}>
           <Icon name="arrow-up" size={16} />
         </button>
       </div>
+      {value.length >= SEUIL_COMPTEUR && (
+        <div className="ax-compteur-carac mono" title={t('conv.compteur.aide')}
+          aria-label={t('conv.compteur.aide')}>
+          {value.length} / {MAX_CARACTERES}
+        </div>
+      )}
       {pendingDocs.length > 0 && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
           {pendingDocs.map((d) => (
             <span key={d.id} className="chip" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(121,118,247,0.10)', fontSize: 12 }}>
               <Icon name="database" size={11} /> {d.filename}
-              <span style={{ color: 'var(--fg-3)', fontSize: 11 }}>· joint au prochain message</span>
-              <button onClick={() => removePending(d.id)} aria-label="Retirer"
+              <span style={{ color: 'var(--fg-3)', fontSize: 11 }}>· {t('conv.doc.joint')}</span>
+              <button onClick={() => removePending(d.id)} aria-label={t('conv.doc.retirer')}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--fg-3)', padding: 0, display: 'inline-flex' }}>
                 <Icon name="x" size={11} />
               </button>
@@ -4083,10 +4315,12 @@ window.AgentSession = AgentSession;
    MEMORY — Axial's Key
    ================================================================= */
 function DocumentsPanel() {
+  const t = window.useT();
   const lang = window.AXIAL_LANG || 'fr';
   const [docs, setDocs] = React.useState(null);
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState('');
+  const [reindexe, setReindexe] = React.useState('');
   const fileRef = React.useRef(null);
   const load = () => axListDocuments().then(setDocs).catch(() => setDocs([]));
   React.useEffect(() => { load(); }, []);
@@ -4100,6 +4334,15 @@ function DocumentsPanel() {
     load();
   };
   const del = async (id) => { try { await axDeleteDocument(id); } catch (e) { /* noop */ } load(); };
+  // `chunk_count = 0` : le fichier est stocké mais n'alimente aucune réponse.
+  // La réindexation retente sur le texte déjà extrait, sans réimport.
+  const reindexer = async (id) => {
+    setReindexe(id); setErr('');
+    try { await axReindexerDocument(id); }
+    catch (ex) { setErr((ex && ex.message) || t('conv.doc.echec')); }
+    setReindexe('');
+    load();
+  };
   const fmtSize = (b) => (b > 1e6 ? (b / 1e6).toFixed(1) + ' Mo' : Math.max(1, Math.round(b / 1024)) + ' Ko');
   return (
     <div style={{ maxWidth: 720, marginTop: 34 }}>
@@ -4122,6 +4365,19 @@ function DocumentsPanel() {
           <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 12px', background: 'var(--surface-2)', borderRadius: 8 }}>
             <Icon name="database" size={14} style={{ color: 'var(--v-bright)', flexShrink: 0 }} />
             <span style={{ flex: 1, minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.filename}</span>
+            {d.chunk_count === 0 && (
+              <>
+                <span className="ax-badge-illisible">
+                  <Icon name="alert" size={10} /> {t('doc.badge.illisible')}
+                </span>
+                <button className="btn btn-secondary btn-sm" style={{ flexShrink: 0 }}
+                  disabled={reindexe === d.id} onClick={() => reindexer(d.id)}
+                  title={t('doc.reindexer.aide')}>
+                  <Icon name="refresh" size={12} />
+                  {reindexe === d.id ? '…' : t('doc.reindexer')}
+                </button>
+              </>
+            )}
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--fg-3)', flexShrink: 0 }}>{d.chunk_count} chunks · {fmtSize(d.size_bytes)}</span>
             <button className="icon-btn" onClick={() => del(d.id)} title={lang === 'fr' ? 'Supprimer' : 'Delete'}><Icon name="x" size={13} /></button>
           </div>
@@ -5510,6 +5766,13 @@ function App() {
   const [conversations, setConversations] = useState(() => []);
   const [activeId, setActiveId] = useState(conversations[0]?.id || null);
   const [showCitePanelFor, setShowCitePanelFor] = useState(null);
+  // Modale « Plus de crédits » : garde avant envoi ET réponse 402.
+  const [modaleCredits, setModaleCredits] = useState(false);
+  // Profil entreprise — UNE seule source de vérité, partagée par les
+  // suggestions et le bandeau « contexte absent ». `undefined` = pas chargé.
+  const [profil, setProfil] = useState(undefined);
+  // Message posé sur l'écran de connexion après une session expirée.
+  const [authNotice, setAuthNotice] = useState('');
 
   // sub-routes & flow states
   const [subRoute, setSubRoute] = useState('conversations');
@@ -5541,6 +5804,18 @@ function App() {
       setResetToken(jeton);
       try { window.history.replaceState({}, '', window.location.pathname); } catch (e) {}
       go('reset');
+      return;
+    }
+    // Session expirée pendant un envoi : `sessionExpiree()` a effacé le jeton
+    // et rechargé la page (aucun état du compte précédent ne survit, cf.
+    // `deconnecter`). Le drapeau survit au rechargement et porte le message.
+    let expiree = false;
+    try { expiree = localStorage.getItem('axial_session_expiree') === '1'; } catch (e) {}
+    if (expiree) {
+      try { localStorage.removeItem('axial_session_expiree'); } catch (e) {}
+      setAuthNotice(texteI18n('err.session.detail'));
+      setAuthMode('login');
+      go('auth');
       return;
     }
     let tok = null;
@@ -5582,12 +5857,15 @@ function App() {
       else { go('app'); }
     });
   }, []);
-  const [suggested, setSuggested] = useState(window.AXIAL_DATA.SUGGESTED_PROMPTS);
+  // Repli FR/EN par `t()` : les quatre questions codées en dur en français
+  // étaient le premier écran d'un utilisateur anglophone.
+  const [suggested, setSuggested] = useState(null);
   useEffect(() => {
     if (route === 'app') {
       // Suggestions construites depuis le VRAI profil (nom, défi, stade) —
       // les génériques ne servent que de repli tant que le profil est vide.
       axGetProfile().then((pr) => {
+        setProfil(pr || {});
         if (!pr || !(pr.company_name || pr.sector)) return;
         const en = window.AXIAL_LANG === 'en';
         const who = pr.company_name || (en ? `my ${pr.sector || ''} startup`.trim()
@@ -5608,7 +5886,7 @@ function App() {
           pr.main_challenge ? `Par où attaquer : « ${pr.main_challenge} » ?` : `Quels risques ${who} doit-elle anticiper cette année ?`,
         ];
         setSuggested(qs);
-      }).catch(() => {});
+      }).catch(() => { setProfil({}); });
       // Historique persistant : recharger les conversations du compte.
       axListConversations().then((list) => {
         setConversations((cs) => {
@@ -5688,23 +5966,61 @@ function App() {
   }));
   const mapBackendMsg = (m) => (m.role === 'user'
     ? { role: 'user', content: m.content }
-    : { role: 'assistant', content: m.content, agent: m.agent, sources: mapCitations(m.citations), viz: m.viz || null });
+    : {
+        role: 'assistant', content: m.content, agent: m.agent,
+        sources: mapCitations(m.citations), viz: m.viz || null,
+        // Statut + coût du tour : le badge « Réponse partielle » et la pastille
+        // de coût (Task 7) les lisent sur le message, pas sur le flux.
+        statut: m.statut || 'complet', credits: m.credits,
+        tokensEntree: m.tokens_entree, tokensSortie: m.tokens_sortie,
+        messageId: m.id,
+      });
 
   // Historique persistant : sélection d'une conversation -> chargement paresseux
   // de ses messages depuis le backend (une seule fois).
+  // La route est paginée depuis Task 2 : elle rend `{ items, has_more }`, et
+  // `has_more` est conservé pour le « Charger les messages précédents ».
   const openConversation = async (id) => {
     setActiveId(id);
     const conv = conversations.find((c) => c.id === id);
     if (!conv || conv.loaded) return;
     try {
-      const msgs = await axMessages(id);
+      const page = await axMessagesPage(id);
       setConversations((cs) => cs.map((c) => c.id === id
-        ? { ...c, loaded: true, messages: msgs.map(mapBackendMsg) } : c));
+        ? { ...c, loaded: true, hasMore: !!page.has_more, messages: (page.items || []).map(mapBackendMsg) }
+        : c));
     } catch (e) { /* la conversation reste vide plutôt que de casser l'UI */ }
   };
 
+  // Session expirée en cours d'envoi : déconnexion propre (jeton effacé,
+  // rechargement complet) puis écran de connexion avec le message.
+  const sessionExpiree = () => {
+    try { localStorage.setItem('axial_session_expiree', '1'); } catch (e) {}
+    deconnecter();
+  };
+
+  // Erreur d'envoi : une carte nommée à la place de la bulle, jamais un
+  // « ⚠️ + message brut ». `cleIdem` est conservée sur la carte pour que
+  // « Réessayer » rejoue le MÊME tour côté serveur (aucun double débit).
+  const poserErreur = (cid, base, e, question, cleIdem) => {
+    const erreur = decrireErreur(e, t);
+    if (erreur.action === 'reconnexion') { sessionExpiree(); return; }
+    if (erreur.action === 'credits') {
+      setModaleCredits(true);
+      // Le 402 signifie que le solde connu du front était en retard : le
+      // rafraîchir, sinon la modale « Plus de crédits » afficherait l'ancien
+      // solde et se contredirait.
+      axBalance().then((b) => setAxBal(b.available)).catch(() => {});
+    }
+    setConversations((cs) => cs.map((c) => c.id === cid
+      ? { ...c, messages: [...base, { role: 'assistant', erreur, question, cleIdem }] }
+      : c));
+  };
+
   // Envoi en flux : le message assistant grandit mot à mot dans la conversation.
-  const sendStreamed = async (cid, text, baseMessages) => {
+  // `onEvent` transmet TOUS les événements (étapes, avertissements) ; Task 5
+  // n'en consomme que `sources`, `delta` et `done`.
+  const sendStreamed = async (cid, text, baseMessages, cleIdem) => {
     let acc = '';
     const setMsgs = (msgs) => setConversations((cs) => cs.map((c) => c.id === cid ? { ...c, messages: msgs } : c));
     const onEvent = (evt) => {
@@ -5717,52 +6033,94 @@ function App() {
           const last = c.messages[c.messages.length - 1] || {};
           return { ...c, messages: [...baseMessages, { ...last, role: 'assistant', content: acc, live: true }] };
         }));
+      } else if (evt.step === 'done' && evt.data && typeof evt.data.balance === 'number') {
+        // La pastille de crédits ne se rafraîchissait jamais après un envoi.
+        setAxBal(evt.data.balance);
       }
     };
-    const final = await axStreamChatIn(cid, text, onEvent);
+    const final = await axStreamChatIn(cid, text, onEvent, { idempotencyKey: cleIdem });
     setMsgs([...baseMessages, {
       role: 'assistant', content: final.content, agent: final.agent,
       sources: mapCitations(final.citations), viz: final.viz || null, live: false,
+      statut: final.statut || 'complet', credits: final.credits,
+      tokensEntree: final.tokens_entree, tokensSortie: final.tokens_sortie,
+      messageId: final.id,
     }]);
+    // Repli sur la route bloquante : le payload ne porte pas de `balance`.
+    if (typeof final.balance !== 'number') {
+      axBalance().then((b) => setAxBal(b.available)).catch(() => {});
+    }
   };
 
   const handleSendInActive = async (text) => {
     if (!activeId) return;
+    if (axBal != null && axBal < CREDITS_PAR_MESSAGE) { setModaleCredits(true); return; }
     const cid = activeId;
+    const cleIdem = nouvelleCleIdempotence();
     const now = (window.AXIAL_LANG === 'en') ? 'now' : 'à l\'instant';
     setConversations((cs) => cs.map((c) => c.id === cid ? {
       ...c,
       messages: [...c.messages, { role: 'user', content: text }, { role: 'assistant', content: '__PENDING__' }],
       lastUpdated: now,
     } : c));
+    const base = [...(((conversations.find((c) => c.id === cid) || {}).messages) || []),
+                  { role: 'user', content: text }];
     try {
-      const base = (conversations.find((c) => c.id === cid) || {}).messages || [];
-      await sendStreamed(cid, text, [...base.slice(0, -1)]);
+      await sendStreamed(cid, text, base, cleIdem);
     } catch (e) {
-      setConversations((cs) => cs.map((c) => c.id === cid ? {
-        ...c, messages: [...c.messages.slice(0, -1), { role: 'assistant', content: '⚠️ ' + ((e && e.message) || 'Erreur') }],
-      } : c));
+      poserErreur(cid, base, e, text, cleIdem);
     }
   };
 
   const handleSendNew = async (text) => {
+    if (axBal != null && axBal < CREDITS_PAR_MESSAGE) { setModaleCredits(true); return; }
     const title = text.length > 48 ? text.slice(0, 45) + '…' : text;
     const now = (window.AXIAL_LANG === 'en') ? 'now' : 'à l\'instant';
+    const cleIdem = nouvelleCleIdempotence();
     let id;
     try {
-      id = await axCreateConversation();  // id backend réel -> l'historique persiste
-    } catch (e) { id = 'c-' + Date.now(); }
+      id = await axCreateConversation(null, title);  // id backend réel -> l'historique persiste
+    } catch (e) {
+      // Sans conversation côté serveur, rien ne serait persisté : mieux vaut
+      // le dire que de laisser un fil fantôme qui disparaît au rechargement.
+      const idLocal = 'c-' + Date.now();
+      setConversations((cs) => [{
+        id: idLocal, title, lastUpdated: now, loaded: true, hasMore: false,
+        messages: [{ role: 'user', content: text }],
+      }, ...cs]);
+      setActiveId(idLocal);
+      poserErreur(idLocal, [{ role: 'user', content: text }], e, text, cleIdem);
+      return;
+    }
+    const base = [{ role: 'user', content: text }];
     setConversations((cs) => [{
-      id, title, lastUpdated: now, loaded: true,
-      messages: [{ role: 'user', content: text }, { role: 'assistant', content: '__PENDING__' }],
+      id, title, lastUpdated: now, loaded: true, hasMore: false,
+      messages: [...base, { role: 'assistant', content: '__PENDING__' }],
     }, ...cs]);
     setActiveId(id);
     try {
-      await sendStreamed(id, text, [{ role: 'user', content: text }]);
+      await sendStreamed(id, text, base, cleIdem);
     } catch (e) {
-      setConversations((cs) => cs.map((c) => c.id === id ? {
-        ...c, messages: [{ role: 'user', content: text }, { role: 'assistant', content: '⚠️ ' + ((e && e.message) || 'Erreur') }],
-      } : c));
+      poserErreur(id, base, e, text, cleIdem);
+    }
+  };
+
+  // Bouton d'action d'une carte d'erreur. « Réessayer » réutilise la clé
+  // d'idempotence de l'envoi raté : le backend rejoue son tour sans refacturer.
+  const gererActionErreur = async (cid, m) => {
+    const action = m.erreur && m.erreur.action;
+    if (action === 'credits') { setModaleCredits(true); return; }
+    if (action === 'reconnexion') { sessionExpiree(); return; }
+    if (action !== 'reessayer') return;
+    const conv = conversations.find((c) => c.id === cid);
+    if (!conv) return;
+    const base = conv.messages.slice(0, -1);  // la carte d'erreur est toujours la dernière
+    setConversations((cs) => cs.map((c) => c.id === cid
+      ? { ...c, messages: [...base, { role: 'assistant', content: '__PENDING__' }] } : c));
+    try {
+      await sendStreamed(cid, m.question, base, m.cleIdem);
+    } catch (e) {
+      poserErreur(cid, base, e, m.question, m.cleIdem);
     }
   };
 
@@ -5781,6 +6139,7 @@ function App() {
   if (route === 'auth') {
     return <AuthPage
       initialMode={authMode}
+      notice={authNotice}
       onBack={() => go('landing')}
       onSubmit={async ({ mode, email, pwd }) => {
         if (mode === 'signup') { await axRegister(email, pwd); go('onb1'); }
@@ -5903,7 +6262,13 @@ function App() {
             onSendInActive={handleSendInActive}
             onSendNew={handleSendNew}
             onNewChat={() => { setActiveId(null); }}
-            suggestedPrompts={suggested}
+            profil={profil}
+            onCompleterProfil={() => setSubRoute('memory')}
+            onErreurAction={gererActionErreur}
+            suggestedPrompts={suggested || [
+              t('conv.suggest.1'), t('conv.suggest.2'),
+              t('conv.suggest.3'), t('conv.suggest.4'),
+            ]}
             streamingSpeed={40}
             showCitePanelFor={showCitePanelFor}
             setShowCitePanelFor={setShowCitePanelFor}
@@ -5948,6 +6313,14 @@ function App() {
         {subRoute === 'docs' && <DocsSurface />}
         {subRoute === 'settings' && <SettingsSurface />}
       </AppShell>
+
+      {modaleCredits && (
+        <ModaleCredits
+          solde={axBal}
+          onCredits={() => { setModaleCredits(false); setSubRoute('credits'); }}
+          onClose={() => setModaleCredits(false)}
+        />
+      )}
 
       {showWizard && (
         <AgentWizard
