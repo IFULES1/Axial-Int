@@ -31,6 +31,8 @@ email-validator>=2.2,<3
 # --- Billing / reports (P5) ---
 stripe>=11.0,<13
 reportlab>=4.2,<5
+# Graphiques Vega-Lite rendus côté serveur (SVG/PNG), sans navigateur
+vl-convert-python>=1.7,<2
 pillow>=10,<13
 
 # --- Worker / scheduling (P6) ---
