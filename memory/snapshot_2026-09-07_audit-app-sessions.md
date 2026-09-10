@@ -125,6 +125,27 @@ d'adresse du compte admin, écran carte), reprise le 07/09.
   (−5/run) malgré `is_admin` : l'exemption ne couvre pas le worker. Solde 140.
   `miradie@francedigitale.org` est à 0 crédit avec une veille active.
 
+## Forme des rapports (10/09, branche `forme-rapports`) — retours de Christian
+
+- ✓ Plan exécuté en ligne : spec `docs/superpowers/specs/2026-09-10-forme-rapports.md`,
+  plan `docs/superpowers/plans/2026-09-10-forme-rapports.md`.
+- ✓ `app/modules/reports/blocs.py` : analyseur de blocs markdown partagé
+  (tableaux, titres, puces) + `serie_numerique()` (tableau homogène → série).
+- ✓ PDF : tableaux en `Table` ReportLab ; `[N]` → liens internes vers une
+  section « Sources » générée depuis `report.sources` (URL cliquables) ; la
+  section « Sources » textuelle du modèle est écartée quand la nôtre existe
+  (sinon doublon — vu sur un vrai rapport : 15 → 14 pages) ; graphique en
+  barres sous un tableau numérique d'unité unique, jamais ailleurs.
+- ✓ App : `MarkdownView` rend les tableaux (`.md-table`) ; dans l'éditeur de
+  rapport, clic sur `[N]` → défilement + surbrillance de la source N.
+- ✓ Déployé en prod (backend + front rebuild, bundle vérifié). Preuve sur
+  l'étude de marché du compte de contrôle : 6 tableaux, 178 liens internes,
+  38 URL cliquables, une seule section Sources.
+- ⏳ **Prompt (règle 7, synthèse exécutive en tête)** : commité localement
+  (`6a4870c`), **NON déployé** — diff à valider par Miradie avant tout scp de
+  `app/modules/analysis/prompts.py`.
+- 101 tests verts en local, 97 sur le serveur (un test local absent du VPS).
+
 ## Décisions techniques prises
 
 - **Le serveur ne détient aucune session Supabase** : il relaie des jetons.
