@@ -150,3 +150,102 @@ def test_redirect_hints_vouvoient():
     ):
         assert not TUTOIEMENT.search(hint), hint
         assert "votre question" in hint.lower()
+
+
+def test_conversation_libre_recoit_registre_instruction(monkeypatch):
+    """Le plan exige `REGISTRE_INSTRUCTION` sur DEUX chemins : les personas
+    spécialisées (verrouillé par `test_registre_impose_au_contenu_genere`) ET
+    la conversation libre (persona `AUTO`, intelligence/service.py:288-289).
+    Seul le premier était gardé — une régression sur l'assemblage du prompt de
+    chat libre passerait inaperçue. On appelle `_prepare_turn` pour de vrai,
+    sans réseau : le message est volontairement court pour rester sur le
+    chemin `trivial` (pas de RAG, pas de recherche web, pas de Notion)."""
+    import uuid as uuidlib
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    import app.modules.intelligence.models  # noqa: F401 — enregistre les tables
+    import app.modules.memory.models  # noqa: F401 — company_profiles (build_context)
+    from app.db import Base
+    from app.modules.intelligence import service
+
+    engine = create_engine("sqlite://", future=True)
+    Base.metadata.create_all(engine, tables=[
+        Base.metadata.tables["projects"],
+        Base.metadata.tables["conversations"],
+        Base.metadata.tables["messages"],
+        Base.metadata.tables["company_profiles"],
+    ])
+    # Le chemin libre ne doit dépendre d'aucun provider réel : on force la
+    # disponibilité déclarée sans jamais appeler `generate()`.
+    monkeypatch.setattr(service.llm_client, "generation_available", lambda: True)
+
+    with Session(engine) as db:
+        uid = str(uuidlib.uuid4())
+        projet = service.create_project(db, uid, "Projet test", None)
+        conv = service.create_conversation(db, uid, str(projet.id), None, None)
+
+        turn = service._prepare_turn(
+            db, uid, str(conv.id), "salut", personas.AUTO,
+            is_admin=True, document_ids=None,
+        )
+
+    assert personas.REGISTRE_INSTRUCTION in turn.system, (
+        "le chemin conversation libre n'assemble plus REGISTRE_INSTRUCTION "
+        "dans son system prompt"
+    )
+
+
+# --------------------------------------------------------------------------
+# F2 — garde-fou symétrique : les emails, eux, tutoient toujours.
+#
+# Rien ne gardait ce risque (docstring du module, § "non couverte ici") alors
+# que c'est la conversion accidentelle la plus probable de ce chantier. Trois
+# gabarits réels, lus tels quels (aucun contenu inventé) :
+#   - emailing/sequences.py : corps_essai / corps_bienvenue (FR, purs — pas
+#     d'I/O, appelables directement) ;
+#   - auth/password_reset.py : _envoyer_email — corps texte de l'email de
+#     réinitialisation. `_poster` (l'envoi réseau via Resend) est monkeypatché
+#     pour capturer le texte au lieu de l'envoyer : aucun appel réseau.
+# emailing/notification.py n'est volontairement PAS repris ici : sa revue
+# (final-review.md §3.2) note qu'il ne modifie pas la deuxième personne — il
+# n'y a pas de tutoiement légitime à y vérifier.
+# --------------------------------------------------------------------------
+
+VOUVOIEMENT_LECTEUR = re.compile(r"\b(vous|votre|vos)\b", re.IGNORECASE)
+
+
+def test_emails_sequences_tutoient():
+    from app.modules.emailing import sequences
+
+    for texte in (
+        sequences.corps_essai("fr", {}),
+        sequences.corps_bienvenue("fr", {}),
+    ):
+        assert TUTOIEMENT.search(texte), f"email sans marque de tutoiement : {texte!r}"
+        assert not VOUVOIEMENT_LECTEUR.search(texte), (
+            f"email de séquence vouvoie le lecteur : {texte!r}"
+        )
+
+
+def test_email_reinitialisation_mot_de_passe_tutoie(monkeypatch):
+    from app.modules.auth import password_reset
+
+    captures: list[tuple] = []
+    monkeypatch.setattr(
+        password_reset, "_poster",
+        lambda email, objet, texte, html=None: captures.append((objet, texte, html)),
+    )
+
+    password_reset._envoyer_email("quelquun@example.com", "un-jeton")
+
+    assert captures, "l'email de réinitialisation n'a pas été composé"
+    _, texte, html = captures[0]
+    assert TUTOIEMENT.search(texte), f"email de réinitialisation sans tutoiement : {texte!r}"
+    assert not VOUVOIEMENT_LECTEUR.search(texte), (
+        f"email de réinitialisation vouvoie le lecteur : {texte!r}"
+    )
+    # Le corps HTML porte le même registre que le texte brut.
+    assert TUTOIEMENT.search(html)
+    assert not VOUVOIEMENT_LECTEUR.search(html)

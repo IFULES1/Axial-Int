@@ -164,6 +164,7 @@ const STRINGS = {
     'nav.new_analysis': 'Nouvelle analyse',
     'nav.new_report': 'Nouveau rapport',
     'nav.new_agent': 'Nouvel agent',
+    'nav.pilotage': 'Pilotage',
 
     // topbar
     'topbar.credits': 'crédits',
@@ -379,6 +380,7 @@ const STRINGS = {
     'nav.new_analysis': 'New analysis',
     'nav.new_report': 'New report',
     'nav.new_agent': 'New agent',
+    'nav.pilotage': 'Admin console',
 
     'topbar.credits': 'credits',
     'topbar.settings': 'Settings',
@@ -1381,7 +1383,7 @@ const LABELS_EN = {
   "Concurrence": "Competition",
   "Généraliste": "General",
   "Votre avis": "Your feedback",
-  "Dis-nous ce que vaut ce rapport": "Tell us what this report is worth",
+  "Dites-nous ce que vaut ce rapport": "Tell us what this report is worth",
   "Continuer sans carte": "Continue without a card",
   "Vous gardez vos 40 crédits offerts — de quoi lancer une étude complète. Vous pourrez activer l'essai plus tard, depuis Crédits.":
     "You keep your 40 free credits — enough for a full study. You can start the trial later, from Credits.",
@@ -3388,7 +3390,7 @@ function ReportsEditor({ data, onBack }) {
               moment où l'utilisateur a un avis. */}
           <a className="btn btn-secondary btn-sm" href={FORMULAIRE_FEEDBACK}
             target="_blank" rel="noopener noreferrer"
-            title={libelle("Dis-nous ce que vaut ce rapport")}>
+            title={libelle("Dites-nous ce que vaut ce rapport")}>
             <Icon name="message-square" size={14} />{t('reports.feedback')}
           </a>
           {(outils.notion && outils.notion.connecte) && (
@@ -3471,32 +3473,6 @@ function ReportsQuota({ needed, available, onBack, onSeeCredits }) {
                 : `This report costs ${needed} credits, you have ${available}.`}
             </p>
           )}
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div className="quota-option featured">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <h3>Pro</h3>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--v-soft)', letterSpacing: '0.10em', textTransform: 'uppercase', fontWeight: 700 }}>{lang === 'fr' ? 'Recommandé' : 'Recommended'}</span>
-            </div>
-            <div className="price">50 €<small>/{lang === 'fr' ? 'mois' : 'mo'}</small></div>
-            <ul>
-              <li><Icon name="check" size={13} className="check" />120 {lang === 'fr' ? 'crédits' : 'credits'} / {lang === 'fr' ? 'mois' : 'mo'}</li>
-              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? '2 agents de veille' : '2 monitoring agents'}</li>
-              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? 'Templates (fundraising, ICP, GTM)' : 'Templates (fundraising, ICP, GTM)'}</li>
-              <li><Icon name="check" size={13} className="check" />{lang === 'fr' ? 'Export PDF' : 'PDF export'}</li>
-            </ul>
-            <button className="btn btn-primary" style={{ marginTop: 4 }}>{t('reports.quota.upgrade')}</button>
-          </div>
-
-          <div className="quota-option">
-            <h3>{lang === 'fr' ? 'Recharge ponctuelle' : 'One-time top-up'}</h3>
-            <div className="price">20 €<small>{lang === 'fr' ? ' · 50 crédits' : ' · 50 credits'}</small></div>
-            <p style={{ fontSize: 12.5, color: 'var(--fg-2)', margin: 0, lineHeight: 1.5 }}>
-              {lang === 'fr' ? 'Packs ponctuels (50, 100 ou 200 crédits) qui ne périment pas.' : 'One-off packs (50, 100 or 200 credits) that never expire.'}
-            </p>
-            <button className="btn btn-secondary" style={{ marginTop: 4 }}>{t('reports.quota.topup')}</button>
-          </div>
         </div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
@@ -4266,6 +4242,9 @@ function CreditsSurface() {
     active: lang === 'fr' ? 'Actif' : 'Active',
     past_due: lang === 'fr' ? 'Paiement en retard' : 'Past due',
     canceled: lang === 'fr' ? 'Annulé' : 'Canceled',
+    incomplete: lang === 'fr' ? 'Paiement en attente' : 'Payment pending',
+    unpaid: lang === 'fr' ? 'Impayé' : 'Unpaid',
+    paused: lang === 'fr' ? 'En pause' : 'Paused',
   };
   const go = async (fn, id) => {
     setBusy(id); setErr('');
@@ -4274,7 +4253,7 @@ function CreditsSurface() {
       if (r && r.checkout_url) window.location.href = r.checkout_url;
       else throw new Error('no url');
     } catch (e) {
-      setErr(lang === 'fr' ? 'Paiement indisponible (vérifie la config Stripe).' : 'Payment unavailable (check Stripe config).');
+      setErr(lang === 'fr' ? 'Paiement indisponible (vérifiez la configuration Stripe).' : 'Payment unavailable (check Stripe config).');
     }
     setBusy('');
   };
@@ -4353,7 +4332,7 @@ function CreditsSurface() {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 14, maxWidth: 760, marginBottom: 30 }}>
         {paidPlans.map((p) => {
-          const isCurrent = sub && sub.status === 'active' && sub.plan === p.key;
+          const isCurrent = sub && (sub.status === 'active' || sub.status === 'trialing') && sub.plan === p.key;
           return (
           <div key={p.key} className="plan-card">
             <span className="plan-tag">{p.name}</span>
