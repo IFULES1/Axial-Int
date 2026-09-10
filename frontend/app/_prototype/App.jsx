@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axChat, axChatIn, axStreamChatIn, axCreateConversation, axListConversations, axMessages, axNewConversation, axClearToken, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, AX_API, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument } from "./bridge";
 const ReactDOM = { createRoot: () => ({ render: () => {} }) };
 
 
@@ -2584,7 +2584,7 @@ function ConvThread({ conversation, onSend, streamingSpeed, openCite }) {
             m.role === 'user'
               ? <UserMsg key={i} text={m.content} />
               : <AiMsg key={i} content={m.content} sources={m.sources || []} agent={m.agent}
-                  streamingSpeed={streamingSpeed} openCite={openCite} live={m.live}
+                  streamingSpeed={streamingSpeed} openCite={openCite} live={m.live} viz={m.viz || null}
                   isLast={i === conversation.messages.length - 1} />
           ))}
         </div>
@@ -2609,7 +2609,7 @@ function UserMsg({ text }) {
 // (clé "conseiller") reste une discussion simple, sans badge.
 const AGENT_LABELS = { market_scanner: 'Market Scanner · PESTEL', competitor_radar: 'Competitor Radar · Porter' };
 
-function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast, live }) {
+function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast, live, viz }) {
   // Pending state: a real backend answer is on its way (search + RAG + LLM can
   // take 20-40s). Show a clear "thinking" indicator instead of a mute placeholder.
   if (content === '__PENDING__') {
@@ -2659,7 +2659,7 @@ function AiMsg({ content, sources, agent, streamingSpeed, openCite, isLast, live
             <Icon name="cpu" size={10} /> {AGENT_LABELS[agent]}
           </div>
         )}
-        <MarkdownView text={shownText} onCite={openCite} />
+        <MarkdownView text={shownText} onCite={openCite} vizs={viz} live={!!live || stillStreaming} />
         {stillStreaming && <span className="typing-cursor" />}
         {!stillStreaming && (
           <div className="msg-ai-actions">
@@ -3348,8 +3348,54 @@ function renderInline(text, kp, onCite) {
   return nodes;
 }
 
-function MarkdownView({ text, onCite }) {
+/* Une visualisation : image SVG servie par l'API quand le rendu est archivé
+   (rapport, message relu), rendu à la volée quand le bloc arrive en flux (chat),
+   tableau de repli quand le graphique n'a pas pu être tracé. Le graphique
+   lui-même est toujours produit côté serveur : un seul moteur, un seul look. */
+function VizFigure({ viz, brut, ferme, live }) {
+  const [etat, setEtat] = React.useState(viz ? { statut: viz.statut, empreinte: viz.empreinte } : null);
+  React.useEffect(() => {
+    if (viz) { setEtat({ statut: viz.statut, empreinte: viz.empreinte }); return; }
+    if (!ferme || live) return;                       // en flux : attendre la fermeture du bloc et la fin
+    let spec;
+    try { spec = JSON.parse(brut); } catch (e) { setEtat({ statut: 'repli' }); return; }
+    let actif = true;
+    axRenduViz(spec)
+      .then((r) => { if (actif) setEtat({ statut: r.statut, empreinte: r.empreinte, tableau: r.tableau }); })
+      .catch(() => { if (actif) setEtat({ statut: 'repli' }); });
+    return () => { actif = false; };
+  }, [viz, brut, ferme, live]);
+
+  if (!ferme || (live && !etat)) {
+    return <div className="viz-attente">{libelle('Graphique en préparation…')}</div>;
+  }
+  if (!etat) return <div className="viz-attente">…</div>;
+  if (etat.statut === 'ok' && etat.empreinte) {
+    return (
+      <figure className="viz">
+        <img src={`${AX_API}/viz/${etat.empreinte}.svg`} alt="" loading="lazy" />
+      </figure>
+    );
+  }
+  // Repli : les données du bloc, en tableau — rien ne se perd.
+  let t = etat.tableau || null;
+  if (!t) {
+    let spec = viz && viz.spec;
+    if (!spec && brut) { try { spec = JSON.parse(brut); } catch (e) { spec = null; } }
+    if (spec && spec.cellules) t = spec.cellules;
+    else if (spec && spec.series) t = [['', spec.unit || '']].concat(spec.series.map((p) => [p.label, String(p.value)]));
+  }
+  return t ? (
+    <div className="md-table-wrap"><table className="md-table">
+      <thead><tr>{t[0].map((c, i) => <th key={i}>{c}</th>)}</tr></thead>
+      <tbody>{t.slice(1).map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j}>{c}</td>)}</tr>)}</tbody>
+    </table></div>
+  ) : null;
+}
+
+function MarkdownView({ text, onCite, vizs, live }) {
   const lines = (text || '').split('\n');
+  let vizIndex = 0;   // rang du bloc de visualisation, même comptage que le serveur
   const blocks = [];
   let bullets = [];
   const flush = (k) => {
@@ -3371,10 +3417,48 @@ function MarkdownView({ text, onCite }) {
     if (s.endsWith('|')) s = s.slice(0, -1);
     return s.split('|').map((c) => c.trim());
   };
+  const isGraphique = (l) => /^\s*\**\s*(graphique|chart)\s*:/i.test(l || '');
   let idx = 0;
   while (idx < lines.length) {
     const line = lines[idx].replace(/\s+$/, '');
     if (!line.trim()) { flush(idx); idx += 1; continue; }
+    // Bloc ```viz … ``` : visualisation décrite par le modèle, rendue par le serveur.
+    if (line.trim().startsWith('```viz')) {
+      flush(idx);
+      let j = idx + 1; const corps = [];
+      while (j < lines.length && !lines[j].trim().startsWith('```')) { corps.push(lines[j]); j += 1; }
+      const ferme = j < lines.length;
+      const k = vizIndex++;
+      blocks.push(<VizFigure key={'v' + k} viz={(vizs || [])[k]} brut={corps.join('\n')} ferme={ferme} live={!!live} />);
+      idx = ferme ? j + 1 : j;
+      continue;
+    }
+    // Ancienne marque « Graphique : titre » + tableau : même compteur que le serveur.
+    if (isGraphique(line)) {
+      let j = idx + 1;
+      while (j < lines.length && !lines[j].trim()) j += 1;
+      if (j + 1 < lines.length && lines[j].trim().startsWith('|') && isSep(lines[j + 1])) {
+        flush(idx);
+        const head = cells(lines[j]); const rows = [];
+        let m = j + 2;
+        while (m < lines.length && lines[m].trim().startsWith('|')) { rows.push(cells(lines[m])); m += 1; }
+        const k = vizIndex++;
+        const v = (vizs || [])[k];
+        if (v && v.statut === 'ok') {
+          blocks.push(<VizFigure key={'v' + k} viz={v} ferme={true} live={false} />);
+        } else {
+          blocks.push(<p key={'gt' + k} style={{ margin: '10px 0 4px', fontWeight: 700 }}>{line.replace(/^\s*\**\s*(graphique|chart)\s*:\s*/i, '').replace(/\**\s*$/, '')}</p>);
+          blocks.push(
+            <div key={'t' + k} className="md-table-wrap"><table className="md-table">
+              <thead><tr>{head.map((c, i) => <th key={i}>{renderInline(c, 'gh' + k + i, onCite)}</th>)}</tr></thead>
+              <tbody>{rows.map((r, ri) => <tr key={ri}>{head.map((_, ci) => <td key={ci}>{renderInline(r[ci] || '', 'gd' + k + ri + ci, onCite)}</td>)}</tr>)}</tbody>
+            </table></div>,
+          );
+        }
+        idx = m;
+        continue;
+      }
+    }
     if (line.trim().startsWith('|') && isSep(lines[idx + 1])) {
       flush(idx);
       const head = cells(line);
@@ -3495,7 +3579,7 @@ function ReportsEditor({ data, onBack, openShare }) {
 
       <div className="rep-doc" style={{ fontSize: 14, maxWidth: 820 }}>
         {content
-          ? <MarkdownView text={content}
+          ? <MarkdownView text={content} vizs={(data && data.viz) || null}
               onCite={(n) => {
                 const el = document.getElementById('src-' + n);
                 if (!el) return;
@@ -6432,7 +6516,7 @@ function App() {
   }));
   const mapBackendMsg = (m) => (m.role === 'user'
     ? { role: 'user', content: m.content }
-    : { role: 'assistant', content: m.content, agent: m.agent, sources: mapCitations(m.citations) });
+    : { role: 'assistant', content: m.content, agent: m.agent, sources: mapCitations(m.citations), viz: m.viz || null });
 
   // Historique persistant : sélection d'une conversation -> chargement paresseux
   // de ses messages depuis le backend (une seule fois).
@@ -6466,7 +6550,7 @@ function App() {
     const final = await axStreamChatIn(cid, text, onEvent);
     setMsgs([...baseMessages, {
       role: 'assistant', content: final.content, agent: final.agent,
-      sources: mapCitations(final.citations), live: false,
+      sources: mapCitations(final.citations), viz: final.viz || null, live: false,
     }]);
   };
 

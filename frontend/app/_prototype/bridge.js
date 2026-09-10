@@ -353,6 +353,8 @@ export async function axCrediterCompte(userId, credits, motif) {
 export async function axProlongerEssai(userId, jours) {
   return axFetch(`/metrics/comptes/${userId}/prolonger`, { method: "POST", body: { jours } });
 }
+// Visualisation à la volée (chat en flux) : le spec du bloc ```viz → SVG ou tableau de repli.
+export async function axRenduViz(spec) { return axFetch("/viz/rendu", { method: "POST", body: spec }); }
 export async function axPremierRapport() { return axFetch("/analysis/premier-rapport", { method: "POST" }); }
 // Export d'une conversation : on télécharge des octets, pas du JSON — axFetch
 // ne convient pas, il parse la réponse.

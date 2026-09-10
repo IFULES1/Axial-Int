@@ -1078,6 +1078,11 @@ input, select, textarea { font-family: inherit; color: inherit; }
                letter-spacing: .05em; color: var(--fg-3); border-bottom: 1px solid var(--v-soft); white-space: nowrap; }
 .md-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.45; }
 .md-table tr:last-child td { border-bottom: 0; }
+/* Visualisations (rendu serveur, image SVG) */
+figure.viz { margin: 12px 0 16px; padding: 12px 12px 8px; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+figure.viz img { display: block; width: 100%; height: auto; }
+.viz-attente { margin: 12px 0; padding: 18px; border: 1px dashed var(--border); border-radius: 8px;
+               color: var(--fg-3); font-size: 12.5px; text-align: center; }
 /* Source atteinte depuis une citation [N] */
 .src-flash { outline: 2px solid var(--v-bright); outline-offset: 2px; border-radius: 6px; transition: outline-color .6s; }
 
