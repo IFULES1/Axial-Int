@@ -3373,7 +3373,7 @@ function VizFigure({ viz, brut, ferme, live }) {
   if (etat.statut === 'ok' && etat.empreinte) {
     return (
       <figure className="viz">
-        <img src={`${AX_API}/viz/${etat.empreinte}.svg`} alt="" loading="lazy" />
+        <img src={`${AX_API}/viz/${etat.empreinte}.svg`} alt="" />
       </figure>
     );
   }
