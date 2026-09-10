@@ -10,8 +10,8 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import re
+import threading
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from sqlalchemy import select
@@ -313,6 +313,11 @@ def _alterner(tours: list[dict]) -> list[dict]:
         # Question restée sans réponse : elle est déjà dans le prompt courant
         # ou n'a jamais abouti, la garder créerait deux tours utilisateur.
         out.pop()
+    # Retroncature APRÈS fusion : deux messages de même rôle concaténés
+    # dépassaient la limite (deux fois 1 500 caractères, et plus si le fil
+    # enchaîne trois tours du même côté).
+    for m in out:
+        m["content"] = m["content"][:HISTORIQUE_CARACTERES]
     return out
 
 
@@ -347,19 +352,33 @@ RESUME_SYSTEM = (
 
 
 def _mettre_a_jour_resume(db: Session, conv: Conversation) -> None:
-    """Résumé roulant des messages sortis de la fenêtre des 8 derniers.
+    """Résumé roulant INCRÉMENTAL des messages sortis de la fenêtre des 8.
 
-    Appelé APRÈS l'événement `done` : l'utilisateur a déjà sa réponse, il n'a
-    pas à attendre un second appel au modèle. Toute erreur est absorbée — un
-    résumé manquant dégrade la mémoire longue, il ne casse pas la conversation.
+    Ne résume que la tranche `[conv.resume_messages, message_count - 8)` — les
+    messages qui viennent de quitter la fenêtre — en donnant le résumé
+    précédent comme contexte, puis enregistre la nouvelle couverture. La
+    version qui relisait tout le fil à chaque tour envoyait ~35 k tokens
+    d'entrée au 100ᵉ message pour produire 900 tokens de sortie, et
+    recommençait au tour suivant : le résumé coûtait plus que la réponse.
+
+    Tourne HORS du cycle de requête (voir `_mettre_a_jour_resume_en_tache`).
+    Toute erreur est absorbée — un résumé manquant dégrade la mémoire longue,
+    il ne casse pas la conversation.
     """
     try:
-        if (conv.message_count or 0) <= HISTORIQUE_MESSAGES:
+        total = conv.message_count or 0
+        if total <= HISTORIQUE_MESSAGES:
+            return
+        deja = conv.resume_messages or 0
+        fin = total - HISTORIQUE_MESSAGES
+        if fin <= deja:
+            # Rien de nouveau n'est sorti de la fenêtre depuis le dernier
+            # résumé : le second appel au modèle serait payé pour rien.
             return
         tous = list(db.scalars(select(Message)
                                .where(Message.conversation_id == conv.id)
                                .order_by(Message.created_at.asc())))
-        anciens = tous[:-HISTORIQUE_MESSAGES]
+        anciens = tous[deja:fin]
         if not anciens:
             return
         corps = "\n\n".join(
@@ -371,16 +390,55 @@ def _mettre_a_jour_resume(db: Session, conv: Conversation) -> None:
         prefixe = (f"Résumé précédent (à compléter, pas à répéter) :\n{conv.resume}\n\n"
                    if conv.resume else "")
         res = llm_client.generate(system=RESUME_SYSTEM,
-                                  prompt=f"{prefixe}Messages à résumer :\n{corps}",
+                                  prompt=f"{prefixe}Nouveaux messages à intégrer :\n{corps}",
                                   tier="chat", max_tokens=900)
         texte = " ".join((res.text or "").split())
         if not texte:
             return
         mots = texte.split(" ")
         conv.resume = " ".join(mots[:RESUME_MOTS_MAX]) + ("…" if len(mots) > RESUME_MOTS_MAX else "")
+        conv.resume_messages = deja + len(anciens)
         db.commit()
     except Exception as e:  # noqa: BLE001 — jamais bloquant
         logger.warning("Résumé roulant non mis à jour : %s", e)
+
+
+def _mettre_a_jour_resume_en_tache(conversation_id) -> None:
+    """Le résumé roulant, dans son propre thread et sa propre session.
+
+    Le générateur de la réponse n'est pas terminé tant qu'il n'a pas rendu la
+    main : Starlette n'envoie le dernier chunk (`more_body: False`) qu'après
+    `StopIteration`. Faire le résumé dedans gardait la connexion SSE ouverte —
+    et un worker du pool occupé — pendant plusieurs secondes APRÈS le `done`,
+    exactement ce que « jamais bloquant » devait éviter. La session de la
+    requête, elle, est fermée par `get_db` dès la réponse rendue : ce thread
+    ouvre donc la sienne. Ne lève jamais.
+    """
+    from app.db import SessionLocal
+
+    db = None
+    try:
+        db = SessionLocal()
+        conv = db.get(Conversation, conversation_id)
+        if conv is not None:
+            _mettre_a_jour_resume(db, conv)
+    except Exception as e:  # noqa: BLE001 — un thread qui lève ne prévient personne
+        logger.warning("Résumé roulant en tâche de fond abandonné : %s", e)
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Session du résumé non refermée : %s", e)
+
+
+def _programmer_resume(conv: Conversation) -> None:
+    """Lance le résumé roulant en arrière-plan (thread démon)."""
+    try:
+        threading.Thread(target=_mettre_a_jour_resume_en_tache,
+                         args=(conv.id,), daemon=True).start()
+    except Exception as e:  # noqa: BLE001 — jamais bloquant
+        logger.warning("Résumé roulant non programmé : %s", e)
 
 
 def _fournisseurs_recherche() -> list[str]:
@@ -703,7 +761,13 @@ def _finalize_turn(db: Session, user_id: str, turn: _Turn, answer: str, *,
                             appels_recherche=turn.appels_recherche,
                             cout_recherche_micro_eur=turn.cout_recherche_micro_eur,
                             statut=statut,
-                            cle_idempotence=cle_idempotence or None)
+                            # La clé N'EST POSÉE QUE sur une réponse complète :
+                            # sinon le rejeu après coupure réseau renvoyait
+                            # définitivement le texte tronqué archivé par cette
+                            # même coupure, sans jamais rien facturer ni
+                            # permettre d'obtenir la réponse entière.
+                            cle_idempotence=((cle_idempotence or None)
+                                             if statut == "complet" else None))
     db.add(assistant_msg)
 
     turn.conv.message_count += 2
@@ -750,7 +814,7 @@ def post_message(db: Session, user_id: str, conversation_id: str, content: str,
                          statut=statut, mesure=result,
                          cle_idempotence=cle_idempotence)
     if statut == "complet":
-        _mettre_a_jour_resume(db, turn.conv)
+        _programmer_resume(turn.conv)
     return msg
 
 
@@ -792,26 +856,26 @@ NOTE_INTERROMPUE = "\n\n*(réponse interrompue)*"
 NOTE_COUPURE = ("\n\n*(réponse interrompue — le service a coupé en cours "
                 "de rédaction)*")
 
-# Fréquence du test de déconnexion dans la boucle de chunks. Chaque test
-# traverse la frontière thread → boucle d'événements : à chaque chunk, le coût
-# dépasserait ce qu'il évite.
-DECONNEXION_TOUS_LES = 10
-
-
 def stream_message(db: Session, user_id: str, conversation_id: str, content: str,
                    agent_override: str | None = None, *, is_admin: bool = False,
                    document_ids: list[str] | None = None,
-                   cle_idempotence: str | None = None,
-                   est_deconnecte: Callable[[], bool] | None = None):
+                   cle_idempotence: str | None = None):
     """Same turn as post_message, but the answer arrives word by word.
 
     Order matters: the citations are sent BEFORE the first word, so the reader
     can already see what the answer is built on while it is being written.
 
-    `est_deconnecte` — fourni par le routeur, dit si le client a fermé la
-    connexion (bouton Stop, onglet fermé). Le générateur s'arrête alors et
-    ARCHIVE quand même le texte écrit, en `statut='partiel'` et sans facturer :
-    l'utilisateur retrouve ce qu'il a vu passer.
+    **Déconnexion du client** (bouton Stop, onglet fermé) : rien n'est sondé
+    ici. Le routeur enveloppe ce générateur dans un générateur ASYNC et appelle
+    `close()` dessus dans un `finally` ; Starlette ferme ce générateur async dès
+    que le client part, donc `GeneratorExit` est levé au `yield` courant,
+    ENCORE DANS LE SCOPE DE LA REQUÊTE (la session `get_db` est toujours
+    ouverte). Le sondage précédent lisait le même `receive` que la tâche
+    `listen_for_disconnect` de Starlette — une course non déterministe — et
+    l'archivage se retrouvait à tourner sur une session déjà fermée.
+    Le handler `except GeneratorExit` archive le texte écrit en
+    `statut='partiel'`, sans facturer : l'utilisateur retrouve ce qu'il a vu
+    passer.
     """
     # Rejeu : la même clé renvoie le message déjà produit, en un seul `done`.
     try:
@@ -884,7 +948,7 @@ def stream_message(db: Session, user_id: str, conversation_id: str, content: str
                                           tier=turn.tier, history=hist_flux,
                                           mesure=compte_tokens,
                                           max_tokens=turn.max_tokens)
-            raison, vus = None, 0
+            raison = None
             while True:
                 try:
                     chunk = next(flux)
@@ -893,13 +957,7 @@ def stream_message(db: Session, user_id: str, conversation_id: str, content: str
                     break
                 chunks.append(chunk)
                 yield _sse({"step": "delta", "delta": chunk})
-                vus += 1
-                if (vus % DECONNEXION_TOUS_LES == 0 and est_deconnecte
-                        and est_deconnecte()):
-                    flux.close()
-                    statut = "partiel"
-                    break
-            if statut == "partiel" or raison != "max_tokens":
+            if raison != "max_tokens":
                 break
             partiel = "".join(chunks)
             if not partiel.strip():
@@ -913,14 +971,13 @@ def stream_message(db: Session, user_id: str, conversation_id: str, content: str
                 {"role": "assistant", "content": partiel},
             ]
             prompt_flux = SUITE_FLUX_CONSIGNE
-        if statut == "partiel":
-            chunks.append(NOTE_INTERROMPUE)
     except GeneratorExit:
-        # FastAPI ferme le générateur quand le client part sans que le test de
-        # déconnexion soit tombé (entre deux vérifications, ou dès le premier
-        # morceau). On archive AVANT de laisser la fermeture se poursuivre :
-        # c'est exactement ce qui faisait perdre un rapport le 25/08. Plus
-        # rien ne peut être émis à ce stade, d'où l'absence de `done`.
+        # SEUL chemin de détection du départ du client : le routeur ferme ce
+        # générateur (via son enveloppe async), `GeneratorExit` est levé au
+        # `yield` courant et la session de la requête est encore ouverte. On
+        # archive AVANT de laisser la fermeture se poursuivre — c'est
+        # exactement ce qui faisait perdre un rapport le 25/08. Aucun `yield`
+        # n'est permis ici, d'où l'absence de `done`.
         if chunks:
             chunks.append(NOTE_INTERROMPUE)
             _finalize_turn(db, user_id, turn, "".join(chunks), is_admin=is_admin,
@@ -973,7 +1030,7 @@ def stream_message(db: Session, user_id: str, conversation_id: str, content: str
     # Résumé roulant APRÈS le `done` : l'utilisateur a sa réponse, il n'attend
     # pas un second appel au modèle.
     if statut == "complet":
-        _mettre_a_jour_resume(db, turn.conv)
+        _programmer_resume(turn.conv)
 
 
 def _stream_payload(msg: Message, *, balance: int | None = None,

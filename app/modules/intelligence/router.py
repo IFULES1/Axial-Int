@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 
 from fastapi.responses import StreamingResponse
-from fastapi import APIRouter, Depends, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -147,29 +147,37 @@ def list_conversations(project_id: str, user: AuthUser = Depends(get_current_use
 
 # --- messages --------------------------------------------------------------
 
-def _detecteur_deconnexion(request: Request):
-    """Rend une fonction SYNCHRONE qui dit si le client est parti.
+def _flux_sse(generateur):
+    """Enveloppe un générateur SYNCHRONE du service en générateur ASYNC.
 
-    Le générateur du service est synchrone : Starlette l'itère dans un thread
-    du pool (`iterate_in_threadpool`), donc `request.is_disconnected()` — une
-    coroutine — doit être relancée sur la boucle d'événements depuis ce thread.
-    C'est exactement ce que fait `anyio.from_thread.run`. Un générateur async
-    aurait évité le détour mais aurait forcé à rendre asynchrone tout le
-    pipeline (SQLAlchemy synchrone compris).
+    C'est ce qui rend la détection de déconnexion fiable. Starlette n'appelle
+    jamais `close()` sur un itérable synchrone (`iterate_in_threadpool`) : à
+    l'annulation, le générateur du service était abandonné en plein `yield` et
+    son `GeneratorExit` n'arrivait qu'au passage du ramasse-miettes, après que
+    l'`AsyncExitStack` de FastAPI a fermé la session `get_db` — l'archivage de
+    la réponse partielle tournait alors sur une session morte.
+
+    Un générateur ASYNC, lui, est fermé par Starlette (`aclose`) dès que le
+    client part. Le `finally` appelle `gen.close()` dans un thread du pool
+    (SQLAlchemy est synchrone et l'archivage commite) : `GeneratorExit` est
+    levé au `yield` courant du service, ENCORE dans le scope de la requête,
+    puisque le démontage des dépendances n'a lieu qu'après le retour de l'appel
+    à la réponse.
     """
-    import anyio
+    from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 
-    def _parti() -> bool:
+    async def _flux():
         try:
-            return bool(anyio.from_thread.run(request.is_disconnected))
-        except Exception:  # noqa: BLE001 — un test raté ne doit jamais couper un flux sain
-            return False
+            async for evenement in iterate_in_threadpool(generateur):
+                yield evenement
+        finally:
+            await run_in_threadpool(generateur.close)
 
-    return _parti
+    return _flux()
 
 
 @router.post("/conversations/{conversation_id}/messages/stream")
-def stream_message(conversation_id: str, payload: MessageIn, request: Request,
+def stream_message(conversation_id: str, payload: MessageIn,
                    user: AuthUser = Depends(get_current_user),
                    db: Session = Depends(get_db),
                    x_idempotency_key: str | None = Header(default=None)
@@ -182,10 +190,9 @@ def stream_message(conversation_id: str, payload: MessageIn, request: Request,
         db, user.id, conversation_id, payload.content, payload.agent,
         is_admin=user.is_admin, document_ids=payload.document_ids,
         cle_idempotence=x_idempotency_key,
-        est_deconnecte=_detecteur_deconnexion(request),
     )
     return StreamingResponse(
-        generator,
+        _flux_sse(generator),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

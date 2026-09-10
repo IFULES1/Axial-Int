@@ -109,34 +109,40 @@ def stream(*, system: str, prompt: str, model: str | None = None,
     }
     url = f"{_BASE}/{model}:streamGenerateContent?alt=sse&key={settings.gemini_api_key}"
     raison = None
-    with httpx.stream("POST", url, json=payload, timeout=180.0) as r:
-        r.raise_for_status()
-        for line in r.iter_lines():
-            if not line or not line.startswith("data:"):
-                continue
-            try:
-                data = json.loads(line[5:].strip())
-            except ValueError:
-                continue
-            # `usageMetadata` arrive sur les derniers chunks : on garde le
-            # dernier vu, c'est le décompte complet de la réponse.
-            usage = data.get("usageMetadata") or {}
-            if mesure is not None and usage:
-                mesure["_dernier_usage"] = usage
-            for cand in data.get("candidates") or []:
-                # `finishReason` n'apparaît que sur les derniers chunks : on
-                # garde le dernier vu, normalisé comme dans generate().
-                fin = cand.get("finishReason")
-                if fin:
-                    raison = "max_tokens" if fin == "MAX_TOKENS" else str(fin).lower()
-                for part in (cand.get("content") or {}).get("parts") or []:
-                    chunk = part.get("text")
-                    if chunk:
-                        yield chunk
-    if mesure is not None:
-        usage = mesure.pop("_dernier_usage", None) or {}
-        if usage:
-            cumuler_mesure(mesure, model, "gemini",
-                           usage.get("promptTokenCount", 0) or 0,
-                           usage.get("candidatesTokenCount", 0) or 0)
+    try:
+        with httpx.stream("POST", url, json=payload, timeout=180.0) as r:
+            r.raise_for_status()
+            for line in r.iter_lines():
+                if not line or not line.startswith("data:"):
+                    continue
+                try:
+                    data = json.loads(line[5:].strip())
+                except ValueError:
+                    continue
+                # `usageMetadata` arrive sur les derniers chunks : on garde le
+                # dernier vu, c'est le décompte complet de la réponse.
+                usage = data.get("usageMetadata") or {}
+                if mesure is not None and usage:
+                    mesure["_dernier_usage"] = usage
+                for cand in data.get("candidates") or []:
+                    # `finishReason` n'apparaît que sur les derniers chunks : on
+                    # garde le dernier vu, normalisé comme dans generate().
+                    fin = cand.get("finishReason")
+                    if fin:
+                        raison = "max_tokens" if fin == "MAX_TOKENS" else str(fin).lower()
+                    for part in (cand.get("content") or {}).get("parts") or []:
+                        chunk = part.get("text")
+                        if chunk:
+                            yield chunk
+    finally:
+        # Dans un `finally` : un Stop (GeneratorExit) ou une coupure laissait
+        # la mesure dans `_dernier_usage` sans jamais la cumuler, donc un
+        # message partiel archivé sans tokens ni coût — alors que le coût
+        # fournisseur, lui, a bien été payé et doit remonter dans les métriques.
+        if mesure is not None:
+            usage = mesure.pop("_dernier_usage", None) or {}
+            if usage:
+                cumuler_mesure(mesure, model, "gemini",
+                               usage.get("promptTokenCount", 0) or 0,
+                               usage.get("candidatesTokenCount", 0) or 0)
     return raison

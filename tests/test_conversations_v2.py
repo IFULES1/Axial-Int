@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid as uuidlib
 
 import pytest
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import UniqueConstraint, create_engine, func, select
 from sqlalchemy.pool import StaticPool
 from sqlalchemy.orm import Session
 
@@ -71,10 +71,17 @@ def test_colonnes_conversations_v2_presentes():
     for nom in ("statut", "cle_idempotence", "cout_recherche_micro_eur",
                 "appels_recherche"):
         assert nom in msg, f"messages.{nom} manquant"
-    assert msg["cle_idempotence"].unique, "cle_idempotence doit être unique"
+    # Unicité COMPOSITE : une clé dérivée d'autre chose qu'un uuid (hash du
+    # message, compteur de composer) est réutilisable d'un fil à l'autre, et
+    # une unicité globale y répondait par un IntegrityError 500.
+    contraintes = {tuple(c.columns.keys())
+                   for c in Base.metadata.tables["messages"].constraints
+                   if isinstance(c, UniqueConstraint)}
+    assert ("conversation_id", "cle_idempotence") in contraintes
+    assert not msg["cle_idempotence"].unique, "l'unicité globale est levée"
 
     conv = Base.metadata.tables["conversations"].c
-    for nom in ("resume", "pinned_at", "archived_at"):
+    for nom in ("resume", "resume_messages", "pinned_at", "archived_at"):
         assert nom in conv, f"conversations.{nom} manquant"
 
 
@@ -625,34 +632,61 @@ def test_message_trivial_n_annonce_pas_de_recherche(monkeypatch):
 
 # --- Step 4 : statut partiel + Stop ---------------------------------------
 
-def test_flux_interrompu_est_partiel_et_non_facture(monkeypatch):
-    """Stop après le premier mot : le texte écrit est gardé, marqué `partiel`,
-    et aucun crédit n'est débité."""
+def test_enveloppe_du_routeur_archive_a_la_deconnexion(monkeypatch):
+    """La déconnexion passe par l'enveloppe ASYNC du routeur — le seul chemin
+    de production. Le client lit deux morceaux puis part ; Starlette ferme le
+    générateur async, dont le `finally` ferme le générateur du service, ce qui
+    y lève `GeneratorExit` alors que la session de la requête vit encore.
+
+    Le sondage `request.is_disconnected()` a été retiré : il lisait le même
+    `receive` que la tâche `listen_for_disconnect` de Starlette (course non
+    déterministe) et son `GeneratorExit` n'arrivait qu'au ramasse-miettes,
+    après la fermeture de la session.
+    """
+    import asyncio
+
+    from app.modules.intelligence import router as intel_router
+
     _hors_reseau(monkeypatch)
     debits = _sans_effets(monkeypatch, contexte="ACME")
-    _stub_flux(monkeypatch, [([f"mot{i} " for i in range(50)], "end_turn")])
+    _stub_flux(monkeypatch, [([f"mot{i} " for i in range(40)], "end_turn")])
 
-    with Session(_base_complete()) as db:
+    # `partagee` : le générateur du service est itéré dans un thread du pool.
+    engine = _base_complete(partagee=True)
+    with Session(engine) as db:
         uid, conv = _fil(db)
-        evts = _evenements(intel.stream_message(
-            db, uid, str(conv.id),
-            "Analyse détaillée du marché du logiciel RH en France",
-            is_admin=False, est_deconnecte=lambda: True))
+        generateur = intel.stream_message(
+            db, uid, str(conv.id), "Analyse détaillée du marché du logiciel RH",
+            is_admin=False, cle_idempotence="cle-coupee")
+        flux = intel_router._flux_sse(generateur)
+
+        async def _lire_deux_puis_partir():
+            deltas = 0
+            async for bloc in flux:
+                if '"delta"' in bloc:
+                    deltas += 1
+                    if deltas == 2:
+                        break
+            await flux.aclose()
+
+        asyncio.run(_lire_deux_puis_partir())
+
         reponse = db.scalars(select(intel.Message).where(
             intel.Message.conversation_id == conv.id,
             intel.Message.role == "assistant")).one()
-
         assert reponse.statut == "partiel"
+        assert reponse.content.startswith("mot0")
         assert reponse.content.endswith(intel.NOTE_INTERROMPUE)
-        assert "mot0" in reponse.content
-        assert debits == [], "un tour interrompu a été facturé"
-
-    # Le générateur a bien ARRÊTÉ de tirer sur le modèle : le test de
-    # déconnexion tombe tous les 10 morceaux, pas au 50e.
-    deltas = [e for e in evts if e["step"] == "delta"]
-    assert len(deltas) == intel.DECONNEXION_TOUS_LES
-    assert evts[-1]["data"]["statut"] == "partiel"
-    assert evts[-1]["data"]["credits"] == 0
+        assert "mot39" not in reponse.content
+        assert debits == [], "un flux coupé a été facturé"
+        # Le fil reste cohérent : la question ET la réponse partielle sont là.
+        db.refresh(conv)
+        assert conv.message_count == 2
+        assert db.scalar(select(func.count()).select_from(intel.Message)
+                         .where(intel.Message.conversation_id == conv.id)) == 2
+        # Rien n'est absorbé par l'idempotence : la même clé doit pouvoir
+        # redonner une réponse complète (finding 3).
+        assert reponse.cle_idempotence is None
 
 
 def test_flux_survit_a_la_deconnexion_du_client(monkeypatch):
@@ -1146,3 +1180,286 @@ def test_cumul_de_mesure_et_resultat():
     res = resultat_de_mesure(mesure)
     assert (res.input_tokens, res.output_tokens, res.tokens) == (17, 5, 22)
     assert res.model == "m" and res.provider == "gemini"
+
+
+
+# --- Fix round 1 : garde-fous ---------------------------------------------
+
+def test_historique_retronque_apres_fusion(monkeypatch):
+    """Finding 7 — deux messages consécutifs de même rôle sont CONCATÉNÉS par
+    `_alterner` ; la limite doit être appliquée après la fusion, sinon une
+    entrée d'historique atteint 3 000 caractères ou plus."""
+    _hors_reseau(monkeypatch)
+    with Session(_base()) as db:
+        uid, conv = _fil(db)
+        base = dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc)
+        tours = (("user", "Question"), ("assistant", "a" * 1400),
+                 ("assistant", "b" * 1400), ("assistant", "c" * 1400))
+        for i, (role, texte) in enumerate(tours):
+            db.add(intel.Message(id=uuidlib.uuid4(), conversation_id=conv.id,
+                                 role=role, content=texte,
+                                 created_at=base + dt.timedelta(minutes=i)))
+        conv.message_count = len(tours)
+        db.commit()
+        turn = intel._prepare_turn(db, uid, str(conv.id), "Suite ?", None,
+                                   is_admin=True, document_ids=None)
+    assert [h["role"] for h in turn.history] == ["user", "assistant"]
+    assert all(len(h["content"]) <= intel.HISTORIQUE_CARACTERES
+               for h in turn.history)
+    # La fusion a bien eu lieu (trois réponses en une), mais tronquée.
+    assert len(turn.history[-1]["content"]) == intel.HISTORIQUE_CARACTERES
+
+
+def test_resume_roulant_est_incremental(monkeypatch):
+    """Finding 2 — le résumé n'intègre que la tranche nouvellement sortie de la
+    fenêtre, avec le résumé précédent comme contexte. La version qui relisait
+    tout le fil envoyait ~35 k tokens d'entrée au 100ᵉ message, à chaque tour.
+    """
+    with Session(_base()) as db:
+        _, conv = _fil(db)
+        _remplir(db, conv, 6)  # 12 messages → 4 sortent de la fenêtre
+        vus: list[str] = []
+
+        def _generate(*, system, prompt, tier="chat", max_tokens=0, history=None):
+            vus.append(prompt)
+            return LLMResult(text="Résumé.", model="m", provider="p")
+
+        monkeypatch.setattr(intel.llm_client, "generate", _generate)
+
+        intel._mettre_a_jour_resume(db, conv)
+        assert conv.resume_messages == 12 - intel.HISTORIQUE_MESSAGES
+        assert "Question 0" in vus[0] and "Question 1" in vus[0]
+
+        # Un tour de plus : seule la paire qui vient de sortir est envoyée.
+        base = dt.datetime(2026, 9, 2, tzinfo=dt.timezone.utc)
+        for i, role in enumerate(("user", "assistant")):
+            db.add(intel.Message(id=uuidlib.uuid4(), conversation_id=conv.id,
+                                 role=role, content=f"Nouveau {i}",
+                                 created_at=base + dt.timedelta(minutes=i)))
+        conv.message_count = 14
+        db.commit()
+        intel._mettre_a_jour_resume(db, conv)
+
+        assert len(vus) == 2
+        assert "Question 2" in vus[1] and "Réponse 2" in vus[1]
+        assert "Question 0" not in vus[1] and "Question 1" not in vus[1]
+        assert "Résumé précédent" in vus[1], "le résumé porte déjà le reste du fil"
+        assert conv.resume_messages == 14 - intel.HISTORIQUE_MESSAGES
+
+        # Rien de neuf n'est sorti de la fenêtre : pas de second appel payé.
+        intel._mettre_a_jour_resume(db, conv)
+        assert len(vus) == 2
+
+
+def test_resume_roulant_sort_du_cycle_de_requete(monkeypatch):
+    """Finding 4 — le résumé ne doit plus tourner dans le générateur de la
+    réponse : Starlette n'envoie le dernier chunk qu'après `StopIteration`,
+    donc la connexion SSE restait ouverte (et un worker occupé) le temps d'un
+    second appel au modèle, APRÈS le `done`.
+    """
+    from sqlalchemy.orm import sessionmaker
+
+    import app.db as app_db
+
+    _hors_reseau(monkeypatch)
+    _sans_effets(monkeypatch, contexte="ACME")
+    _stub_flux(monkeypatch, [(["Texte."], "end_turn")])
+    monkeypatch.setattr(intel.llm_client, "generate",
+                        lambda **k: LLMResult(text="Résumé du fil.", model="m",
+                                              provider="p"))
+
+    engine = _base_complete(partagee=True)
+    # La tâche de fond ouvre SA session : `get_db` a déjà fermé celle de la
+    # requête quand elle s'exécute.
+    monkeypatch.setattr(app_db, "SessionLocal",
+                        sessionmaker(bind=engine, autoflush=False, future=True))
+
+    lancees: list = []
+
+    reel = intel.threading.Thread
+
+    class _Thread:
+        """Intercepte le seul thread du résumé, laisse passer les autres."""
+
+        def __new__(cls, *a, target=None, **kw):
+            if target is not intel._mettre_a_jour_resume_en_tache:
+                return reel(*a, target=target, **kw)
+            return super().__new__(cls)
+
+        def __init__(self, *, target, args=(), daemon=False, **kw):
+            self.cible, self.args, self.daemon = target, args, daemon
+
+        def start(self):
+            lancees.append(self)
+
+    monkeypatch.setattr(intel.threading, "Thread", _Thread)
+
+    with Session(engine) as db:
+        uid, conv = _fil(db)
+        _remplir(db, conv, 5)  # 10 messages + le tour = 12
+        evts = _evenements(intel.stream_message(
+            db, uid, str(conv.id), "Analyse du marché du logiciel RH",
+            is_admin=False))
+        conv_id = conv.id
+        # Le générateur est ÉPUISÉ sans avoir résumé : rien derrière le `done`.
+        assert evts[-1]["step"] == "done"
+        assert conv.resume is None
+        assert len(lancees) == 1 and lancees[0].daemon is True
+
+    # Le thread, exécuté ici synchroniquement.
+    lancees[0].cible(*lancees[0].args)
+
+    with Session(engine) as db:
+        rechargee = db.get(intel.Conversation, conv_id)
+        assert rechargee.resume == "Résumé du fil."
+        assert rechargee.resume_messages == 12 - intel.HISTORIQUE_MESSAGES
+
+
+def test_tache_de_fond_du_resume_ne_leve_jamais(monkeypatch):
+    """Un thread qui lève ne prévient personne : la tâche absorbe tout, y
+    compris une conversation supprimée entre-temps."""
+    from sqlalchemy.orm import sessionmaker
+
+    import app.db as app_db
+
+    engine = _base_complete(partagee=True)
+    monkeypatch.setattr(app_db, "SessionLocal",
+                        sessionmaker(bind=engine, autoflush=False, future=True))
+    intel._mettre_a_jour_resume_en_tache(uuidlib.uuid4())  # introuvable
+
+    def _boom():
+        raise RuntimeError("base indisponible")
+
+    monkeypatch.setattr(app_db, "SessionLocal", _boom)
+    intel._mettre_a_jour_resume_en_tache(uuidlib.uuid4())  # ne lève pas
+
+
+def test_cle_idempotence_absente_des_tours_non_complets(monkeypatch):
+    """Finding 3 — une clé posée sur un `partiel` ou un `degrade` rendait le
+    rejeu ABSORBANT : le frontend qui renvoyait la même clé après une coupure
+    recevait définitivement le texte tronqué archivé par cette coupure, sans
+    jamais rien facturer. La clé ne se pose que sur `complet`.
+    """
+    _hors_reseau(monkeypatch)
+    debits = _sans_effets(monkeypatch, contexte="ACME")
+
+    def _stream_coupe(**kwargs):
+        def _gen():
+            yield "Début. "
+            raise RuntimeError("connexion coupée")
+
+        return _gen()
+
+    monkeypatch.setattr(intel.llm_client, "stream_text", _stream_coupe)
+
+    with Session(_base_complete()) as db:
+        uid, conv = _fil(db)
+        question = "Analyse du marché du logiciel RH en France"
+        list(intel.stream_message(db, uid, str(conv.id), question,
+                                  is_admin=False, cle_idempotence="cle-1"))
+        partiel = db.scalars(select(intel.Message).where(
+            intel.Message.role == "assistant")).one()
+        assert partiel.statut == "partiel"
+        assert partiel.cle_idempotence is None
+
+        # Le tour dégradé non plus ne fixe pas la clé.
+        monkeypatch.setattr(intel.llm_client, "stream_text",
+                            lambda **k: (_ for _ in ()).throw(RuntimeError("503")))
+        list(intel.stream_message(db, uid, str(conv.id), question,
+                                  is_admin=False, cle_idempotence="cle-2"))
+        degrade = db.scalars(select(intel.Message).where(
+            intel.Message.role == "assistant",
+            intel.Message.statut == "degrade")).one()
+        assert degrade.cle_idempotence is None
+
+        # La même clé peut donc encore obtenir une réponse COMPLÈTE.
+        _stub_flux(monkeypatch, [(["Réponse entière."], "end_turn")])
+        evts = _evenements(intel.stream_message(
+            db, uid, str(conv.id), question, is_admin=False,
+            cle_idempotence="cle-1"))
+        assert "rejeu" not in evts[-1]
+        assert evts[-1]["data"]["content"] == "Réponse entière."
+        assert evts[-1]["data"]["statut"] == "complet"
+        complet = db.get(intel.Message, uuidlib.UUID(evts[-1]["data"]["id"]))
+        assert complet.cle_idempotence == "cle-1"
+        assert len(debits) == 1, "seul le tour complet est facturé"
+
+
+def test_mesure_gemini_conservee_sur_interruption(monkeypatch):
+    """Finding 8 — un Stop laissait la consommation dans `_dernier_usage` sans
+    jamais la cumuler : le message partiel était archivé sans tokens ni coût,
+    alors que le coût fournisseur, lui, a bien été payé."""
+    import types
+
+    from app.shared.llm_client import gemini
+
+    lignes = [
+        'data: {"candidates":[{"content":{"parts":[{"text":"Bonjour"}]}}],'
+        '"usageMetadata":{"promptTokenCount":11,"candidatesTokenCount":3}}',
+        'data: {"candidates":[{"content":{"parts":[{"text":" monde"}]}}]}',
+    ]
+
+    class _Reponse:
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            return iter(lignes)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(gemini, "get_settings",
+                        lambda: types.SimpleNamespace(gemini_api_key="k",
+                                                      llm_chat_model="gemini-flash"))
+    monkeypatch.setattr(gemini.httpx, "stream", lambda *a, **k: _Reponse())
+
+    mesure: dict = {}
+    flux = gemini.stream(system="s", prompt="p", mesure=mesure)
+    assert next(flux) == "Bonjour"
+    flux.close()  # ce que fait le service sur une déconnexion
+
+    assert mesure["model"] == "gemini-flash"
+    assert (mesure["input_tokens"], mesure["output_tokens"]) == (11, 3)
+    assert "_dernier_usage" not in mesure
+
+
+def test_bascule_ferme_le_flux_du_fournisseur_en_echec(monkeypatch):
+    """Finding 9 — sur un échec avant le premier morceau, le flux du
+    fournisseur était abandonné sans `close()` : la connexion sortante
+    (`with httpx.stream(...)`) ne se libérait qu'au ramasse-miettes."""
+    from app.shared.llm_client import claude, gemini
+
+    class _FluxEnEchec:
+        def __init__(self):
+            self.ferme = False
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            raise RuntimeError("503 avant le premier mot")
+
+        def close(self):
+            self.ferme = True
+
+    abandonne = _FluxEnEchec()
+    monkeypatch.setattr(gemini, "available", lambda: True)
+    monkeypatch.setattr(gemini, "stream", lambda **k: abandonne)
+    monkeypatch.setattr(claude, "available", lambda: True)
+
+    def _claude_stream(**kwargs):
+        def _gen():
+            yield "repli"
+            return "end_turn"
+
+        return _gen()
+
+    monkeypatch.setattr(claude, "stream", _claude_stream)
+
+    assert list(intel.llm_client.stream_text(system="s", prompt="p",
+                                             tier="chat")) == ["repli"]
+    assert abandonne.ferme, "le flux du fournisseur en échec n'a pas été fermé"

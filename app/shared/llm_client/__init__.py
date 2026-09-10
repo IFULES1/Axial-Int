@@ -121,6 +121,7 @@ def stream_text(*, system: str, prompt: str, tier: str = "chat",
         if not mod.available():
             continue
         started = False
+        flux = None
         try:
             extra = ({"mcp_servers": mcp_servers, "mcp_tools": mcp_tools}
                      if (mcp_servers and name == "claude") else {})
@@ -137,6 +138,16 @@ def stream_text(*, system: str, prompt: str, tier: str = "chat",
                 started = True
                 yield chunk
         except Exception as e:  # noqa: BLE001
+            # Fermer le générateur abandonné : sans ce `close()`, le
+            # `with httpx.stream(...)` de Gemini ou le `with espace.stream(...)`
+            # de Claude ne se refermait qu'au ramasse-miettes — une connexion
+            # sortante retenue à chaque bascule de fournisseur.
+            if flux is not None:
+                try:
+                    flux.close()
+                except Exception as fermeture:  # noqa: BLE001
+                    logger.warning("Flux %s non refermé : %s", name,
+                                   _sans_secret(fermeture))
             if started:
                 logger.warning("LLM %s a coupé en cours de réponse : %s", name, _sans_secret(e))
                 raise

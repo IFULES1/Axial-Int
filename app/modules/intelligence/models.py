@@ -4,7 +4,8 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (JSON, DateTime, ForeignKey, Integer, String, Text,
+                        UniqueConstraint)
 from sqlalchemy import Uuid as SAUuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -49,6 +50,13 @@ class Conversation(Base):
     message_count: Mapped[int] = mapped_column(Integer, default=0)
     # Résumé roulant du fil au-delà de 8 messages (mémoire de conversation).
     resume: Mapped[str | None] = mapped_column(Text)
+    # Nombre de messages déjà couverts par `resume`. Le résumé est INCRÉMENTAL :
+    # chaque tour ne résume que la tranche nouvellement sortie de la fenêtre, en
+    # s'appuyant sur le résumé précédent. Sans ce curseur, le prompt du résumé
+    # croissait avec le fil et finissait par coûter plus que la réponse.
+    resume_messages: Mapped[int] = mapped_column(Integer, default=0,
+                                                 server_default="0",
+                                                 nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
     last_message_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     # Rangement du panneau : épinglé remonte en tête, archivé sort de la liste.
@@ -63,6 +71,13 @@ class Conversation(Base):
 
 class Message(Base):
     __tablename__ = "messages"
+    # La clé d'idempotence n'est unique QUE dans sa conversation : un client
+    # qui la dérive du contenu (hash, compteur) la réutilise d'un fil à
+    # l'autre, et une unicité globale répondait par un 500 à l'insertion.
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "cle_idempotence",
+                         name="ix_messages_conversation_cle_idempotence"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(SAUuid, primary_key=True, default=uuid.uuid4)
     conversation_id: Mapped[uuid.UUID] = mapped_column(
@@ -90,7 +105,7 @@ class Message(Base):
     statut: Mapped[str] = mapped_column(String(16), default="complet")
     # Clé fournie par le client (un uuid par envoi) : un rejeu renvoie le
     # message déjà produit au lieu d'en générer — et de débiter — un second.
-    cle_idempotence: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    cle_idempotence: Mapped[str | None] = mapped_column(String(64))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")

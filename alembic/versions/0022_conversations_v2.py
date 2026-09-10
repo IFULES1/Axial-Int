@@ -7,7 +7,14 @@ Trois familles de colonnes, trois causes distinctes :
   telle dans l'historique ni être facturé.
 * `messages.cle_idempotence` — un rejeu (réseau perdu, double clic) renvoyait
   une deuxième réponse et un deuxième débit. Unique en base : c'est la seule
-  garantie qui survit à deux workers.
+  garantie qui survit à deux workers. Unicité **composite**
+  `(conversation_id, cle_idempotence)` : une clé dérivée d'autre chose qu'un
+  uuid (hash du message, compteur de composer) est réutilisable d'un fil à
+  l'autre, et un index global y répondait par un `IntegrityError` 500.
+* `conversations.resume_messages` — nombre de messages déjà couverts par
+  `resume`. Sans ce curseur, le résumé roulant relisait tout le fil à chaque
+  tour : au 100ᵉ message, ~35 k tokens d'entrée pour produire 900 tokens, et
+  cela recommençait au tour suivant.
 * `messages.cout_recherche_micro_eur` / `appels_recherche` — le coût de
   recherche des conversations était compté `0` dans `metrics`, alors que
   chaque tour interroge tous les fournisseurs actifs.
@@ -42,10 +49,13 @@ def upgrade() -> None:
         "appels_recherche", sa.Integer(), nullable=True))
     # Index unique partiel impossible en Alembic portable : un index unique
     # ordinaire suffit, les NULL n'entrent pas en collision en PostgreSQL.
-    op.create_index("ix_messages_cle_idempotence", "messages",
-                    ["cle_idempotence"], unique=True)
+    # Composite : la clé n'est unique QUE dans sa conversation (voir en-tête).
+    op.create_index("ix_messages_conversation_cle_idempotence", "messages",
+                    ["conversation_id", "cle_idempotence"], unique=True)
 
     op.add_column("conversations", sa.Column("resume", sa.Text(), nullable=True))
+    op.add_column("conversations", sa.Column(
+        "resume_messages", sa.Integer(), nullable=False, server_default="0"))
     op.add_column("conversations", sa.Column(
         "pinned_at", sa.DateTime(timezone=True), nullable=True))
     op.add_column("conversations", sa.Column(
@@ -63,9 +73,11 @@ def downgrade() -> None:
                     server_default="market_scanner")
     op.drop_column("conversations", "archived_at")
     op.drop_column("conversations", "pinned_at")
+    op.drop_column("conversations", "resume_messages")
     op.drop_column("conversations", "resume")
 
-    op.drop_index("ix_messages_cle_idempotence", table_name="messages")
+    op.drop_index("ix_messages_conversation_cle_idempotence",
+                  table_name="messages")
     op.drop_column("messages", "appels_recherche")
     op.drop_column("messages", "cout_recherche_micro_eur")
     op.drop_column("messages", "cle_idempotence")
