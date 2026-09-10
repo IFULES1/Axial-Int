@@ -345,6 +345,7 @@ const STRINGS = {
     'conv.doc.joint': 'joint au prochain message',
     'conv.doc.echec': 'Échec de l\u2019import.',
     'conv.doc.illisible': 'Document importé, mais aucun contenu n\u2019a pu être extrait : il ne servira pas aux réponses.',
+    'conv.doc.reindex_echec': 'La réindexation a échoué',
     'doc.badge.illisible': 'non lisible',
     'doc.reindexer': 'Réindexer',
     'doc.reindexer.aide': 'Relancer l\u2019indexation de ce document',
@@ -359,10 +360,13 @@ const STRINGS = {
     'err.credits.detail': 'Votre solde ne couvre pas cette question (2 crédits).',
     'err.session.titre': 'Session expirée',
     'err.session.detail': 'Votre session a expiré, reconnectez-vous.',
+    'auth.session_expiree': 'Votre session a expiré, reconnectez-vous.',
     'err.trop_long.titre': 'Message trop long',
     'err.trop_long.detail': 'Raccourcissez votre question : 6 000 caractères au maximum.',
     'err.reseau.titre': 'Connexion perdue pendant la réponse',
     'err.reseau.detail': 'La réponse a été interrompue. Réessayez : vous ne serez pas débité deux fois.',
+    'err.flux.titre': 'Le flux de réponse n\u2019a pas pu s\u2019ouvrir',
+    'err.flux.detail': 'Réessayez, vous ne serez pas débité deux fois.',
     'err.trop_court.titre': 'Question trop courte',
     'err.trop_court.detail': 'Écrivez au moins quelques mots pour qu\u2019Axial puisse chercher.',
     'err.defaut.titre': 'La réponse a échoué',
@@ -590,6 +594,7 @@ const STRINGS = {
     'conv.doc.joint': 'attached to the next message',
     'conv.doc.echec': 'Import failed.',
     'conv.doc.illisible': 'Document imported, but no content could be extracted: it will not feed any answer.',
+    'conv.doc.reindex_echec': 'Reindexing failed',
     'doc.badge.illisible': 'unreadable',
     'doc.reindexer': 'Reindex',
     'doc.reindexer.aide': 'Run the indexing of this document again',
@@ -604,10 +609,13 @@ const STRINGS = {
     'err.credits.detail': 'Your balance does not cover this question (2 credits).',
     'err.session.titre': 'Session expired',
     'err.session.detail': 'Your session has expired, please sign in again.',
+    'auth.session_expiree': 'Your session has expired, please sign in again.',
     'err.trop_long.titre': 'Message too long',
     'err.trop_long.detail': 'Shorten your question: 6,000 characters maximum.',
     'err.reseau.titre': 'Connection lost while answering',
     'err.reseau.detail': 'The answer was interrupted. Try again: you will not be charged twice.',
+    'err.flux.titre': 'The answer stream could not be opened',
+    'err.flux.detail': 'Try again, you will not be charged twice.',
     'err.trop_court.titre': 'Question too short',
     'err.trop_court.detail': 'Write at least a few words so Axial can search.',
     'err.defaut.titre': 'The answer failed',
@@ -1185,6 +1193,10 @@ function ResetPasswordPage({ token, onDone }) {
 }
 
 function AuthPage({ initialMode = 'signup', onSubmit, onBack, notice }) {
+  // `notice` est une CLÉ (ex. `auth.session_expiree`), pas un texte figé à la
+  // langue du moment où elle a été posée : un changement de langue sur cet
+  // écran doit la retraduire, comme tout le reste.
+  const t = window.useT();
   const [mode, setMode] = useAuthState(initialMode); // 'signup' | 'login'
   const [email, setEmail] = useAuthState('');
   const [pwd, setPwd] = useAuthState('');
@@ -1250,7 +1262,7 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack, notice }) {
 
         {notice && (
           <div className="ax-avis-session" role="status">
-            <Icon name="alert" size={13} /> {notice}
+            <Icon name="alert" size={13} /> {t(notice)}
           </div>
         )}
 
@@ -2310,12 +2322,19 @@ function decrireErreur(e, t) {
   if (code === 'requete_trop_courte') {
     return { titre: t('err.trop_court.titre'), detail: t('err.trop_court.detail'), action: null };
   }
-  // Panne réseau : `fetch` lève un TypeError (« Failed to fetch »), et un flux
-  // coupé avant son `done` remonte le message de `lireFluxSSE`.
-  const reseau = (e instanceof TypeError)
-    || /failed to fetch|networkerror|load failed/i.test(msg)
-    || msg === 'Réponse interrompue.'
-    || msg === 'Génération interrompue.';
+  // `axRegenerer`/`axEditerMessage` n'ont pas de repli bloquant (contrairement
+  // à `axStreamChatIn`) : bridge.js nomme l'indisponibilité du flux plutôt que
+  // de laisser fuiter `stream_unavailable` tel quel dans l'interface.
+  if (code === 'flux_indisponible') {
+    return { titre: t('err.flux.titre'), detail: t('err.flux.detail'), action: 'reessayer' };
+  }
+  // Panne réseau : bridge.js pose `code: 'reseau'` sur le `TypeError` de
+  // `fetch` et sur un flux coupé avant son `done` — plus de comparaison sur
+  // les deux littéraux français de `lireFluxSSE`, qui se seraient tus dès que
+  // ce texte aurait changé ou été traduit.
+  const reseau = code === 'reseau'
+    || (e instanceof TypeError)
+    || /failed to fetch|networkerror|load failed/i.test(msg);
   if (reseau) {
     return { titre: t('err.reseau.titre'), detail: t('err.reseau.detail'), action: 'reessayer' };
   }
@@ -2389,7 +2408,7 @@ function CarteErreur({ erreur, onAction }) {
 function ConversationsRegion({
   conversations, activeId, setActiveId, onSendInActive, onSendNew, onNewChat,
   suggestedPrompts, streamingSpeed, showCitePanelFor, setShowCitePanelFor,
-  profil, onCompleterProfil, onErreurAction,
+  profil, onCompleterProfil, onErreurAction, erreurCreation, onRetryCreation,
 }) {
   const active = conversations.find((c) => c.id === activeId);
 
@@ -2413,7 +2432,8 @@ function ConversationsRegion({
         />
       ) : (
         <EmptyConvState onSend={onSendNew} suggestedPrompts={suggestedPrompts}
-          profil={profil} onCompleterProfil={onCompleterProfil} />
+          profil={profil} onCompleterProfil={onCompleterProfil}
+          erreurCreation={erreurCreation} onRetryCreation={onRetryCreation} />
       )}
       {showCitePanelFor && (
         <CitationPanel
@@ -2472,7 +2492,7 @@ function ConvListPanel({ conversations, activeId, onPick, onNew }) {
 /* ============================================================
    Empty state — no conversation selected
    ============================================================ */
-function EmptyConvState({ onSend, suggestedPrompts, profil, onCompleterProfil }) {
+function EmptyConvState({ onSend, suggestedPrompts, profil, onCompleterProfil, erreurCreation, onRetryCreation }) {
   const t = window.useT();
   // La question suggérée de l'onboarding pré-remplit le composer (jamais
   // envoyée automatiquement — l'utilisateur garde la main).
@@ -2504,16 +2524,36 @@ function EmptyConvState({ onSend, suggestedPrompts, profil, onCompleterProfil })
           {t('conv.sub')}
         </p>
 
-        <div className="empty-prompt-chips">
-          {suggestedPrompts.map((p) => (
-            <button key={p} className="prompt-chip" onClick={() => onSend(p)}>{p}</button>
-          ))}
-        </div>
+        {erreurCreation ? (
+          // Pas de fil créé côté serveur : la carte vit ici plutôt que dans
+          // un fil fantôme. « Réessayer » relance création + envoi avec le
+          // même texte (conservé sur `erreurCreation`, pas relu du composer).
+          <div className="ax-carte-erreur" role="alert" style={{ marginTop: 8 }}>
+            <div className="ax-carte-erreur-titre">
+              <Icon name="alert" size={14} /> {erreurCreation.erreur.titre}
+            </div>
+            <p>{erreurCreation.erreur.detail}</p>
+            <button className="btn btn-secondary btn-sm" onClick={onRetryCreation}>
+              {t('err.action.reessayer')}
+            </button>
+          </div>
+        ) : (
+          <div className="empty-prompt-chips">
+            {suggestedPrompts.map((p) => (
+              <button key={p} className="prompt-chip" onClick={() => onSend(p)}>{p}</button>
+            ))}
+          </div>
+        )}
       </div>
 
       <Composer value={draft} onChange={setDraft} profil={profil}
-        onCompleterProfil={onCompleterProfil} onSend={() => {
-          if (draft.trim()) { onSend(draft); setDraft(''); }
+        onCompleterProfil={onCompleterProfil} onSend={async () => {
+          if (!draft.trim()) return;
+          const envoye = await onSend(draft);
+          // Ne vider le brouillon QUE sur un envoi accepté : la garde de
+          // crédits (et un échec de création) rendent `false` pour que le
+          // texte tapé reste visible dans le composer.
+          if (envoye !== false) setDraft('');
         }} />
     </div>
   );
@@ -2610,8 +2650,13 @@ function ConvThread({ conversation, onSend, streamingSpeed, openCite, profil,
       </div>
 
       <Composer value={draft} onChange={setDraft} profil={profil}
-        onCompleterProfil={onCompleterProfil} onSend={() => {
-          if (draft.trim()) { onSend(draft); setDraft(''); }
+        onCompleterProfil={onCompleterProfil} onSend={async () => {
+          if (!draft.trim()) return;
+          const envoye = await onSend(draft);
+          // Ne vider le brouillon QUE sur un envoi accepté (garde de crédits
+          // non déclenchée) — sinon le texte tapé disparaît sans avoir
+          // jamais été envoyé.
+          if (envoye !== false) setDraft('');
         }} />
     </div>
   );
@@ -2760,6 +2805,10 @@ function Composer({ value, onChange, onSend, profil, onCompleterProfil }) {
   const removePending = (id) => {
     window.AXIAL_PENDING_DOCS = (window.AXIAL_PENDING_DOCS || []).filter((d) => d.id !== id);
     window.dispatchEvent(new Event('axial-pending-docs'));
+    // Le message rouge (import illisible, échec…) concernait peut-être
+    // justement le document qu'on retire : ne pas le laisser traîner sous le
+    // composer jusqu'au prochain import.
+    setUploadMsg(null);
   };
   React.useEffect(() => {
     const el = ref.current; if (!el) return;
@@ -4339,7 +4388,7 @@ function DocumentsPanel() {
   const reindexer = async (id) => {
     setReindexe(id); setErr('');
     try { await axReindexerDocument(id); }
-    catch (ex) { setErr((ex && ex.message) || t('conv.doc.echec')); }
+    catch (ex) { setErr((ex && ex.message) || t('conv.doc.reindex_echec')); }
     setReindexe('');
     load();
   };
@@ -5768,6 +5817,9 @@ function App() {
   const [showCitePanelFor, setShowCitePanelFor] = useState(null);
   // Modale « Plus de crédits » : garde avant envoi ET réponse 402.
   const [modaleCredits, setModaleCredits] = useState(false);
+  // Échec de création de conversation (écran vide) : { text, erreur }, pas de
+  // fil fantôme ajouté à la liste — voir `handleSendNew`.
+  const [erreurCreation, setErreurCreation] = useState(null);
   // Profil entreprise — UNE seule source de vérité, partagée par les
   // suggestions et le bandeau « contexte absent ». `undefined` = pas chargé.
   const [profil, setProfil] = useState(undefined);
@@ -5813,7 +5865,10 @@ function App() {
     try { expiree = localStorage.getItem('axial_session_expiree') === '1'; } catch (e) {}
     if (expiree) {
       try { localStorage.removeItem('axial_session_expiree'); } catch (e) {}
-      setAuthNotice(texteI18n('err.session.detail'));
+      // Clé, pas texte figé : un changement de langue sur l'écran de
+      // connexion doit retraduire l'avis, comme tout le reste (via `t()`
+      // dans `AuthPage`).
+      setAuthNotice('auth.session_expiree');
       setAuthMode('login');
       go('auth');
       return;
@@ -6052,9 +6107,12 @@ function App() {
     }
   };
 
+  // Retourne un booléen : le composer ne vide le brouillon QUE sur un envoi
+  // accepté (garde de crédits non déclenchée), jamais quand la modale
+  // s'ouvre — sinon le texte tapé disparaît sans avoir jamais été envoyé.
   const handleSendInActive = async (text) => {
-    if (!activeId) return;
-    if (axBal != null && axBal < CREDITS_PAR_MESSAGE) { setModaleCredits(true); return; }
+    if (!activeId) return false;
+    if (axBal != null && axBal < CREDITS_PAR_MESSAGE) { setModaleCredits(true); return false; }
     const cid = activeId;
     const cleIdem = nouvelleCleIdempotence();
     const now = (window.AXIAL_LANG === 'en') ? 'now' : 'à l\'instant';
@@ -6070,10 +6128,12 @@ function App() {
     } catch (e) {
       poserErreur(cid, base, e, text, cleIdem);
     }
+    return true;
   };
 
   const handleSendNew = async (text) => {
-    if (axBal != null && axBal < CREDITS_PAR_MESSAGE) { setModaleCredits(true); return; }
+    if (axBal != null && axBal < CREDITS_PAR_MESSAGE) { setModaleCredits(true); return false; }
+    setErreurCreation(null);
     const title = text.length > 48 ? text.slice(0, 45) + '…' : text;
     const now = (window.AXIAL_LANG === 'en') ? 'now' : 'à l\'instant';
     const cleIdem = nouvelleCleIdempotence();
@@ -6081,16 +6141,13 @@ function App() {
     try {
       id = await axCreateConversation(null, title);  // id backend réel -> l'historique persiste
     } catch (e) {
-      // Sans conversation côté serveur, rien ne serait persisté : mieux vaut
-      // le dire que de laisser un fil fantôme qui disparaît au rechargement.
-      const idLocal = 'c-' + Date.now();
-      setConversations((cs) => [{
-        id: idLocal, title, lastUpdated: now, loaded: true, hasMore: false,
-        messages: [{ role: 'user', content: text }],
-      }, ...cs]);
-      setActiveId(idLocal);
-      poserErreur(idLocal, [{ role: 'user', content: text }], e, text, cleIdem);
-      return;
+      // Aucune conversation créée côté serveur : rien n'est ajouté à la
+      // liste (plus de faux fil `'c-' + Date.now()`, qui pointait vers un
+      // identifiant inconnu du backend et rendait « Réessayer » sans issue —
+      // 404 garanti). Le texte est conservé pour que « Réessayer », dans
+      // l'écran vide, relance la création ET l'envoi avec le même brouillon.
+      setErreurCreation({ text, erreur: decrireErreur(e, t) });
+      return false;
     }
     const base = [{ role: 'user', content: text }];
     setConversations((cs) => [{
@@ -6103,6 +6160,14 @@ function App() {
     } catch (e) {
       poserErreur(id, base, e, text, cleIdem);
     }
+    return true;
+  };
+
+  // « Réessayer » de la carte d'échec de création (écran vide) : relance
+  // `handleSendNew` avec le brouillon conservé, pas celui du composer (qui a
+  // pu changer entre-temps).
+  const retryCreationConversation = () => {
+    if (erreurCreation) handleSendNew(erreurCreation.text);
   };
 
   // Bouton d'action d'une carte d'erreur. « Réessayer » réutilise la clé
@@ -6261,7 +6326,9 @@ function App() {
             setActiveId={openConversation}
             onSendInActive={handleSendInActive}
             onSendNew={handleSendNew}
-            onNewChat={() => { setActiveId(null); }}
+            erreurCreation={erreurCreation}
+            onRetryCreation={retryCreationConversation}
+            onNewChat={() => { setErreurCreation(null); setActiveId(null); }}
             profil={profil}
             onCompleterProfil={() => setSubRoute('memory')}
             onErreurAction={gererActionErreur}

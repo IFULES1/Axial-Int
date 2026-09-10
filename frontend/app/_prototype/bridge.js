@@ -217,26 +217,39 @@ export async function lireFluxSSE(res, onEvent, messageInterrompu = "Réponse in
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "", final = null;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() || "";
-    for (const frame of frames) {
-      const line = frame.split("\n").find((l) => l.startsWith("data:"));
-      if (!line) continue;
-      let evt;
-      try { evt = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
-      if (onEvent) onEvent(evt);
-      if (evt.done) {
-        if (evt.error) { const e = new Error(evt.error); e.code = evt.code; throw e; }
-        final = evt.data || null;
+  // `finally` couvre TOUTES les sorties (fin normale, `evt.error`, flux coupé
+  // sans `done`) : sans ça la connexion restait retenue jusqu'au ramasse-miettes.
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() || "";
+      for (const frame of frames) {
+        const line = frame.split("\n").find((l) => l.startsWith("data:"));
+        if (!line) continue;
+        let evt;
+        try { evt = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+        if (onEvent) onEvent(evt);
+        if (evt.done) {
+          if (evt.error) { const e = new Error(evt.error); e.code = evt.code; throw e; }
+          final = evt.data || null;
+        }
       }
     }
+    if (!final) {
+      // Le flux s'est fermé avant son `done` : panne réseau, nommée par
+      // code — pas par ce texte, que `decrireErreur` ne doit pas connaître
+      // par cœur (il change de langue et de formulation).
+      const e = new Error(messageInterrompu);
+      e.code = "reseau";
+      throw e;
+    }
+    return final;
+  } finally {
+    reader.cancel().catch(() => {});
   }
-  if (!final) throw new Error(messageInterrompu);
-  return final;
 }
 
 /** Ouvre une route SSE authentifiée et la lit avec `lireFluxSSE`.
@@ -253,26 +266,42 @@ async function ouvrirFluxSSE(path, { body, onEvent, signal, idempotencyKey,
                                      messageInterrompu } = {}) {
   const run = async (retried) => {
     const tok = axGetToken();
-    const res = await fetch(AX_API + path, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(tok ? { Authorization: "Bearer " + tok } : {}),
-        ...(idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {}),
-      },
-      body: JSON.stringify(body || {}),
-      signal,
-    });
+    let res;
+    try {
+      res = await fetch(AX_API + path, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(tok ? { Authorization: "Bearer " + tok } : {}),
+          ...(idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : {}),
+        },
+        body: JSON.stringify(body || {}),
+        signal,
+      });
+    } catch (err) {
+      // Aucune réponse du tout (réseau coupé) : `fetch` lève un `TypeError`.
+      // Nommé par code plutôt que laissé tel quel, pour que `decrireErreur`
+      // n'ait pas à connaître ce texte par cœur.
+      const e = new Error("reseau");
+      e.code = "reseau";
+      throw e;
+    }
     // 401 ou 403 : même règle que dans axFetch — FastAPI répond 403 quand
     // l'en-tête Authorization manque, ce qui est précisément le cas à réessayer.
     if ((res.status === 401 || res.status === 403) && !retried) {
       const ok = await tryRefresh();
-      if (ok) return run(true);
+      if (ok) {
+        // Ce premier corps de réponse ne sera jamais lu : le libérer, sinon
+        // la connexion reste retenue jusqu'au ramasse-miettes.
+        if (res.body) res.body.cancel().catch(() => {});
+        return run(true);
+      }
       throw await erreurDepuisReponse(res, "Session expirée.", "refresh_invalid");
     }
     if (res.status >= 400 && res.status < 500) throw await erreurDepuisReponse(res);
     if (!res.ok || !res.body) {
       const e = new Error("stream_unavailable");
+      e.code = "stream_unavailable";
       e.status = res.status;
       throw e;
     }
@@ -409,25 +438,42 @@ export async function axStreamChatIn(cid, text, onEvent, { signal, idempotencyKe
     viderDocumentsEnAttente();
     return r;
   } catch (e) {
-    if (e && e.message === "stream_unavailable") return axChatIn(cid, text, { idempotencyKey });
+    if (e && e.code === "stream_unavailable") return axChatIn(cid, text, { idempotencyKey });
     throw e;
   }
 }
 
+/** `axRegenerer`/`axEditerMessage` n'ont pas de route bloquante de repli
+ * (contrairement à `axStreamChatIn`) : une indisponibilité réelle du flux est
+ * nommée `flux_indisponible` plutôt que laissée fuiter en `stream_unavailable`
+ * brut jusqu'à l'utilisateur. */
+function nommerFluxIndisponible(e) {
+  if (e && e.code === "stream_unavailable") {
+    const err = new Error("flux_indisponible");
+    err.code = "flux_indisponible";
+    throw err;
+  }
+  throw e;
+}
+
 /** Rejoue le dernier tour : supprime la réponse et relance le même flux. */
 export async function axRegenerer(cid, msgId, onEvent, { signal, idempotencyKey } = {}) {
-  return ouvrirFluxSSE(
-    `/intelligence/conversations/${cid}/messages/${msgId}/regenerer`,
-    { body: {}, onEvent, signal, idempotencyKey },
-  );
+  try {
+    return await ouvrirFluxSSE(
+      `/intelligence/conversations/${cid}/messages/${msgId}/regenerer`,
+      { body: {}, onEvent, signal, idempotencyKey },
+    );
+  } catch (e) { nommerFluxIndisponible(e); }
 }
 
 /** Remplace un message envoyé, supprime la suite du fil et relance le flux. */
 export async function axEditerMessage(cid, msgId, content, onEvent, { signal, idempotencyKey } = {}) {
-  return ouvrirFluxSSE(
-    `/intelligence/conversations/${cid}/messages/${msgId}/editer`,
-    { body: { content }, onEvent, signal, idempotencyKey },
-  );
+  try {
+    return await ouvrirFluxSSE(
+      `/intelligence/conversations/${cid}/messages/${msgId}/editer`,
+      { body: { content }, onEvent, signal, idempotencyKey },
+    );
+  } catch (e) { nommerFluxIndisponible(e); }
 }
 
 // --- intégrations (Notion, Google) ---
@@ -537,7 +583,7 @@ export async function axStreamAnalysis(body, onEvent) {
       body, onEvent, messageInterrompu: "Génération interrompue.",
     });
   } catch (e) {
-    if (e && e.message === "stream_unavailable") return axRunAnalysis(body);  // repli
+    if (e && e.code === "stream_unavailable") return axRunAnalysis(body);  // repli
     throw e;
   }
 }
