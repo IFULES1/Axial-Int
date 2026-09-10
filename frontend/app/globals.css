@@ -976,15 +976,12 @@ input, select, textarea { font-family: inherit; color: inherit; }
   color: var(--fg-3);
 }
 
-.sidebar-foot { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border); }
+.sidebar-foot { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
 .user-row {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 10px;
   border-radius: 9px;
-  cursor: pointer;
-  transition: background 140ms ease-out;
 }
-.user-row:hover { background: rgba(121,118,247,0.06); }
 .user-avatar {
   width: 30px; height: 30px;
   border-radius: 50%;
@@ -993,6 +990,7 @@ input, select, textarea { font-family: inherit; color: inherit; }
   font-size: 12px; font-weight: 700; color: var(--fg-on-violet);
 }
 .user-meta { display: flex; flex-direction: column; min-width: 0; }
+.user-name, .user-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user-name { font-size: 13px; font-weight: 600; color: var(--fg); }
 .user-email { font-size: 11px; color: var(--fg-3); }
 
@@ -2700,6 +2698,21 @@ html[data-theme="light"] .sidebar {
   font-size: 13px;
   color: var(--fg-3);
   font-weight: 500;
+}
+
+/* Carte « Mon abonnement » : partagée entre la page Crédits et
+   Paramètres > Facturation, pour qu'elles ne divergent plus. */
+.sub-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 22px;
+  max-width: 760px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 
 /* ============================================================

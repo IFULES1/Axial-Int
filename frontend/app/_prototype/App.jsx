@@ -121,6 +121,7 @@ const STRINGS = {
     'nav.credits': 'Crédits',
     'nav.settings': 'Paramètres',
     'nav.recent': 'RÉCENTES',
+    'nav.logout': 'Se déconnecter',
     'conv.search': 'Rechercher une analyse…',
     'conv.none': 'Aucun résultat.',
     'conv.hook': "Quelle question stratégique aujourd'hui ?",
@@ -195,6 +196,7 @@ const STRINGS = {
     'reports.quota.upgrade': 'Passer à Pro',
     'reports.quota.topup': 'Recharger ponctuellement',
     'reports.quota.usage': 'Consommation du mois',
+    'reports.quota.see_credits': 'Voir les crédits',
 
     // agents
     'agents.title': 'Agents',
@@ -230,6 +232,7 @@ const STRINGS = {
 
     // credits
     'credits.title': 'Crédits',
+    'credits.current': 'Plan actuel',
     'credits.month': 'Ce mois-ci',
     'credits.used': 'utilisés',
     'credits.remaining': 'restants',
@@ -328,6 +331,7 @@ const STRINGS = {
     'nav.credits': 'Credits',
     'nav.settings': 'Settings',
     'nav.recent': 'RECENT',
+    'nav.logout': 'Sign out',
     'conv.search': 'Search an analysis…',
     'conv.none': 'No result.',
     'conv.hook': 'What strategic question today?',
@@ -400,6 +404,7 @@ const STRINGS = {
     'reports.quota.upgrade': 'Move to Pro',
     'reports.quota.topup': 'One-time top-up',
     'reports.quota.usage': 'This month',
+    'reports.quota.see_credits': 'See credits',
 
     'agents.title': 'Agents',
     'agents.subtitle': 'Persistent workers. You set the mission, they bring back findings.',
@@ -432,6 +437,7 @@ const STRINGS = {
     'memory.unfreeze': 'Unfreeze',
 
     'credits.title': 'Credits',
+    'credits.current': 'Current plan',
     'credits.month': 'This month',
     'credits.used': 'used',
     'credits.remaining': 'left',
@@ -1418,6 +1424,12 @@ function libelle(valeur) {
   return (window.AXIAL_LANG === 'en' && LABELS_EN[valeur]) || valeur;
 }
 
+// Date longue partagée par la carte d'abonnement (Crédits + Paramètres > Facturation) :
+// une seule fonction, un seul format, pour ne pas les faire diverger.
+function fmtDate(iso, lang) {
+  return iso ? new Date(iso).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
+}
+
 const SECTORS = ['SaaS B2B', 'SaaS B2C', 'Marketplace', 'Fintech', 'Deeptech / IA', 'Industrie / Hardware', 'Services pro', 'E-commerce'];
 const STAGES = ['Idéation', 'Pre-seed', 'Seed', 'Série A', 'Série B+', 'Profitable'];
 const CHALLENGES = [
@@ -2017,7 +2029,7 @@ function deconnecter() {
    Sidebar sub-routes: 'conversations' | 'reports' | 'agents' | 'memory' | 'credits' | 'settings'
 */
 
-function AppShell({ user, conversations, activeId, onPickConv, onNewChat, onLogout, children, topbar, subRoute, onSubRoute }) {
+function AppShell({ user, onNewChat, onLogout, children, topbar, subRoute, onSubRoute }) {
   const t = window.useT();
   const lang = window.AXIAL_LANG || 'fr';
 
@@ -2061,41 +2073,20 @@ function AppShell({ user, conversations, activeId, onPickConv, onNewChat, onLogo
           </ul>
         </div>
 
-        {/* RECENT CONVERSATIONS (below tools, only on conversations route) */}
-        {subRoute === 'conversations' && (
-          <div className="sidebar-recents" style={{ marginTop: 16 }}>
-            <div className="sidebar-section-label">{t('nav.recent')}</div>
-            <ul className="nav-list" style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {conversations.map((c) => (
-                <li key={c.id}>
-                  <button
-                    className={`nav-item conv-item ${c.id === activeId ? 'active' : ''}`}
-                    onClick={() => onPickConv(c.id)}
-                    style={{ width: '100%', textAlign: 'left' }}>
-                    <span className="conv-item-title">{c.title}</span>
-                    <span className="conv-item-meta">{(c.lastUpdated || '').toUpperCase()}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
         <div className="sidebar-foot">
-          {/* Toute la ligne déconnecte. Sans rôle ni libellé, ce contrôle était
-              invisible au clavier et aux lecteurs d'écran — et introuvable
-              par une recherche textuelle dans l'audit du 07/09. */}
-          <div className="user-row" onClick={onLogout} style={{ cursor: 'pointer' }}
-               role="button" tabIndex={0}
-               title={libelle('Se déconnecter')} aria-label={libelle('Se déconnecter')}
-               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLogout(); } }}>
+          {/* Ligne d'identité inerte : plus de déconnexion accidentelle au clic
+              sur son propre nom. Le bouton dédié ci-dessous porte l'action,
+              visible et accessible au clavier. */}
+          <div className="user-row">
             <div className="user-avatar">{user.initials}</div>
             <div className="user-meta">
-              <span className="user-name">{user.name}</span>
-              <span className="user-email">{user.email}</span>
+              <span className="user-name" title={user.name}>{user.name}</span>
+              <span className="user-email" title={user.email}>{user.email}</span>
             </div>
-            <Icon name="logout" size={14} style={{ marginLeft: 'auto', color: 'var(--fg-3)' }} />
           </div>
+          <button className="btn btn-ghost" style={{ width: '100%' }} onClick={onLogout}>
+            <Icon name="logout" size={14} /> {t('nav.logout')}
+          </button>
         </div>
       </aside>
 
@@ -3364,7 +3355,7 @@ function ReportsEditor({ data, onBack }) {
 /* =================================================================
    REPORTS — Quota Exceeded (state 6)
    ================================================================= */
-function ReportsQuota({ onClose }) {
+function ReportsQuota({ needed, available, onBack, onSeeCredits }) {
   const t = window.useT();
   const lang = window.AXIAL_LANG || 'fr';
   return (
@@ -3382,6 +3373,13 @@ function ReportsQuota({ onClose }) {
           <p style={{ fontSize: 13.5, color: 'var(--fg-2)', lineHeight: 1.6, margin: '6px 0 0' }}>
             {t('reports.quota.body')}
           </p>
+          {needed != null && available != null && (
+            <p style={{ fontSize: 12.5, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)', margin: '10px 0 0' }}>
+              {lang === 'fr'
+                ? `Ce rapport coûte ${needed} crédits, vous en avez ${available}.`
+                : `This report costs ${needed} credits, you have ${available}.`}
+            </p>
+          )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -3410,8 +3408,9 @@ function ReportsQuota({ onClose }) {
           </div>
         </div>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 18 }}>
-        <button className="btn btn-ghost" onClick={onClose}>{t('common.back')}</button>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
+        <button className="btn btn-ghost" onClick={onBack}>{t('common.back')}</button>
+        <button className="btn btn-secondary" onClick={onSeeCredits}>{t('reports.quota.see_credits')}</button>
       </div>
     </div>
   );
@@ -4177,7 +4176,6 @@ function CreditsSurface() {
     past_due: lang === 'fr' ? 'Paiement en retard' : 'Past due',
     canceled: lang === 'fr' ? 'Annulé' : 'Canceled',
   };
-  const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
   const go = async (fn, id) => {
     setBusy(id); setErr('');
     try {
@@ -4208,28 +4206,54 @@ function CreditsSurface() {
         <div className="credits-stat"><div className="lbl">{lang === 'fr' ? 'Essai' : 'Trial'}</div><div className="val">{bal ? (bal.trial_credits || 0).toLocaleString(lang) : '—'}</div></div>
       </div>
 
-      {sub && sub.active && (
-        <div className="plan-card" style={{ maxWidth: 760, marginBottom: 26, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+      {sub && (
+        <div className="sub-card" style={{ marginBottom: 26 }}>
           <div>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--v-soft)', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 6 }}>
               {lang === 'fr' ? 'Mon abonnement' : 'My subscription'}
             </div>
-            <div style={{ fontSize: 17, fontWeight: 700 }}>
-              {sub.plan_name || sub.plan} · {sub.price_eur} €/{lang === 'fr' ? 'mois' : 'mo'}
-              <span style={{ marginLeft: 10, fontSize: 11.5, fontFamily: 'var(--font-mono)', color: sub.status === 'past_due' ? 'var(--error, #e5484d)' : 'var(--success)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                {SUB_STATUS[sub.status] || sub.status}
-              </span>
-            </div>
-            <p style={{ fontSize: 12.5, color: 'var(--fg-2)', margin: '6px 0 0' }}>
-              {sub.monthly_credits} {lang === 'fr' ? 'crédits/mois' : 'credits/mo'}
-              {sub.current_period_end && (sub.cancel_at_period_end
-                ? (lang === 'fr' ? ` · prend fin le ${fmtDate(sub.current_period_end)}` : ` · ends on ${fmtDate(sub.current_period_end)}`)
-                : (lang === 'fr' ? ` · prochain prélèvement le ${fmtDate(sub.current_period_end)}` : ` · next debit on ${fmtDate(sub.current_period_end)}`))}
-            </p>
+            {sub.status === 'active' ? (
+              <>
+                <div style={{ fontSize: 17, fontWeight: 700 }}>
+                  {sub.plan_name || sub.plan} · {sub.price_eur} €/{lang === 'fr' ? 'mois' : 'mo'}
+                  <span style={{ marginLeft: 10, fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'var(--success)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    {SUB_STATUS[sub.status] || sub.status}
+                  </span>
+                </div>
+                <p style={{ fontSize: 12.5, color: 'var(--fg-2)', margin: '6px 0 0' }}>
+                  {sub.monthly_credits} {lang === 'fr' ? 'crédits/mois' : 'credits/mo'}
+                  {sub.current_period_end && (sub.cancel_at_period_end
+                    ? (lang === 'fr' ? ` · prend fin le ${fmtDate(sub.current_period_end, lang)}` : ` · ends on ${fmtDate(sub.current_period_end, lang)}`)
+                    : (lang === 'fr' ? ` · prochain prélèvement le ${fmtDate(sub.current_period_end, lang)}` : ` · next debit on ${fmtDate(sub.current_period_end, lang)}`))}
+                </p>
+              </>
+            ) : sub.status && sub.status !== 'none' ? (
+              <>
+                <div style={{ fontSize: 17, fontWeight: 700 }}>
+                  {sub.plan_name || sub.plan}
+                  <span style={{ marginLeft: 10, fontSize: 11.5, fontFamily: 'var(--font-mono)', color: sub.status === 'past_due' ? 'var(--error, #e5484d)' : 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    {SUB_STATUS[sub.status] || sub.status}
+                  </span>
+                </div>
+                {sub.current_period_end && (
+                  <p style={{ fontSize: 12.5, color: 'var(--fg-2)', margin: '6px 0 0' }}>
+                    {lang === 'fr' ? `Fin le ${fmtDate(sub.current_period_end, lang)}` : `Ends on ${fmtDate(sub.current_period_end, lang)}`}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p style={{ fontSize: 13, color: 'var(--fg-2)', margin: 0 }}>
+                {bal && bal.trial_credits > 0 && bal.essai_expire_le
+                  ? (lang === 'fr' ? `Aucun abonnement — essai jusqu'au ${fmtDate(bal.essai_expire_le, lang)}` : `No subscription — trial until ${fmtDate(bal.essai_expire_le, lang)}`)
+                  : (lang === 'fr' ? 'Aucun abonnement.' : 'No subscription.')}
+              </p>
+            )}
           </div>
-          <button className="btn btn-secondary" onClick={openPortal}>
-            {lang === 'fr' ? "Gérer l'abonnement" : 'Manage subscription'}
-          </button>
+          {sub.active && (
+            <button className="btn btn-secondary" onClick={openPortal}>
+              {lang === 'fr' ? "Gérer l'abonnement" : 'Manage subscription'}
+            </button>
+          )}
         </div>
       )}
 
@@ -4237,9 +4261,12 @@ function CreditsSurface() {
         {lang === 'fr' ? 'Abonnements (mensuel)' : 'Subscriptions (monthly)'}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 14, maxWidth: 760, marginBottom: 30 }}>
-        {paidPlans.map((p) => (
+        {paidPlans.map((p) => {
+          const isCurrent = sub && sub.status === 'active' && sub.plan === p.key;
+          return (
           <div key={p.key} className="plan-card">
             <span className="plan-tag">{p.name}</span>
+            {isCurrent && <span className="chip" style={{ background: 'var(--ok-soft, rgba(45,140,90,.14))', color: 'var(--success)', fontSize: 10.5, marginLeft: 8 }}>{t('credits.current')}</span>}
             {p.price_eur != null
               ? <div className="price">{p.price_eur} €<small>/{lang === 'fr' ? 'mois' : 'mo'}</small></div>
               : <div className="price">{lang === 'fr' ? 'Sur devis' : 'Custom'}</div>}
@@ -4250,12 +4277,13 @@ function CreditsSurface() {
               {(p.features || []).slice(0, 3).map((f, i) => <li key={i}>{libelle(f)}</li>)}
             </ul>
             {p.price_eur != null
-              ? <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => subscribe(p.key)} disabled={busy === 'plan-' + p.key}>
-                  {busy === 'plan-' + p.key ? '…' : (lang === 'fr' ? "S'abonner" : 'Subscribe')}
+              ? <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => subscribe(p.key)} disabled={isCurrent || busy === 'plan-' + p.key}>
+                  {isCurrent ? t('credits.current') : (busy === 'plan-' + p.key ? '…' : (lang === 'fr' ? "S'abonner" : 'Subscribe'))}
                 </button>
               : <a className="btn btn-secondary" style={{ width: '100%', textAlign: 'center' }} href="mailto:sales@axial-ia.fr">{lang === 'fr' ? 'Nous contacter' : 'Contact us'}</a>}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 12 }}>
@@ -4469,12 +4497,16 @@ function IntegrationsSettings({ lang, t }) {
   React.useEffect(() => { charger(); }, []);
 
   const OUTILS = [
-    { id: 'notion', nom: 'Notion', icone: 'file',
+    { id: 'notion', nom: 'Notion', icone: 'file', logo: '/logos/notion.svg',
       quoi: lang === 'fr'
         ? "Axial consulte votre espace pendant la rédaction d'un rapport, et peut y publier le résultat."
         : 'Axial reads your workspace while writing a report, and can publish results there.' },
     // Google Drive : le backend est prêt (OAuth + dépôt du PDF), mais l'outil
     // reste masqué tant que Miradie n'ouvre pas cette intégration.
+    // { id: 'google_drive', nom: 'Google Drive', icone: 'file', logo: '/logos/google-drive.svg',
+    //   quoi: lang === 'fr'
+    //     ? "Axial peut déposer vos rapports directement dans votre Drive."
+    //     : 'Axial can drop your reports straight into your Drive.' },
   ];
 
   const connecter = async (id) => {
@@ -4502,7 +4534,9 @@ function IntegrationsSettings({ lang, t }) {
           <div key={o.id} className="settings-row">
             <div>
               <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Icon name={o.icone} size={14} /> {o.nom}
+                {o.logo
+                  ? <span className="icon-tile"><img src={o.logo} alt="" width="20" height="20" /></span>
+                  : <Icon name={o.icone} size={14} />} {o.nom}
                 {s.connecte && (
                   <span className="chip" style={{ background: 'var(--ok-soft, rgba(45,140,90,.14))', color: 'var(--success)', fontSize: 10.5 }}>
                     {lang === 'fr' ? 'connecté' : 'connected'}
@@ -4551,6 +4585,11 @@ function BillingSettings({ lang, t }) {
     axCreditHistory().then(setEvents).catch(() => setEvents([]));
   }, []);
   const fmtD = (iso) => new Date(iso).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const SUB_STATUS_BILLING = {
+    trialing: lang === 'fr' ? 'Essai en cours' : 'Trial',
+    past_due: lang === 'fr' ? 'Paiement en retard' : 'Past due',
+    canceled: lang === 'fr' ? 'Annulé' : 'Canceled',
+  };
   const ACTION_LABELS = {
     essai_bienvenue: lang === 'fr' ? 'Crédits de bienvenue' : 'Welcome credits',
     pack_credits: lang === 'fr' ? 'Achat de pack' : 'Pack purchase',
@@ -4572,13 +4611,15 @@ function BillingSettings({ lang, t }) {
       <h2>{t('settings.billing')}</h2>
       <p>{lang === 'fr' ? 'Abonnement, factures et consommation de crédits.' : 'Subscription, invoices and credit usage.'}</p>
 
-      <div className="settings-row">
+      <div className="sub-card">
         <div>
           <h3>{lang === 'fr' ? 'Plan actuel' : 'Current plan'}</h3>
           <p>{sub === null ? '…'
-            : sub.active
-              ? `${sub.plan_name || sub.plan} · ${sub.price_eur} €/${lang === 'fr' ? 'mois' : 'mo'}${sub.current_period_end ? (lang === 'fr' ? ` · prochain prélèvement le ${fmtD(sub.current_period_end)}` : ` · next debit ${fmtD(sub.current_period_end)}`) : ''}`
-              : (lang === 'fr' ? 'Aucun abonnement actif.' : 'No active subscription.')}</p>
+            : sub.status === 'active'
+              ? `${sub.plan_name || sub.plan} · ${sub.price_eur} €/${lang === 'fr' ? 'mois' : 'mo'}${sub.current_period_end ? (lang === 'fr' ? ` · prochain prélèvement le ${fmtDate(sub.current_period_end, lang)}` : ` · next debit ${fmtDate(sub.current_period_end, lang)}`) : ''}`
+              : sub.status && sub.status !== 'none'
+                ? `${sub.plan_name || sub.plan} · ${SUB_STATUS_BILLING[sub.status] || sub.status}${sub.current_period_end ? (lang === 'fr' ? ` · fin le ${fmtDate(sub.current_period_end, lang)}` : ` · ends on ${fmtDate(sub.current_period_end, lang)}`) : ''}`
+                : (lang === 'fr' ? 'Aucun abonnement actif.' : 'No active subscription.')}</p>
         </div>
         {sub && sub.active && (
           <div className="control">
@@ -5531,7 +5572,17 @@ function App() {
   const [reportsState, setReportsState] = useState('empty'); // empty | generating | editor | quota
   const [reportData, setReportData] = useState(null);
   const [genMeta, setGenMeta] = useState(null); // { prompt } pendant la génération
+  const [quotaInfo, setQuotaInfo] = useState(null); // { needed, available } quand le solde ne suffit pas
   const startReport = async ({ type, analysisType, prompt }) => {
+    // Le solde est connu côté client (axBal) et le coût aussi (REPORT_TYPES) :
+    // autant prévenir avant de lancer une génération vouée à l'échec.
+    const rt = REPORT_TYPES.find((x) => x.id === type);
+    const cost = rt ? rt.cost : 0;
+    if (axBal != null && axBal < cost) {
+      setQuotaInfo({ needed: cost, available: axBal });
+      setReportsState('quota');
+      return;
+    }
     setGenMeta({ prompt, progress: 5, step: 'start' });
     setReportsState('generating');
     try {
@@ -5778,9 +5829,6 @@ function App() {
     <>
       <AppShell
         user={axUser || { name: '', email: '', initials: '·' }}
-        conversations={conversations}
-        activeId={activeId}
-        onPickConv={(id) => { setSubRoute('conversations'); openConversation(id); }}
         onNewChat={handleNewChat}
         onLogout={deconnecter}
         topbar={topbar}
@@ -5820,7 +5868,12 @@ function App() {
           />
         )}
         {subRoute === 'reports' && reportsState === 'quota' && (
-          <ReportsQuota onClose={() => setReportsState('empty')} />
+          <ReportsQuota
+            needed={quotaInfo && quotaInfo.needed}
+            available={quotaInfo && quotaInfo.available}
+            onBack={() => setReportsState('empty')}
+            onSeeCredits={() => setSubRoute('credits')}
+          />
         )}
 
         {subRoute === 'agents' && agentsState === 'library' && (
