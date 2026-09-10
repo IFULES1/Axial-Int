@@ -228,11 +228,12 @@ Le catalogue (une ligne par `intent` : quand l'utiliser, quand l'éviter, exempl
 2. **`reports/blocs.py`** : bloc fencé ```viz → `Bloc("viz", texte=json)` ; la marque `Graphique :` reste supportée et est **convertie** en VizSpec (`intent=comparaison`, `series` depuis le tableau) — compatibilité avec les rapports d'aujourd'hui.
 3. **Migration 0021** : `reports.viz JSONB` (liste `{index, spec, vl, statut}`) ; `analysis/service.finalize()` appelle `pipeline` et remplit la colonne. Endpoint `GET /reports/{id}/viz/{index}.svg` (auth, cache).
 4. **PDF** : `pdf.py` rend `Bloc("viz")` en `Image(PNG ×2)` dans un `KeepTogether` avec titre, insight, source. Le graphique ReportLab actuel est supprimé (remplacé, pas conservé en double).
-5. **App** : `MarkdownView` rend ```viz → `<figure class="viz"><img src=/api/reports/{id}/viz/{i}.svg>` + légende ; pour le chat (pas de `report_id`), `POST /viz/render` (spec → SVG) — V1 ne l'active que dans les rapports.
-6. **Prompt** : règle 5 mise à jour (diff à valider) ; `Graphique :` retiré du prompt mais toujours accepté par le code.
-7. **Preuve** : rapport de contrôle réel + PDF ; mesure du taux `repli_tableau`.
+5. **App, rapports** : `MarkdownView` rend ```viz → `<figure class="viz"><img src=/api/reports/{id}/viz/{i}.svg>` + légende.
+6. **App, chat et agents (décision du 11/09 : dans la V1)** : `POST /viz/rendu` prend un `VizSpec`, renvoie `{svg, kind, statut}` (compilation + validation + cache LRU par empreinte). Pendant le flux, `MarkdownView` affiche un cadre « graphique en préparation » tant que le bloc ```viz n'est pas fermé, puis demande le rendu. À l'archivage, `messages.viz JSONB` (migration 0021, même forme que `reports.viz`) évite de recompiler à la relecture. Les veilles passent par le même moteur ; l'email de veille reçoit chaque graphique en **PNG intégré** (pièce jointe `cid:`), seul rendu possible dans un client mail.
+7. **Prompt** : règle 5 mise à jour (diff à valider) ; `Graphique :` retiré du prompt mais toujours accepté par le code. Le même bloc ```viz est autorisé dans les personas de chat (`intelligence/personas.py`) avec la consigne « seulement si la réponse compare, classe, répartit ou fait évoluer des chiffres ».
+8. **Preuve** : rapport de contrôle réel + PDF + une question de chat comparative + une exécution de veille avec email.
 
-Dépendances : `vl-convert-python>=1.7` (backend, roue Linux vérifiée) ; **aucune** côté front en V1.
+Dépendances : `vl-convert-python>=1.7` (backend, roue Linux vérifiée) ; **aucune** côté front en V1. Charge estimée : deux jours.
 
 ---
 
@@ -581,9 +582,9 @@ if (line.startsWith('```viz')) {
 
 ## 13. Roadmap
 
-**V1 — indispensable (1,5 j)** : `VizSpec` + sélecteur + 7 kinds (kpi, bar, bar_h, line, donut, funnel, scatter) + rendu serveur SVG/PNG + PDF + app en image + prompt + migration + mesure du taux de repli. Aucune dépendance front.
+**V1 — indispensable (2 j)** : `VizSpec` + sélecteur + 7 kinds (kpi, bar, bar_h, line, donut, funnel, scatter) + rendu serveur SVG/PNG + PDF + app en image + **chat en flux et agents** (`POST /viz/rendu`, `messages.viz`, PNG dans l'email de veille) + prompt + migration + mesure du taux de repli. Aucune dépendance front.
 
-**V2 — quand 5 rapports réels ont tourné** : `vega-embed` dans l'app (survol, export PNG depuis l'écran), waterfall, stacked_bar, quadrant avec seuils, heatmap risque, timeline réglementaire ; cartes stratégiques (`risk_card`, `benchmark_card`) comme blocs typés ; ```viz dans le chat via `POST /viz/render` ; export HTML autonome du rapport (même SVG).
+**V2 — quand 5 rapports réels ont tourné** : `vega-embed` dans l'app (survol, export PNG depuis l'écran), waterfall, stacked_bar, quadrant avec seuils, heatmap risque, timeline réglementaire ; cartes stratégiques (`risk_card`, `benchmark_card`) comme blocs typés ; export HTML autonome du rapport (même SVG).
 
 **V3 — produit** : dashboards multi-rapports (benchmark sectoriel, comparaison d'entreprises) sur les mêmes specs stockées ; export PowerPoint (`python-pptx` + PNG) ; données financières/macro structurées en amont du LLM (le `VizSpec` devient alors produit par du code sur des données réelles, le LLM n'écrivant que l'`intent` et l'insight) ; scénarios et projections avec bandes d'incertitude.
 
