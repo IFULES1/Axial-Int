@@ -932,25 +932,30 @@ input, select, textarea { font-family: inherit; color: inherit; }
 }
 .sidebar .lockup { padding: 4px 8px 18px; }
 
-/* ---- Barre latérale repliable : mode rail (icônes seules) ---- */
-html[data-sidebar="rail"] { --sidebar-w: 60px; }
-html[data-sidebar="rail"] .sidebar .lockup-text,
-html[data-sidebar="rail"] .sidebar .nav-item span.label,
-html[data-sidebar="rail"] .sidebar .user-meta,
-html[data-sidebar="rail"] .sidebar .sidebar-newconv .label,
-html[data-sidebar="rail"] .sidebar .sidebar-foot .label {
-  display: none;
+/* ---- Barre latérale repliable : mode rail (icônes seules), desktop uniquement ----
+   Tout le bloc est sous (min-width: 768px) pour que ces sélecteurs ne
+   s'appliquent jamais en surcouche mobile — pas de conflit de spécificité
+   à gérer avec le bloc mobile ci-dessous. */
+@media (min-width: 768px) {
+  html[data-sidebar="rail"] { --sidebar-w: 60px; }
+  html[data-sidebar="rail"] .sidebar .lockup-text,
+  html[data-sidebar="rail"] .sidebar .nav-item span.label,
+  html[data-sidebar="rail"] .sidebar .user-meta,
+  html[data-sidebar="rail"] .sidebar .sidebar-newconv .label,
+  html[data-sidebar="rail"] .sidebar .sidebar-foot .label {
+    display: none;
+  }
+  html[data-sidebar="rail"] .sidebar .nav-item,
+  html[data-sidebar="rail"] .sidebar .sidebar-newconv,
+  html[data-sidebar="rail"] .sidebar .sidebar-foot .btn {
+    justify-content: center;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+  html[data-sidebar="rail"] .sidebar .user-row { justify-content: center; padding-left: 4px; padding-right: 4px; }
+  html[data-sidebar="rail"] .sidebar { padding-left: 8px; padding-right: 8px; }
+  html[data-sidebar="rail"] .sidebar .lockup { padding-left: 0; padding-right: 0; justify-content: center; display: flex; }
 }
-html[data-sidebar="rail"] .sidebar .nav-item,
-html[data-sidebar="rail"] .sidebar .sidebar-newconv,
-html[data-sidebar="rail"] .sidebar .sidebar-foot .btn {
-  justify-content: center;
-  padding-left: 4px;
-  padding-right: 4px;
-}
-html[data-sidebar="rail"] .sidebar .user-row { justify-content: center; padding-left: 4px; padding-right: 4px; }
-html[data-sidebar="rail"] .sidebar { padding-left: 8px; padding-right: 8px; }
-html[data-sidebar="rail"] .sidebar .lockup { padding-left: 0; padding-right: 0; justify-content: center; display: flex; }
 
 .topbar-hamburger {
   display: none;
@@ -1070,7 +1075,6 @@ html[data-sidebar="rail"] .sidebar .lockup { padding-left: 0; padding-right: 0; 
     width: 260px;
     transform: translateX(-100%);
     z-index: 40;
-    box-shadow: 0 0 0 1px transparent;
   }
   html[data-sidebar-mobile="open"] .sidebar { transform: none; }
   .sidebar-backdrop {
@@ -1082,19 +1086,6 @@ html[data-sidebar="rail"] .sidebar .lockup { padding-left: 0; padding-right: 0; 
   .topbar-hamburger { display: inline-flex; }
   .topbar { justify-content: flex-start; padding: 0 16px; }
   .topbar-actions { margin-left: auto; }
-
-  /* Le mode rail est une préférence desktop ; en surcouche mobile la barre
-     reste toujours en pleine largeur avec ses libellés. */
-  .sidebar { width: 260px !important; }
-  .sidebar .nav-item span.label,
-  .sidebar .sidebar-newconv .label,
-  .sidebar .sidebar-foot .label {
-    display: inline;
-  }
-  .sidebar .lockup-text { display: inline-flex; }
-  .sidebar .user-meta { display: flex; }
-  .sidebar .nav-item, .sidebar .sidebar-newconv, .sidebar .sidebar-foot .btn { justify-content: flex-start; }
-  .sidebar .user-row { justify-content: flex-start; }
 }
 
 /* ============================================================
