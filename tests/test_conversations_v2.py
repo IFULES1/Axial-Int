@@ -1159,7 +1159,10 @@ def test_routes_de_messages_publient_le_nouveau_contrat():
     params = {p["name"] for p in liste.get("parameters", [])}
     assert {"limit", "before"} <= params
     reponse = liste["responses"]["200"]["content"]["application/json"]["schema"]
-    assert reponse["$ref"].endswith("MessagesPage")
+    # Union : la page (avec `limit`) ou l'ancienne liste (sans `limit`, pour
+    # les onglets ouverts avant Conversations v2).
+    refs = [v.get("$ref", "") for v in reponse.get("anyOf", [reponse])]
+    assert any(r.endswith("MessagesPage") for r in refs), reponse
 
     for chemin in ("/intelligence/conversations/{conversation_id}/messages",
                    "/intelligence/conversations/{conversation_id}/messages/stream"):
@@ -1210,7 +1213,7 @@ def test_413_reel_sur_les_deux_routes(monkeypatch):
             assert res.json()["error"]["code"] == "message_trop_long"
 
         # Pagination et coût répondent bien sur un fil vide.
-        page = client.get(f"/intelligence/conversations/{conv_id}/messages").json()
+        page = client.get(f"/intelligence/conversations/{conv_id}/messages?limit=50").json()
         assert page == {"items": [], "has_more": False}
         cout = client.get(f"/intelligence/conversations/{conv_id}/cout").json()
         assert cout == {"messages": 0, "credits": 0, "tokens_entree": 0,
@@ -3061,3 +3064,43 @@ def test_une_question_de_suite_est_cherchee_avec_le_sujet_du_fil():
     # Titre générique (pas encore posé) : la question seule.
     conv.title = "Workspace"
     assert intel.requete_de_recherche(ctx_suite, "Développe le point 2") == "Développe le point 2"
+
+
+def test_sans_limit_la_route_messages_rend_l_ancienne_liste():
+    """Un onglet ouvert avant Conversations v2 appelle `/messages` sans
+    paramètre et attend un tableau : il doit continuer à afficher le fil."""
+    from fastapi.testclient import TestClient
+
+    from app.db import get_db
+    from app.main import app
+    from app.modules.auth.schemas import AuthUser
+    from app.modules.auth.security import get_current_user
+    from app.modules.intelligence.models import Message
+
+    engine = _base_complete(partagee=True)
+    uid = str(uuidlib.uuid4())
+
+    def _db():
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(
+        id=uid, email="test@axial-ia.fr", is_admin=False)
+    try:
+        client = TestClient(app)
+        with Session(engine) as db:
+            projet = intel.create_project(db, uid, "P", None)
+            conv = intel.create_conversation(db, uid, str(projet.id), None, None)
+            conv_id = str(conv.id)
+            db.add_all([Message(id=uuidlib.uuid4(), conversation_id=conv.id, role="user",
+                                content="q"),
+                        Message(id=uuidlib.uuid4(), conversation_id=conv.id, role="assistant",
+                                content="r")])
+            db.commit()
+        ancien = client.get(f"/intelligence/conversations/{conv_id}/messages").json()
+        assert isinstance(ancien, list) and [m["role"] for m in ancien] == ["user", "assistant"]
+        nouveau = client.get(f"/intelligence/conversations/{conv_id}/messages?limit=50").json()
+        assert set(nouveau) == {"items", "has_more"} and len(nouveau["items"]) == 2
+    finally:
+        app.dependency_overrides.clear()

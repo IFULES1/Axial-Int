@@ -354,13 +354,25 @@ def _msg_out(m, *, is_admin: bool = False) -> MessageOut:
                       cout_micro_eur=m.cout_micro_eur if is_admin else None)
 
 
-@router.get("/conversations/{conversation_id}/messages", response_model=MessagesPage)
+@router.get("/conversations/{conversation_id}/messages",
+            response_model=MessagesPage | list[MessageOut])
 def list_messages(conversation_id: str, user: AuthUser = Depends(get_current_user),
                   db: Session = Depends(get_db),
-                  limit: int = Query(default=50, ge=1, le=200),
-                  before: str | None = Query(default=None)) -> MessagesPage:
+                  limit: int | None = Query(default=None, ge=1, le=200),
+                  before: str | None = Query(default=None)):
     """Fenêtre paginée, ordre chronologique. `before` = identifiant du plus
-    ancien message déjà affiché, pour « Charger les messages précédents »."""
+    ancien message déjà affiché, pour « Charger les messages précédents ».
+
+    Sans `limit` : l'ancienne forme (liste brute). Un onglet ouvert avant le
+    déploiement de Conversations v2 appelle encore cette route sans
+    paramètre et attend un tableau — constaté le 11/09 chez une utilisatrice
+    qui « n'avait plus accès à ses conversations » : le fil ne s'affichait
+    plus, sans erreur visible.
+    """
+    if limit is None:
+        items, _ = service.list_messages(db, user.id, conversation_id,
+                                         limit=200, before=None)
+        return [_msg_out(m, is_admin=user.is_admin) for m in items]
     items, has_more = service.list_messages(db, user.id, conversation_id,
                                             limit=limit, before=before)
     return MessagesPage(items=[_msg_out(m, is_admin=user.is_admin) for m in items],
