@@ -9,9 +9,13 @@ séparément — les inclure à zéro ferait croire à une marge parfaite.
 """
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import text
 
 from app.shared.comptes import DOMAINES_INTERNES
+
+logger = logging.getLogger("axial.metrics")
 
 # Valeur d'un crédit, déduite du catalogue : Pro = 50 € pour 120 crédits.
 # Sert à valoriser une consommation qui n'a pas donné lieu à un paiement direct.
@@ -160,6 +164,37 @@ def delai_premier_rapport(db) -> dict:
     return d
 
 
+def _poste(db, table: str, jours: int):
+    """Agrégats de coût d'une table, tolérants à un schéma en retard.
+
+    `COALESCE` sur chaque colonne : une ligne non instrumentée vaut 0, pas NULL.
+    Et si la colonne de coût de recherche n'existe pas encore — backend démarré
+    AVANT `alembic upgrade head`, l'ordre de déploiement inversé du finding 4 —
+    le poste se lit sans son coût de recherche plutôt que de rendre tout
+    `/metrics/tableau` en 500. La requête en échec laisse la transaction
+    avortée sur PostgreSQL : il faut la rembobiner avant de réessayer.
+    """
+    requete = """
+        SELECT count(*) AS lignes,
+               count(cout_micro_eur) AS mesurees,
+               COALESCE(sum(COALESCE(cout_micro_eur, 0)), 0) AS modele_micro,
+               %s AS recherche_micro
+        FROM %s
+        WHERE created_at > now() - make_interval(days => :j)
+    """
+    try:
+        return db.execute(
+            text(requete % ("COALESCE(sum(COALESCE(cout_recherche_micro_eur, 0)), 0)",
+                            table)),
+            {"j": jours}).mappings().first()
+    except Exception as e:  # noqa: BLE001 — schéma en retard, pas une panne
+        logger.warning("Coût de recherche indisponible sur %s (%s) — compté 0",
+                       table, e)
+        db.rollback()
+        return db.execute(text(requete % ("0", table)),
+                          {"j": jours}).mappings().first()
+
+
 def couts_totaux(db, jours: int = 30) -> dict:
     """Coût complet : rapports + conversations + veilles + structure.
 
@@ -172,14 +207,7 @@ def couts_totaux(db, jours: int = 30) -> dict:
     postes = {}
     for nom, table in (("rapports", "reports"), ("conversations", "messages"),
                        ("veilles", "watch_runs")):
-        r = db.execute(text(f"""
-            SELECT count(*) AS lignes,
-                   count(cout_micro_eur) AS mesurees,
-                   COALESCE(sum(cout_micro_eur), 0) AS modele_micro,
-                   COALESCE(sum(cout_recherche_micro_eur), 0) AS recherche_micro
-            FROM {table}
-            WHERE created_at > now() - make_interval(days => :j)
-        """), {"j": jours}).mappings().first()
+        r = _poste(db, table, jours)
         modele = float(r["modele_micro"] or 0)
         recherche = float(r["recherche_micro"] or 0)
         postes[nom] = {

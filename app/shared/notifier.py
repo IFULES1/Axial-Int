@@ -14,6 +14,8 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import logging
+import os
+import re
 import threading
 import traceback
 
@@ -24,6 +26,64 @@ logger = logging.getLogger("axial.notifier")
 
 TRACEBACK_MAX = 4000
 DEDUP_FENETRE_SECONDES = 3600
+
+MASQUE = "<masqué>"
+
+# Un traceback part par email : il traverse Resend et finit dans une boîte
+# Gmail. `httpx` met l'URL complète dans son message d'erreur — clé d'API
+# comprise quand elle voyage en paramètre de requête (Gemini) — et une
+# bibliothèque tierce peut aussi journaliser un en-tête d'autorisation. Le
+# masquage existait pour les logs (`llm_client._sans_secret`) mais pas ici,
+# alors que c'est le même échec qui déclenche les deux.
+_MOTIFS_SECRETS = (
+    # key=…, api_key: …, token=…, secret=… (URL, dict Python, en-tête)
+    re.compile(r"((?<![A-Za-z])(?:api[-_]?key|apikey|key|token|secret|password|passwd)"
+               r"['\"]?\s*[=:]\s*['\"]?)[^\s,;&'\"})\]]+", re.IGNORECASE),
+    re.compile(r"(Bearer\s+)\S+", re.IGNORECASE),
+    re.compile(r"(Authorization['\"]?\s*[=:]\s*['\"]?)\S+", re.IGNORECASE),
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{6,}"),
+)
+
+# Longueur minimale d'une valeur d'environnement pour être masquée : un
+# `*_TOKEN=1` ou `*_KEY=true` (drapeaux mal nommés) masquerait tous les « 1 »
+# du traceback.
+_LONGUEUR_MIN_SECRET = 8
+_SUFFIXES_SECRETS = ("_KEY", "_SECRET", "_TOKEN")
+
+
+def _valeurs_d_environnement() -> list[str]:
+    """Valeurs des variables d'environnement dont le NOM annonce un secret.
+
+    Le plus long d'abord : une clé qui est le préfixe d'une autre ne doit pas
+    en laisser la queue en clair.
+    """
+    valeurs = {
+        valeur for nom, valeur in os.environ.items()
+        if nom.upper().endswith(_SUFFIXES_SECRETS)
+        and valeur and len(valeur) >= _LONGUEUR_MIN_SECRET
+    }
+    return sorted(valeurs, key=len, reverse=True)
+
+
+def _sans_secrets(texte: str) -> str:
+    """Retire de `texte` tout ce qui ressemble à un secret. Ne lève jamais."""
+    try:
+        # Import local : `llm_client` instancie ses fournisseurs au chargement,
+        # et ce module-ci est importé par le gestionnaire d'erreurs global.
+        from app.shared.llm_client import _sans_secret
+
+        propre = _sans_secret(texte)
+        for valeur in _valeurs_d_environnement():
+            propre = propre.replace(valeur, MASQUE)
+        for motif in _MOTIFS_SECRETS:
+            propre = motif.sub(
+                lambda m: (m.group(1) + MASQUE) if m.groups() else MASQUE, propre)
+        return propre
+    except Exception as e:  # noqa: BLE001 — un masquage en échec ne doit pas
+        # transformer un incident en second incident ; mais rien ne part en
+        # clair pour autant.
+        logger.warning("Masquage des secrets en échec : %s", e)
+        return MASQUE
 
 # Signature (sha1 de route+type d'exception) -> horodatage du dernier envoi.
 # Dict en mémoire, process-local : suffisant, un seul worker uvicorn en prod
@@ -77,13 +137,15 @@ def notifier_erreur(*, titre: str, route: str, methode: str,
             return
 
         horodatage = dt.datetime.now(dt.timezone.utc).isoformat()
-        trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        # Masquer AVANT de tronquer : la limite porte sur ce qui part vraiment.
+        trace = _sans_secrets("".join(
+            traceback.format_exception(type(exc), exc, exc.__traceback__)))
         suffixe = "\n… (tronqué)"
         if len(trace) > TRACEBACK_MAX:
             trace = trace[:TRACEBACK_MAX - len(suffixe)] + suffixe
 
-        sujet = f"[Axial] Erreur backend : {methode} {route}"
-        texte = (
+        sujet = _sans_secrets(f"[Axial] Erreur backend : {methode} {route}")
+        texte = _sans_secrets(
             f"{titre}\n\n"
             f"Compte : {user_email or 'inconnu'}\n"
             f"Route : {methode} {route}\n"

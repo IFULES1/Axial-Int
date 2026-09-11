@@ -14,7 +14,7 @@ import threading
 import uuid
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.errors import AppError
@@ -233,10 +233,18 @@ def list_messages(db: Session, user_id: str, conversation_id: str, *,
         borne = db.get(Message, _uuid_ou_404(before, "Message introuvable."))
         if not borne or borne.conversation_id != conv.id:
             raise AppError("Message introuvable.", 404, code="not_found")
-        stmt = stmt.where(Message.created_at < borne.created_at)
+        # Départage sur `(created_at, id)`, exactement comme
+        # `_messages_ordonnes` : deux messages écrits dans la même
+        # microseconde rendaient la fenêtre instable, et une égalité stricte
+        # sur `created_at` faisait carrément DISPARAÎTRE le jumeau du message
+        # borne — un tour perdu au milieu du fil, jamais rattrapable.
+        stmt = stmt.where(or_(Message.created_at < borne.created_at,
+                              and_(Message.created_at == borne.created_at,
+                                   Message.id < borne.id)))
     # On lit un message de plus que demandé : sa présence EST la réponse à
     # « reste-t-il des messages plus anciens ? », sans second COUNT(*).
-    fenetre = list(db.scalars(stmt.order_by(Message.created_at.desc())
+    fenetre = list(db.scalars(stmt.order_by(Message.created_at.desc(),
+                                            Message.id.desc())
                               .limit(limit + 1)))
     has_more = len(fenetre) > limit
     return list(reversed(fenetre[:limit])), has_more
@@ -486,6 +494,13 @@ class _Turn:
     blocked_answer: str | None = None  # set when no LLM is available at all
     # Mémoire de fil : tours précédents envoyés au modèle avec la question.
     history: list[dict] = field(default_factory=list)
+    # Identifiants et texte du tour, en VALEURS SIMPLES (jamais d'objet ORM) :
+    # l'archivage d'une réponse interrompue tourne dans une session neuve,
+    # après la fermeture de celle de la requête (voir `_archiver_partiel`).
+    conv_id: uuid.UUID | None = None
+    user_id: str | None = None
+    user_msg_id: uuid.UUID | None = None
+    question: str = ""
     # Coût de recherche du tour, mesuré pendant la préparation : c'est là que
     # les fournisseurs sont interrogés, pas à l'archivage.
     appels_recherche: int | None = None
@@ -700,6 +715,7 @@ def _mettre_a_jour_resume_en_tache(conversation_id) -> None:
     except Exception as e:  # noqa: BLE001 — un thread qui lève ne prévient personne
         logger.warning("Résumé roulant en tâche de fond abandonné : %s", e)
     finally:
+        _liberer_resume(conversation_id)
         if db is not None:
             try:
                 db.close()
@@ -707,12 +723,39 @@ def _mettre_a_jour_resume_en_tache(conversation_id) -> None:
                 logger.warning("Session du résumé non refermée : %s", e)
 
 
+# Conversations dont le résumé est en cours de calcul. Un thread était lancé à
+# CHAQUE tour complet au-delà de 8 messages : sur une rafale de questions, le
+# même fil se faisait résumer autant de fois qu'il y avait de tours, chacun
+# avec son appel au modèle, et tous sauf le dernier pour rien. Un seul à la
+# fois par conversation ; le suivant repart au tour d'après, et le curseur
+# `resume_messages` garantit qu'il reprend là où le précédent s'est arrêté.
+# Dict en mémoire, process-local : un seul worker uvicorn en prod (même
+# hypothèse que le dédoublonnage du notifier).
+_resumes_en_cours: set = set()
+_verrou_resumes = threading.Lock()
+
+
+def _liberer_resume(conversation_id) -> None:
+    with _verrou_resumes:
+        _resumes_en_cours.discard(conversation_id)
+
+
 def _programmer_resume(conv: Conversation) -> None:
-    """Lance le résumé roulant en arrière-plan (thread démon)."""
+    """Lance le résumé roulant en arrière-plan (thread démon), un seul à la
+    fois par conversation."""
+    conversation_id = conv.id
+    with _verrou_resumes:
+        if conversation_id in _resumes_en_cours:
+            logger.info("Résumé déjà en cours sur %s — tour suivant", conversation_id)
+            return
+        _resumes_en_cours.add(conversation_id)
     try:
         threading.Thread(target=_mettre_a_jour_resume_en_tache,
-                         args=(conv.id,), daemon=True).start()
+                         args=(conversation_id,), daemon=True).start()
     except Exception as e:  # noqa: BLE001 — jamais bloquant
+        # Le `finally` de la tâche ne tournera jamais : libérer ici, sinon la
+        # conversation ne serait plus jamais résumée.
+        _liberer_resume(conversation_id)
         logger.warning("Résumé roulant non programmé : %s", e)
 
 
@@ -765,6 +808,10 @@ class _Contexte:
     attached_context: str
     history: list[dict]
     trivial: bool
+    # Valeurs simples propagées au `_Turn` (voir son commentaire).
+    user_id: str = ""
+    conv_id: uuid.UUID | None = None
+    user_msg_id: uuid.UUID | None = None
 
 
 @dataclass
@@ -826,7 +873,8 @@ def _preparer_contexte(db: Session, user_id: str, conversation_id: str, content:
                      persona=persona, conversation_libre=conversation_libre,
                      company_context=company_context,
                      attached_context=attached_context, history=history,
-                     trivial=trivial)
+                     trivial=trivial, user_id=user_id, conv_id=conv.id,
+                     user_msg_id=user_msg.id)
 
 
 def _rechercher(db: Session, user_id: str, content: str,
@@ -902,7 +950,9 @@ def _assembler_turn(content: str, ctx: _Contexte, rech: _Recherche) -> _Turn:
                      blocked_answer=("⚠️ Aucun moteur de génération n'est disponible "
                                      "pour le moment. Réessayez plus tard."),
                      appels_recherche=rech.appels_recherche,
-                     cout_recherche_micro_eur=rech.cout_recherche_micro_eur)
+                     cout_recherche_micro_eur=rech.cout_recherche_micro_eur,
+                     conv_id=ctx.conv_id, user_id=ctx.user_id,
+                     user_msg_id=ctx.user_msg_id, question=content)
 
     # Conversation avec le généraliste = échange naturel : ni cadre d'analyse
     # ni bloc « AXIAL Recommande » imposé. Agent spécialisé (choisi par
@@ -952,7 +1002,9 @@ def _assembler_turn(content: str, ctx: _Contexte, rech: _Recherche) -> _Turn:
                  max_tokens=16000 if tier == "report" else 8000,
                  history=ctx.history,
                  appels_recherche=rech.appels_recherche,
-                 cout_recherche_micro_eur=rech.cout_recherche_micro_eur)
+                 cout_recherche_micro_eur=rech.cout_recherche_micro_eur,
+                 conv_id=ctx.conv_id, user_id=ctx.user_id,
+                 user_msg_id=ctx.user_msg_id, question=content)
 
 
 def _prepare_turn(db: Session, user_id: str, conversation_id: str, content: str,
@@ -1020,7 +1072,59 @@ def _finalize_turn(db: Session, user_id: str, turn: _Turn, answer: str, *,
     les rapports étaient instrumentés.
     """
     from app.modules.billing import service as billing
+
+    assistant_msg = _reponse_assistant(db, turn, answer, conv_id=turn.conv.id,
+                                       statut=statut, mesure=mesure,
+                                       cle_idempotence=cle_idempotence)
+    db.add(assistant_msg)
+
+    turn.conv.message_count += 2
+    turn.conv.last_message_at = _now()
+
+    # Charge + track only on a real answer (never on degradation or a stop).
+    billing_res = None
+    if statut == "complet":
+        # Débit AVANT le commit, donc dans la MÊME unité de travail :
+        # `consume_credits` commite lui-même, le message et le débit partent
+        # ensemble. Le commit préalable laissait, si le débit levait, une
+        # réponse archivée AVEC sa clé d'idempotence : facturable une seule
+        # fois, et le rejeu la rendait gratuitement pour toujours.
+        try:
+            billing_res = billing.consume_credits(db, user_id, AGENT_MESSAGE_ACTION,
+                                                  is_admin=is_admin)
+        except Exception:
+            # Pas de facturation, pas de réponse : le tour entier est annulé
+            # et l'utilisateur peut le rejouer avec la même clé.
+            db.rollback()
+            raise
+    # `consume_credits` a déjà commité en mode payant ; le commit reste
+    # nécessaire pour un admin (bypass sans écriture) et hors `complet`.
+    db.commit()
+    db.refresh(assistant_msg)
+
+    if billing_res is not None:
+        from app.modules.analytics import client as analytics
+
+        analytics.increment_usage(user_id, agent_messages=1,
+                                  credits=billing_res.get("charged", 0))
+
+    return assistant_msg
+
+
+def _reponse_assistant(db: Session, turn: _Turn, answer: str, *, conv_id,
+                       statut: str, mesure, cle_idempotence: str | None) -> Message:
+    """Le message assistant du tour, construit mais PAS ajouté à la session.
+
+    Partagé par l'archivage normal (`_finalize_turn`) et par l'archivage d'une
+    réponse interrompue hors session de requête (`_archiver_partiel`) : les
+    deux doivent poser exactement les mêmes colonnes, sinon un Stop rendrait
+    un message sans tokens, sans coût ni citations.
+    """
     from app.modules.billing.couts import cout_micro_eur
+    # Visualisations de la réponse, préparées maintenant pour que l'historique
+    # se recharge sans recompiler. Tolérant : jamais bloquant. Sur un tour
+    # dégradé il n'y a rien à compiler (le texte est un message d'erreur).
+    from app.modules.viz import service as viz_service
 
     if turn.redirect_note:
         answer = f"> ℹ️ {turn.redirect_note}\n\n{answer}"
@@ -1028,47 +1132,90 @@ def _finalize_turn(db: Session, user_id: str, turn: _Turn, answer: str, *,
     entree = getattr(mesure, "input_tokens", 0) or 0
     sortie = getattr(mesure, "output_tokens", 0) or 0
     modele = getattr(mesure, "model", None)
-    # Visualisations de la réponse, préparées maintenant pour que l'historique
-    # se recharge sans recompiler. Tolérant : jamais bloquant. Sur un tour
-    # dégradé il n'y a rien à compiler (le texte est un message d'erreur).
-    from app.modules.viz import service as viz_service
-
     viz = viz_service.preparer_sans_faute(db, answer) if statut != "degrade" else None
-    assistant_msg = Message(id=uuid.uuid4(), conversation_id=turn.conv.id,
-                            role="assistant", agent=turn.agent_key, content=answer,
-                            citations=turn.citations or None, viz=viz,
-                            tokens_entree=entree or None,
-                            tokens_sortie=sortie or None,
-                            modele=modele,
-                            cout_micro_eur=(cout_micro_eur(modele, entree, sortie)
-                                            if modele else None) or None,
-                            appels_recherche=turn.appels_recherche,
-                            cout_recherche_micro_eur=turn.cout_recherche_micro_eur,
-                            statut=statut,
-                            # La clé N'EST POSÉE QUE sur une réponse complète :
-                            # sinon le rejeu après coupure réseau renvoyait
-                            # définitivement le texte tronqué archivé par cette
-                            # même coupure, sans jamais rien facturer ni
-                            # permettre d'obtenir la réponse entière.
-                            cle_idempotence=((cle_idempotence or None)
-                                             if statut == "complet" else None))
-    db.add(assistant_msg)
+    return Message(id=uuid.uuid4(), conversation_id=conv_id,
+                   role="assistant", agent=turn.agent_key, content=answer,
+                   citations=turn.citations or None, viz=viz,
+                   tokens_entree=entree or None,
+                   tokens_sortie=sortie or None,
+                   modele=modele,
+                   cout_micro_eur=(cout_micro_eur(modele, entree, sortie)
+                                   if modele else None) or None,
+                   appels_recherche=turn.appels_recherche,
+                   cout_recherche_micro_eur=turn.cout_recherche_micro_eur,
+                   statut=statut,
+                   # La clé N'EST POSÉE QUE sur une réponse complète : sinon le
+                   # rejeu après coupure réseau renvoyait définitivement le
+                   # texte tronqué archivé par cette même coupure, sans jamais
+                   # rien facturer ni permettre d'obtenir la réponse entière.
+                   cle_idempotence=((cle_idempotence or None)
+                                    if statut == "complet" else None))
 
-    turn.conv.message_count += 2
-    turn.conv.last_message_at = _now()
-    db.commit()
-    db.refresh(assistant_msg)
 
-    # Charge + track only on a real answer (never on degradation or a stop).
-    if statut == "complet":
-        from app.modules.analytics import client as analytics
+def _archiver_partiel(turn: _Turn, answer: str, *, mesure=None) -> None:
+    """Archive une réponse interrompue dans une session NEUVE. Ne lève jamais.
 
-        billing_res = billing.consume_credits(db, user_id, AGENT_MESSAGE_ACTION,
-                                              is_admin=is_admin)
-        analytics.increment_usage(user_id, agent_messages=1,
-                                  credits=billing_res.get("charged", 0))
+    Le `GeneratorExit` du Stop n'arrive PAS dans le scope de la requête, malgré
+    ce que l'enveloppe async du routeur laissait croire. Mesuré sous uvicorn
+    0.32 + Starlette 0.46 (ASGI `spec_version` 2.3) : à la déconnexion le scope
+    est annulé, la tâche `stream_response` est abandonnée et le générateur
+    async n'est fermé qu'à la finalisation asyncgen — après le démontage de
+    l'`AsyncExitStack` de FastAPI. Ordre relevé :
+    `['session_fermee', 'generator_exit']`.
 
-    return assistant_msg
+    Ça fonctionnait quand même, mais pour une raison que personne ne
+    revendiquait : une `Session` SQLAlchemy fermée reprend une connexion du
+    pool au premier usage suivant. Un `rollback()` ou un `expunge_all()` ajouté
+    à `get_db`, un pool plus strict, et « Stop archive la réponse partielle »
+    s'éteignait EN SILENCE (tout est absorbé ici, par nécessité). D'où : aucune
+    session de requête dans ce chemin, rien que des identifiants, et une
+    session à nous, ouverte, commitée et refermée ici.
+    """
+    from app.db import SessionLocal
+
+    db = None
+    try:
+        db = SessionLocal()
+        conv = db.get(Conversation, turn.conv_id)
+        if conv is None:
+            logger.warning("Archivage du partiel : conversation %s introuvable",
+                           turn.conv_id)
+            return
+        # La question de l'utilisateur n'était pas forcément commitée : elle
+        # vivait dans la session de requête, partie avec elle. Sans elle, le
+        # fil rechargé montrerait une réponse sans question.
+        if turn.user_msg_id is not None and db.get(Message, turn.user_msg_id) is None:
+            db.add(Message(id=turn.user_msg_id, conversation_id=conv.id,
+                           role="user", agent=turn.agent_key,
+                           content=turn.question))
+            if (conv.title or "").strip().lower() in TITRES_GENERIQUES:
+                conv.title = titre_depuis(turn.question)
+        db.add(_reponse_assistant(db, turn, answer, conv_id=conv.id,
+                                  statut="partiel", mesure=mesure,
+                                  cle_idempotence=None))
+        conv.last_message_at = _now()
+        # `_recompter` plutôt qu'un `+= 2` : le compteur porté par la
+        # conversation relue ne sait pas ce que la session morte avait en
+        # attente, et un COUNT(*) est juste dans tous les cas.
+        db.flush()
+        _recompter(db, conv)
+        db.commit()
+        logger.info("Flux fermé par le client — réponse partielle archivée")
+    except Exception as e:  # noqa: BLE001 — on tourne dans un `close()` : une
+        # exception ici remplacerait l'annulation par une trace 500 trompeuse,
+        # sans rien sauver de plus. Le client est déjà parti.
+        logger.warning("Archivage du partiel impossible : %s", e)
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception as annulation:  # noqa: BLE001
+                logger.warning("Annulation de l'archivage en échec : %s", annulation)
+    finally:
+        if db is not None:
+            try:
+                db.close()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Session de l'archivage non refermée : %s", e)
 
 
 # --- Régénérer / éditer ----------------------------------------------------
@@ -1221,6 +1368,11 @@ REPRISES_FLUX_MAX = 2
 SUITE_FLUX_CONSIGNE = "Continue exactement où tu t'es arrêté, sans répéter."
 
 NOTE_INTERROMPUE = "\n\n*(réponse interrompue)*"
+# Débit refusé pour une autre raison qu'un solde insuffisant (un 402 garde son
+# propre code, que le frontend sait déjà nommer).
+ERREUR_FACTURATION = ("La facturation de cette réponse a échoué : aucun crédit n'a "
+                      "été débité et la réponse n'a pas été enregistrée. "
+                      "Réessayez dans un instant.")
 NOTE_COUPURE = ("\n\n*(réponse interrompue — le service a coupé en cours "
                 "de rédaction)*")
 
@@ -1384,10 +1536,14 @@ def _stream_message(db: Session, user_id: str, conversation_id: str, content: st
     except GeneratorExit:
         # SEUL chemin de détection du départ du client : le routeur ferme ce
         # générateur (via son enveloppe async), `GeneratorExit` est levé au
-        # `yield` courant et la session de la requête est encore ouverte. On
-        # archive AVANT de laisser la fermeture se poursuivre — c'est
-        # exactement ce qui faisait perdre un rapport le 25/08. Aucun `yield`
-        # n'est permis ici, d'où l'absence de `done`.
+        # `yield` courant. Aucun `yield` n'est permis ici, d'où l'absence de
+        # `done`. Ce qui a été écrit est archivé en `partiel` — c'est exactement
+        # ce qui faisait perdre un rapport le 25/08.
+        #
+        # `_archiver_partiel` ouvre SA session et ne touche pas `db` : la
+        # session de la requête est déjà fermée quand on arrive ici (mesuré,
+        # voir la docstring de la fonction). Le tour est passé en valeurs
+        # simples dans `turn`, aucun objet ORM n'est relu.
         #
         # Fermer le flux du fournisseur AVANT de lire `compte_tokens` : la frame
         # de ce générateur est encore vivante, donc rien n'a fermé `flux` et le
@@ -1396,17 +1552,8 @@ def _stream_message(db: Session, user_id: str, conversation_id: str, content: st
         _fermer_flux(flux)
         if chunks:
             chunks.append(NOTE_INTERROMPUE)
-            # Jamais d'exception hors d'un `close()` : une erreur de base ici
-            # (un `IntegrityError` sur la clé d'idempotence, par exemple)
-            # remplacerait l'annulation par une trace bruyante côté serveur,
-            # sans rien sauver de plus.
-            try:
-                _finalize_turn(db, user_id, turn, "".join(chunks), is_admin=is_admin,
-                               statut="partiel", cle_idempotence=cle_idempotence,
-                               mesure=llm_client.resultat_de_mesure(compte_tokens))
-                logger.info("Flux fermé par le client — réponse partielle archivée")
-            except Exception as archivage:  # noqa: BLE001
-                logger.warning("Archivage du partiel impossible : %s", archivage)
+            _archiver_partiel(turn, "".join(chunks),
+                              mesure=llm_client.resultat_de_mesure(compte_tokens))
         raise
     except Exception as e:
         logger.warning("Agent stream failed: %s", e)
@@ -1455,9 +1602,20 @@ def _stream_message(db: Session, user_id: str, conversation_id: str, content: st
 
     # Archiver AVANT le dernier `yield` : si le client est déjà parti, l'envoi
     # du `done` échoue, mais le message partiel est en base.
-    msg = _finalize_turn(db, user_id, turn, answer, is_admin=is_admin,
-                         statut=statut, cle_idempotence=cle_idempotence,
-                         mesure=llm_client.resultat_de_mesure(compte_tokens))
+    try:
+        msg = _finalize_turn(db, user_id, turn, answer, is_admin=is_admin,
+                             statut=statut, cle_idempotence=cle_idempotence,
+                             mesure=llm_client.resultat_de_mesure(compte_tokens))
+    except Exception as e:  # noqa: BLE001
+        # Le débit et l'archivage forment une seule transaction : si le débit
+        # échoue, rien n'est en base et le tour est à refaire. L'utilisateur
+        # doit l'apprendre par une erreur NOMMÉE, pas par un flux qui s'arrête
+        # sans `done` (le frontend l'afficherait comme une coupure réseau).
+        logger.warning("Facturation/archivage du tour en échec : %s", e)
+        yield _sse({"step": "error", "done": True,
+                    "error": getattr(e, "message", None) or ERREUR_FACTURATION,
+                    "code": getattr(e, "code", None) or "facturation_echec"})
+        return
     yield _sse({"step": "done", "done": True, "degraded": statut == "degrade",
                 "data": _stream_payload(msg, balance=_solde(db, user_id),
                                         is_admin=is_admin)})

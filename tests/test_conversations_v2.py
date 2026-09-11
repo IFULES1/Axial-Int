@@ -188,9 +188,47 @@ def test_couts_totaux_lit_la_colonne_des_messages():
 
     from app.modules.metrics import service as metrics
 
-    source = inspect.getsource(metrics.couts_totaux)
-    assert "sum(cout_recherche_micro_eur)" in source
-    assert "table != 'messages'" not in source
+    source = inspect.getsource(metrics._poste)
+    assert "sum(COALESCE(cout_recherche_micro_eur, 0))" in source
+    assert "table != 'messages'" not in inspect.getsource(metrics.couts_totaux)
+
+
+def test_couts_totaux_tolere_un_schema_en_retard(monkeypatch):
+    """Finding 4 — le backend peut démarrer AVANT `alembic upgrade head`. Le
+    poste se lit alors sans son coût de recherche, plutôt que de rendre tout
+    `/metrics/tableau` en 500."""
+    from app.modules.metrics import service as metrics
+
+    class _DB:
+        def __init__(self):
+            self.requetes, self.rollbacks = [], 0
+
+        def execute(self, requete, params):
+            sql = str(requete)
+            self.requetes.append(sql)
+            if "cout_recherche_micro_eur" in sql:
+                raise RuntimeError('column "cout_recherche_micro_eur" does not exist')
+
+            class _R:
+                def mappings(self_inner):
+                    return self_inner
+
+                def first(self_inner):
+                    return {"lignes": 3, "mesurees": 2, "modele_micro": 120,
+                            "recherche_micro": 0}
+
+            return _R()
+
+        def rollback(self):
+            self.rollbacks += 1
+
+    db = _DB()
+    poste = metrics._poste(db, "messages", 30)
+    assert poste["recherche_micro"] == 0
+    assert poste["lignes"] == 3
+    # La transaction avortée est rembobinée avant la seconde requête, sinon
+    # PostgreSQL refuse tout jusqu'au `ROLLBACK`.
+    assert db.rollbacks == 1 and len(db.requetes) == 2
 
 
 def test_cout_recherche_micro_eur_par_fournisseur():
@@ -298,6 +336,8 @@ def test_statut_accepte_les_trois_valeurs(statut):
 import datetime as dt  # noqa: E402
 import json  # noqa: E402
 
+import jwt  # noqa: E402
+
 from app.errors import AppError  # noqa: E402
 from app.shared.llm_client.base import LLMResult  # noqa: E402
 
@@ -322,6 +362,22 @@ def _base_complete(*, partagee: bool = False):
         Base.metadata.tables["credit_balances"],
         Base.metadata.tables["credit_events"],
     ])
+    return engine
+
+
+def _socle_partage(monkeypatch):
+    """Engine partagé, `app.db.SessionLocal` pointé dessus.
+
+    L'archivage d'une réponse interrompue ouvre SA session (finding 1) : sans
+    ce branchement, elle viserait une autre base SQLite en mémoire.
+    """
+    from sqlalchemy.orm import sessionmaker
+
+    import app.db as app_db
+
+    engine = _base_complete(partagee=True)
+    monkeypatch.setattr(app_db, "SessionLocal",
+                        sessionmaker(bind=engine, autoflush=False, future=True))
     return engine
 
 
@@ -653,7 +709,7 @@ def test_enveloppe_du_routeur_archive_a_la_deconnexion(monkeypatch):
     _stub_flux(monkeypatch, [([f"mot{i} " for i in range(40)], "end_turn")])
 
     # `partagee` : le générateur du service est itéré dans un thread du pool.
-    engine = _base_complete(partagee=True)
+    engine = _socle_partage(monkeypatch)
     with Session(engine) as db:
         uid, conv = _fil(db)
         # `cid` retenu AVANT le flux : le générateur referme la session en
@@ -672,10 +728,17 @@ def test_enveloppe_du_routeur_archive_a_la_deconnexion(monkeypatch):
                     deltas += 1
                     if deltas == 2:
                         break
+            # ORDRE DE PRODUCTION, mesuré (finding 1) : uvicorn annule le
+            # scope, `get_db` ferme la session, et le générateur n'est fermé
+            # QU'ENSUITE. On ferme donc la session AVANT `aclose()`.
+            db.close()
             await flux.aclose()
 
         asyncio.run(_lire_deux_puis_partir())
 
+    # Lecture dans une session neuve : celle de la requête est morte, comme en
+    # production. Ce qui est asserté est donc bien ce qui est EN BASE.
+    with Session(engine) as db:
         reponse = db.scalars(select(intel.Message).where(
             intel.Message.conversation_id == cid,
             intel.Message.role == "assistant")).one()
@@ -689,6 +752,9 @@ def test_enveloppe_du_routeur_archive_a_la_deconnexion(monkeypatch):
         assert conv.message_count == 2
         assert db.scalar(select(func.count()).select_from(intel.Message)
                          .where(intel.Message.conversation_id == cid)) == 2
+        assert db.scalars(select(intel.Message).where(
+            intel.Message.conversation_id == cid,
+            intel.Message.role == "user")).one().content.startswith("Analyse")
         # Rien n'est absorbé par l'idempotence : la même clé doit pouvoir
         # redonner une réponse complète (finding 3).
         assert reponse.cle_idempotence is None
@@ -703,7 +769,8 @@ def test_flux_survit_a_la_deconnexion_du_client(monkeypatch):
     debits = _sans_effets(monkeypatch, contexte="ACME")
     _stub_flux(monkeypatch, [([f"mot{i} " for i in range(40)], "end_turn")])
 
-    with Session(_base_complete()) as db:
+    engine = _socle_partage(monkeypatch)
+    with Session(engine) as db:
         uid, conv = _fil(db)
         cid = conv.id
         flux = intel.stream_message(db, uid, str(cid),
@@ -716,8 +783,13 @@ def test_flux_survit_a_la_deconnexion_du_client(monkeypatch):
                 deltas += 1
                 if deltas == 3:
                     break
+        # La session de la requête est FERMÉE avant la fermeture du générateur :
+        # c'est l'ordre de production (finding 1). L'archivage ne doit plus
+        # rien lui devoir.
+        db.close()
         flux.close()
 
+    with Session(engine) as db:
         reponse = db.scalars(select(intel.Message).where(
             intel.Message.conversation_id == cid,
             intel.Message.role == "assistant")).one()
@@ -1503,7 +1575,8 @@ def test_partiel_archive_avec_les_tokens_mesures(monkeypatch):
 
     monkeypatch.setattr(intel.llm_client, "stream_text", _stream_text)
 
-    with Session(_base_complete()) as db:
+    engine = _socle_partage(monkeypatch)
+    with Session(engine) as db:
         uid, conv = _fil(db)
         cid = conv.id
         flux = intel.stream_message(db, uid, str(cid),
@@ -1515,8 +1588,10 @@ def test_partiel_archive_avec_les_tokens_mesures(monkeypatch):
                 deltas += 1
                 if deltas == 2:
                     break
+        db.close()
         flux.close()
 
+    with Session(engine) as db:
         reponse = db.scalars(select(intel.Message).where(
             intel.Message.conversation_id == cid,
             intel.Message.role == "assistant")).one()
@@ -1540,7 +1615,8 @@ def test_archivage_en_echec_ne_sort_pas_du_close(monkeypatch):
     def _archivage_casse(*a, **k):
         raise RuntimeError("IntegrityError simulée")
 
-    with Session(_base_complete()) as db:
+
+    with Session(_socle_partage(monkeypatch)) as db:
         uid, conv = _fil(db)
         flux = intel.stream_message(db, uid, str(conv.id),
                                     "Analyse détaillée du marché du logiciel RH",
@@ -1548,7 +1624,8 @@ def test_archivage_en_echec_ne_sort_pas_du_close(monkeypatch):
         for bloc in flux:
             if '"delta"' in bloc:
                 break
-        monkeypatch.setattr(intel, "_finalize_turn", _archivage_casse)
+        monkeypatch.setattr(intel, "_reponse_assistant", _archivage_casse)
+        db.close()
         flux.close()  # ne doit PAS lever
 
 
@@ -2450,3 +2527,485 @@ def test_les_dossiers_archives_restent_listables_sur_demande():
         assert ids == {str(actif.id)}
         tous = {str(p.id) for p in intel.list_projects(db, uid, inclure_archives=True)}
         assert tous == {str(actif.id), str(archive.id)}
+
+
+# ==========================================================================
+# Revue finale de branche — findings 1, 5, 6, 7 et trous de tests du §9.
+# ==========================================================================
+
+def _balance(db, uid: str, *, trial=0, free=0, purchased=0, jours=30):
+    """Un solde EXPLICITE : `get_or_create_balance` en créerait un d'essai à
+    120 crédits, ce qui masquerait tout test de refus."""
+    from app.modules.billing.models import CreditBalance
+
+    db.add(CreditBalance(user_id=uuidlib.UUID(uid), trial_credits=trial,
+                         free_credits=free, purchased_credits=purchased,
+                         trial_expires_at=dt.datetime.now(dt.timezone.utc)
+                         + dt.timedelta(days=jours)))
+    db.commit()
+
+
+def _client_http(engine, uid: str, *, is_admin=False):
+    """Client HTTP sur l'app réelle, session et identité surchargées."""
+    from fastapi.testclient import TestClient
+
+    from app.db import get_db
+    from app.main import app
+    from app.modules.auth.schemas import AuthUser
+    from app.modules.auth.security import get_current_user
+
+    def _db():
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(
+        id=uid, email="test@axial-ia.fr", is_admin=is_admin)
+    return TestClient(app)
+
+
+# --- Finding 5 : débit et archivage dans la même unité de travail ----------
+
+def test_facturation_en_echec_n_archive_aucune_reponse(monkeypatch):
+    """Finding 5 — le débit avait lieu APRÈS le `commit` : un débit en échec
+    laissait la réponse en base AVEC sa clé d'idempotence, donc facturable une
+    seule fois… et le rejeu la rendait gratuitement pour toujours. Les deux
+    forment désormais une seule transaction.
+    """
+    _hors_reseau(monkeypatch)
+    _sans_effets(monkeypatch, contexte="ACME")
+    _stub_flux(monkeypatch, [(["Réponse entière."], "end_turn")])
+
+    from app.modules.billing import service as billing
+
+    monkeypatch.setattr(billing, "consume_credits",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            RuntimeError("compteur de crédits indisponible")))
+
+    engine = _socle_partage(monkeypatch)
+    with Session(engine) as db:
+        uid, conv = _fil(db)
+        cid = conv.id
+        evts = _evenements(intel.stream_message(
+            db, uid, str(cid), "Analyse détaillée du marché du logiciel RH",
+            is_admin=False, cle_idempotence="cle-facturation"))
+
+    # Erreur NOMMÉE : un flux qui s'arrête sans `done` s'afficherait comme une
+    # coupure réseau, et l'utilisateur croirait la réponse perdue en route.
+    assert evts[-1]["step"] == "error" and evts[-1]["done"] is True
+    assert evts[-1]["code"] == "facturation_echec"
+    assert evts[-1]["error"] == intel.ERREUR_FACTURATION
+    # Vouvoiement (jamais de tutoiement dans un texte vu par l'utilisateur).
+    assert "Réessayez" in evts[-1]["error"] and "réessaye " not in evts[-1]["error"]
+
+    with Session(engine) as db:
+        assert db.scalars(select(intel.Message).where(
+            intel.Message.conversation_id == cid,
+            intel.Message.role == "assistant")).all() == []
+
+
+def test_402_du_debit_garde_son_code(monkeypatch):
+    """Un solde qui tombe à zéro entre la vérification et le débit reste un
+    402 nommé — le frontend sait déjà l'afficher (`insufficient_credits`)."""
+    _hors_reseau(monkeypatch)
+    _sans_effets(monkeypatch, contexte="ACME")
+    _stub_flux(monkeypatch, [(["Réponse."], "end_turn")])
+
+    from app.modules.billing import service as billing
+
+    monkeypatch.setattr(billing, "consume_credits",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AppError("Crédits insuffisants.", 402,
+                                     code="insufficient_credits")))
+
+    engine = _socle_partage(monkeypatch)
+    with Session(engine) as db:
+        uid, conv = _fil(db)
+        cid = conv.id
+        evts = _evenements(intel.stream_message(
+            db, uid, str(cid), "Analyse du marché du logiciel RH", is_admin=False))
+    assert evts[-1]["code"] == "insufficient_credits"
+    with Session(engine) as db:
+        assert db.scalars(select(intel.Message).where(
+            intel.Message.role == "assistant")).all() == []
+
+
+# --- §9 : facturation réelle de 2 crédits ---------------------------------
+
+def test_debit_reel_de_deux_credits(monkeypatch):
+    """§9 — tous les tests passaient par un `consume_credits` neutralisé, et
+    les assertions `credits == 2` portaient sur le champ DÉRIVÉ. Ici le vrai
+    débit tourne : 10 crédits achetés, 8 après un tour complet.
+    """
+    from app.modules.analytics import client as analytics
+    from app.modules.billing import service as billing
+    from app.modules.memory import service as memory
+    from app.modules.viz import service as viz_service
+
+    _hors_reseau(monkeypatch)
+    monkeypatch.setattr(analytics, "increment_usage", lambda *a, **k: None)
+    monkeypatch.setattr(viz_service, "preparer_sans_faute", lambda *a, **k: None)
+    monkeypatch.setattr(memory, "build_context", lambda *a, **k: "ACME")
+    _stub_flux(monkeypatch, [(["Réponse entière."], "end_turn")])
+
+    with Session(_base_complete()) as db:
+        uid, conv = _fil(db)
+        _balance(db, uid, purchased=10)
+        evts = _evenements(intel.stream_message(
+            db, uid, str(conv.id), "Analyse du marché du logiciel RH",
+            is_admin=False))
+        solde = billing.available_credits(billing.get_or_create_balance(db, uid))
+        assert solde == 8, "le débit réel de 2 crédits n'a pas eu lieu"
+        assert evts[-1]["data"]["credits"] == 2
+        # Le solde renvoyé au frontend est celui d'APRÈS le débit.
+        assert evts[-1]["data"]["balance"] == 8
+        # Et l'événement est journalisé pour la facturation.
+        from app.modules.billing.models import CreditEvent
+
+        evenements = db.scalars(select(CreditEvent).where(
+            CreditEvent.action == intel.AGENT_MESSAGE_ACTION)).all()
+        assert [e.delta for e in evenements] == [-2]
+
+
+def test_admin_n_est_pas_debite(monkeypatch):
+    """Le bypass admin passe par le vrai `consume_credits` : aucun débit, et
+    le message est archivé quand même (le commit ne dépend pas du débit)."""
+    from app.modules.analytics import client as analytics
+    from app.modules.memory import service as memory
+    from app.modules.viz import service as viz_service
+
+    _hors_reseau(monkeypatch)
+    monkeypatch.setattr(analytics, "increment_usage", lambda *a, **k: None)
+    monkeypatch.setattr(viz_service, "preparer_sans_faute", lambda *a, **k: None)
+    monkeypatch.setattr(memory, "build_context", lambda *a, **k: "ACME")
+    _stub_flux(monkeypatch, [(["Réponse entière."], "end_turn")])
+
+    with Session(_base_complete()) as db:
+        uid, conv = _fil(db)
+        _balance(db, uid, purchased=10)
+        _evenements(intel.stream_message(db, uid, str(conv.id),
+                                         "Analyse du marché RH", is_admin=True))
+        from app.modules.billing import service as billing
+
+        assert billing.available_credits(
+            billing.get_or_create_balance(db, uid)) == 10
+        assert db.scalars(select(intel.Message).where(
+            intel.Message.role == "assistant")).one().statut == "complet"
+
+
+# --- §9 : 402 sur un envoi NORMAL -----------------------------------------
+
+def test_402_sur_un_envoi_normal_avant_tout_appel_llm(monkeypatch):
+    """§9 — le seul test 402 portait sur régénérer/éditer. Sur un envoi
+    normal, le refus doit tomber AVANT de payer un appel au modèle."""
+    from app.modules.memory import service as memory
+    from app.modules.viz import service as viz_service
+
+    _hors_reseau(monkeypatch)
+    monkeypatch.setattr(memory, "build_context", lambda *a, **k: "ACME")
+    monkeypatch.setattr(viz_service, "preparer_sans_faute", lambda *a, **k: None)
+
+    def _jamais(**kw):
+        raise AssertionError("le modèle a été appelé malgré un solde nul")
+
+    monkeypatch.setattr(intel.llm_client, "stream_text", _jamais)
+    monkeypatch.setattr(intel.llm_client, "generate", _jamais)
+
+    engine = _base_complete(partagee=True)
+    with Session(engine) as db:
+        uid, conv = _fil(db)
+        _balance(db, uid)  # tout à zéro
+        conv_id = str(conv.id)
+
+    client = _client_http(engine, uid)
+    try:
+        # Chemin bloquant : 402 HTTP.
+        res = client.post(f"/intelligence/conversations/{conv_id}/messages",
+                          json={"content": "Analyse du marché RH"})
+        assert res.status_code == 402, (res.status_code, res.text)
+        assert res.json()["error"]["code"] == "insufficient_credits"
+
+        # Chemin flux : le refus arrive en événement `error` nommé (le flux est
+        # déjà ouvert en 200 quand la préparation tourne — seul le 413 est
+        # testé avant l'ouverture). `lireFluxSSE` le rend en exception portant
+        # ce code, et `decrireErreur` sait déjà l'afficher.
+        res = client.post(f"/intelligence/conversations/{conv_id}/messages/stream",
+                          json={"content": "Analyse du marché RH"})
+        assert res.status_code == 200
+        dernier = json.loads(res.text.strip().splitlines()[-1][len("data: "):])
+        assert dernier["step"] == "error" and dernier["done"] is True
+        assert dernier["code"] == "insufficient_credits"
+    finally:
+        from app.main import app
+
+        app.dependency_overrides.clear()
+
+    with Session(engine) as db:
+        # Aucun message persisté : ni la question, ni une réponse.
+        assert db.scalar(select(func.count()).select_from(intel.Message)) == 0
+
+
+# --- §9 : 401 en cours de conversation, au niveau HTTP --------------------
+
+def test_401_en_cours_de_conversation(monkeypatch):
+    """§9 — un jeton expiré pendant la rédaction d'un message doit rendre un
+    401 JSON nommé (que `decrireErreur` sait afficher), et ne rien persister."""
+    from fastapi.testclient import TestClient
+
+    from app.config import get_settings
+    from app.db import get_db
+    from app.main import app
+
+    # 32 octets : en dessous, PyJWT avertit à chaque encodage (RFC 7518 §3.2).
+    secret = "secret-de-test-suffisamment-long-1234"
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", secret)
+    get_settings.cache_clear()
+
+    engine = _base_complete(partagee=True)
+    uid = "11111111-2222-3333-4444-555555555555"
+    with Session(engine) as db:
+        projet = intel.create_project(db, uid, "P", None)
+        conv = intel.create_conversation(db, uid, str(projet.id), None, None)
+        conv_id = str(conv.id)
+
+    def _db():
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[get_db] = _db
+    try:
+        expire = jwt.encode(
+            {"sub": uid, "email": "ceo@startup.io",
+             "exp": dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)},
+            secret, algorithm="HS256")
+        client = TestClient(app)
+        for chemin in (f"/intelligence/conversations/{conv_id}/messages",
+                       f"/intelligence/conversations/{conv_id}/messages/stream"):
+            res = client.post(chemin, json={"content": "Analyse du marché RH"},
+                              headers={"Authorization": f"Bearer {expire}"})
+            assert res.status_code == 401, (chemin, res.status_code, res.text)
+            assert res.json()["error"]["code"] in ("unauthorized", "invalid_token",
+                                                   "token_expired")
+    finally:
+        app.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+    with Session(engine) as db:
+        assert db.scalar(select(func.count()).select_from(intel.Message)) == 0
+
+
+# --- §9 : documents joints, bornes 3 × 8 000 ------------------------------
+
+def test_documents_joints_bornes_a_trois_et_8000_caracteres(monkeypatch):
+    """§9 — `document_ids[:3]` et `[:8000]` n'étaient verrouillés par aucun
+    test : un quatrième document ou un mémoire de 200 pages passait dans le
+    prompt sans que rien ne s'en plaigne."""
+    from app.modules.documents import service as documents
+
+    class _Doc:
+        def __init__(self, n):
+            self.filename = f"doc{n}.pdf"
+            self.content = f"D{n}" + ("x" * 20_000)
+
+    docs = {f"id-{n}": _Doc(n) for n in range(4)}
+    monkeypatch.setattr(documents, "get_document",
+                        lambda db, uid, doc_id: docs[doc_id])
+
+    contexte = intel._attached_docs_context(None, "u", list(docs))
+    assert "doc0.pdf" in contexte and "doc2.pdf" in contexte
+    assert "doc3.pdf" not in contexte, "plus de 3 pièces jointes acceptées"
+    # Chaque document est borné à 8 000 caractères de contenu.
+    for n in range(3):
+        corps = contexte.split(f"### Document joint : doc{n}.pdf\n")[1].split("\n\n")[0]
+        assert len(corps) == 8000, len(corps)
+    assert contexte.startswith("## Documents joints par l'utilisateur")
+
+    # Aucun document lisible → aucun bloc (et pas un en-tête orphelin).
+    monkeypatch.setattr(documents, "get_document",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("404")))
+    assert intel._attached_docs_context(None, "u", ["id-0"]) == ""
+    assert intel._attached_docs_context(None, "u", None) == ""
+
+
+# --- §9 : grounding.assemble depuis le pipeline de conversation -----------
+
+def test_grounding_assemble_depuis_le_pipeline(monkeypatch):
+    """§9 — `grounding.assemble` n'avait aucun test. C'est lui qui garantit
+    que le [N] du texte et la N-ième citation désignent la MÊME source, web et
+    interne confondus : le chemin rapport les numérotait séparément.
+    """
+    from app.modules.integrations import notion_context
+    from app.modules.rag.vector_store import Passage
+    from app.shared import search as web_search
+    from app.shared.search import rerank
+    from app.shared.search.base import SearchResult
+
+    _sans_effets(monkeypatch, contexte="ACME")
+    monkeypatch.setattr(notion_context, "passages_pour", lambda *a, **k: [])
+    monkeypatch.setattr(intel.llm_client, "generation_available", lambda: True)
+    _stub_flux(monkeypatch, [(["Réponse [1] et [2]."], "end_turn")])
+
+    web = [
+        SearchResult(title="Marché RH", url="https://a.fr/x", snippet="Web A",
+                     provider="exa"),
+        # DOUBLON : même domaine, même titre (deux moteurs rendent la page).
+        SearchResult(title="Marché RH", url="https://a.fr/x?utm=1",
+                     snippet="Web A", provider="tavily"),
+        SearchResult(title="Autre étude", url="https://b.fr/y", snippet="Web B",
+                     provider="exa"),
+    ]
+    passages = [Passage(text="Note interne sur la paie", score=0.9,
+                        doc_id="d1", source="user",
+                        meta={"filename": "paie.pdf"})]
+    monkeypatch.setattr(web_search, "search",
+                        lambda q, k=6, compteur=None: list(web))
+    monkeypatch.setattr(intel, "_retrieve_context",
+                        lambda *a, **k: ("", list(passages)))
+    # Ordre imposé : l'interne d'abord, puis le doublon web, puis l'autre web.
+    # `grounding` lit le réexport de `app.shared.search`, pas le module.
+    assert rerank.rerank_indices is not None
+    monkeypatch.setattr(web_search, "rerank_indices",
+                        lambda q, docs, top_k: [(3, 0.9), (0, 0.8), (1, 0.7),
+                                                (2, 0.6)])
+
+    with Session(_base_complete()) as db:
+        uid, conv = _fil(db)
+        turn = intel._prepare_turn(db, uid, str(conv.id),
+                                   "Analyse du marché du logiciel RH", None,
+                                   is_admin=True, document_ids=None)
+
+    # Dédoublonnage : 3 sources sur 4 classées, le doublon web est tombé.
+    assert len(turn.citations) == 3
+    assert [c.get("source") for c in turn.citations] == ["document", "web", "web"]
+    assert [c.get("url") for c in turn.citations][1:] == ["https://a.fr/x",
+                                                          "https://b.fr/y"]
+    # Numérotation 1..N dans le prompt, dans le MÊME ordre que les citations.
+    bloc = turn.prompt.split("Sources (classées par pertinence) :\n")[1]
+    assert bloc.splitlines()[0].startswith("[1] (réf. interne : paie.pdf)")
+    assert "[2] (web : a.fr) Web A" in bloc
+    assert "[3] (web : b.fr) Web B" in bloc
+    assert "[4]" not in bloc
+
+
+# --- §9 : citations persistées sur la réponse ----------------------------
+
+def test_citations_persistees_sur_la_reponse(monkeypatch):
+    """§9 — aucune assertion ne portait sur `Message.citations` après un tour.
+    Sans elles en base, un fil rechargé perd ses sources : la réponse devient
+    non vérifiable."""
+    from app.shared.search.base import SearchResult
+
+    _hors_reseau(monkeypatch)
+    _sans_effets(monkeypatch, contexte="ACME")
+    citations = [{"title": "Marché RH", "url": "https://a.fr/x", "domain": "a.fr",
+                  "source": "web", "excerpt": "Web A"}]
+    monkeypatch.setattr(intel, "_assemble_sources",
+                        lambda *a, **k: ("[1] (web : a.fr) Web A", list(citations)))
+    _stub_flux(monkeypatch, [(["Réponse [1]."], "end_turn")])
+    assert SearchResult  # la forme des résultats vient bien du module réel
+
+    engine = _base_complete()
+    with Session(engine) as db:
+        uid, conv = _fil(db)
+        evts = _evenements(intel.stream_message(
+            db, uid, str(conv.id), "Analyse du marché du logiciel RH",
+            is_admin=True))
+        reponse = db.scalars(select(intel.Message).where(
+            intel.Message.role == "assistant")).one()
+        assert reponse.citations == citations, "citations non persistées"
+    # Et envoyées AVANT le premier mot, puis rappelées dans le `done`.
+    sources = [e for e in evts if e["step"] == "sources"]
+    assert sources and sources[0]["citations"] == citations
+    assert evts[-1]["data"]["citations"] == citations
+
+
+# --- Finding 6 : pagination départagée sur (created_at, id) --------------
+
+def test_pagination_departage_sur_id_a_horodatage_egal(monkeypatch):
+    """Finding 6 — la fenêtre triait sur `created_at` seul et bornait avec
+    `created_at < borne.created_at` : deux messages écrits dans la même
+    microseconde rendaient l'ordre instable, et le jumeau de la borne
+    DISPARAISSAIT de la fenêtre — un tour perdu au milieu du fil.
+    """
+    instant = dt.datetime(2026, 9, 10, 12, 0, tzinfo=dt.timezone.utc)
+    with Session(_base_complete()) as db:
+        uid, conv = _fil(db)
+        # 6 messages au MÊME horodatage, d'identifiants ordonnés.
+        ids = sorted(uuidlib.uuid4() for _ in range(6))
+        for n, mid in enumerate(ids):
+            db.add(intel.Message(id=mid, conversation_id=conv.id,
+                                 role="user" if n % 2 == 0 else "assistant",
+                                 content=f"m{n}", created_at=instant))
+        db.commit()
+
+        page1, encore = intel.list_messages(db, uid, str(conv.id), limit=3)
+        assert encore is True
+        assert [m.id for m in page1] == ids[3:]
+
+        page2, encore = intel.list_messages(db, uid, str(conv.id), limit=3,
+                                            before=str(page1[0].id))
+        # Aucun message n'a disparu, aucun n'est rendu deux fois.
+        assert [m.id for m in page2] == ids[:3]
+        assert encore is False
+        assert [m.id for m in page2 + page1] == ids
+
+
+# --- Finding 7 : un seul résumé à la fois par conversation ---------------
+
+def test_un_seul_resume_par_conversation_a_la_fois(monkeypatch):
+    """Finding 7 — un thread était lancé à CHAQUE tour complet au-delà de 8
+    messages : sur une rafale, le même fil se faisait résumer autant de fois
+    qu'il y avait de tours, chacun avec son appel au modèle."""
+    lances: list = []
+    reel = intel.threading.Thread
+
+    class _Thread:
+        def __new__(cls, *a, target=None, **kw):
+            if target is not intel._mettre_a_jour_resume_en_tache:
+                return reel(*a, target=target, **kw)
+            return super().__new__(cls)
+
+        def __init__(self, *, target, args=(), daemon=False, **kw):
+            self.cible, self.args = target, args
+
+        def start(self):
+            lances.append(self)
+
+    monkeypatch.setattr(intel.threading, "Thread", _Thread)
+
+    class _Conv:
+        id = uuidlib.uuid4()
+
+    conv = _Conv()
+    try:
+        intel._programmer_resume(conv)
+        intel._programmer_resume(conv)  # rafale : ignoré, un résumé court déjà
+        intel._programmer_resume(conv)
+        assert len(lances) == 1
+        # Une AUTRE conversation n'est pas bloquée par la première.
+        autre = _Conv()
+        autre.id = uuidlib.uuid4()
+        intel._programmer_resume(autre)
+        assert len(lances) == 2
+        # Le verrou est levé quand la tâche se termine (`finally`), donc le
+        # tour suivant peut reprendre — le curseur `resume_messages` garantit
+        # qu'il repart là où le précédent s'est arrêté.
+        intel._liberer_resume(conv.id)
+        intel._programmer_resume(conv)
+        assert len(lances) == 3
+    finally:
+        intel._liberer_resume(conv.id)
+        intel._resumes_en_cours.clear()
+
+
+def test_la_tache_de_resume_libere_son_verrou(monkeypatch):
+    """Même en échec, la tâche libère la conversation : sinon elle ne serait
+    plus JAMAIS résumée pour la durée de vie du process."""
+    import app.db as app_db
+
+    cid = uuidlib.uuid4()
+    intel._resumes_en_cours.add(cid)
+    monkeypatch.setattr(app_db, "SessionLocal",
+                        lambda: (_ for _ in ()).throw(RuntimeError("base HS")))
+    intel._mettre_a_jour_resume_en_tache(cid)  # ne lève pas
+    assert cid not in intel._resumes_en_cours

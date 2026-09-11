@@ -26,7 +26,13 @@ _enrich = ClaudeProvider()
 _SECRET_DANS_URL = re.compile(r"([?&](?:key|api_key|apikey|token)=)[^&'\"\s]+", re.IGNORECASE)
 
 
-def _sans_secret(err: BaseException) -> str:
+def _sans_secret(err: BaseException | str) -> str:
+    """Masque la clé d'API d'une URL dans un message d'erreur OU un texte.
+
+    Accepte aussi une chaîne : `app.shared.notifier` passe le traceback complet
+    d'un incident avant de l'envoyer par email, et il n'y a aucune raison d'en
+    tenir une deuxième copie du motif.
+    """
     return _SECRET_DANS_URL.sub(r"\1<masqué>", str(err))
 
 

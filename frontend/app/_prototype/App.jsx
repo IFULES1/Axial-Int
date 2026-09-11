@@ -144,6 +144,21 @@ window.useConvListMobile = function useConvListMobile() {
 /* i18n.js — bilingual EN/FR strings + global toggle helper.
    Strings are organized by surface. To add a key, add both EN and FR. */
 
+/* Prix d'un tour de conversation, SOURCE UNIQUE côté front. L'autorité reste
+   le catalogue backend (`cost_for(AGENT_MESSAGE_ACTION)`) ; ici la valeur sert
+   de garde AVANT l'envoi (lancer une requête vouée à un 402 fait perdre 30 s)
+   ET de contenu des textes qui l'annoncent. Ces textes portaient « 2 crédits »
+   en dur — 5 chaînes × 2 langues à corriger à la main au moindre changement de
+   tarif : ils écrivent maintenant `{credits}`, substitué à la lecture du
+   dictionnaire (voir `texteI18n` / `useT`). */
+const CREDITS_PAR_MESSAGE = 2;
+
+function _avecCredits(texte) {
+  return (typeof texte === 'string' && texte.indexOf('{credits}') !== -1)
+    ? texte.split('{credits}').join(String(CREDITS_PAR_MESSAGE))
+    : texte;
+}
+
 const STRINGS = {
   fr: {
     // common
@@ -405,7 +420,7 @@ const STRINGS = {
     'doc.reindexer': 'Réindexer',
     'doc.reindexer.aide': 'Relancer l\u2019indexation de ce document',
     'credits.modale.titre': 'Plus de crédits disponibles',
-    'credits.modale.detail': 'Il faut au moins 2 crédits pour poser une question. Rechargez votre compte ou choisissez un abonnement pour continuer.',
+    'credits.modale.detail': 'Il faut au moins {credits} crédits pour poser une question. Rechargez votre compte ou choisissez un abonnement pour continuer.',
     'credits.modale.acheter': 'Acheter des crédits',
     'credits.modale.abos': 'Voir les abonnements',
     'err.action.credits': 'Voir les crédits',
@@ -413,7 +428,7 @@ const STRINGS = {
     'err.action.reessayer': 'Réessayer',
     'err.action.rouvrir': 'Rouvrir la conversation',
     'err.credits.titre': 'Plus de crédits disponibles',
-    'err.credits.detail': 'Votre solde ne couvre pas cette question (2 crédits).',
+    'err.credits.detail': 'Votre solde ne couvre pas cette question ({credits} crédits).',
     'err.session.titre': 'Session expirée',
     'err.session.detail': 'Votre session a expiré, reconnectez-vous.',
     'auth.session_expiree': 'Votre session a expiré, reconnectez-vous.',
@@ -449,14 +464,16 @@ const STRINGS = {
     'conv.recherche.min': 'Trois caractères au minimum pour chercher dans le contenu des messages.',
     'conv.recherche.encours': 'Recherche…',
     'conv.regenerer': 'Régénérer',
-    'conv.regenerer.aide': 'Relancer cette réponse (2 crédits). La réponse actuelle est remplacée.',
+    'conv.regenerer.aide': 'Relancer cette réponse ({credits} crédits). La réponse actuelle est remplacée.',
     'conv.editer': 'Modifier',
-    'conv.editer.aide': 'Modifier ce message et relancer la réponse (2 crédits). Les messages suivants sont supprimés.',
+    'conv.editer.aide': 'Modifier ce message et relancer la réponse ({credits} crédits). Les messages suivants sont supprimés.',
     'conv.editer.renvoyer': 'Renvoyer',
     'err.dossier_non_vide.titre': 'Dossier non vide',
     'err.dossier_non_vide.detail': 'Ce dossier contient encore des conversations actives. Déplacez-les ou archivez-les avant de supprimer le dossier.',
     'err.regen_impossible.titre': 'Action impossible sur ce message',
     'err.regen_impossible.detail': 'Le fil a changé depuis l\u2019affichage. Rouvrez la conversation pour repartir de son état réel.',
+    'err.facturation.titre': 'La facturation n\'a pas abouti',
+    'err.facturation.detail': 'Aucun crédit n\'a été débité et la réponse n\'a pas été enregistrée. Réessayez dans un instant.',
     'err.defaut.titre': 'La réponse a échoué',
     'err.defaut.detail': 'Une erreur inattendue est survenue.',
   },
@@ -706,7 +723,7 @@ const STRINGS = {
     'doc.reindexer': 'Reindex',
     'doc.reindexer.aide': 'Run the indexing of this document again',
     'credits.modale.titre': 'No credits left',
-    'credits.modale.detail': 'You need at least 2 credits to ask a question. Top up your account or pick a subscription to continue.',
+    'credits.modale.detail': 'You need at least {credits} credits to ask a question. Top up your account or pick a subscription to continue.',
     'credits.modale.acheter': 'Buy credits',
     'credits.modale.abos': 'See subscriptions',
     'err.action.credits': 'See credits',
@@ -714,7 +731,7 @@ const STRINGS = {
     'err.action.reessayer': 'Try again',
     'err.action.rouvrir': 'Reopen the conversation',
     'err.credits.titre': 'No credits left',
-    'err.credits.detail': 'Your balance does not cover this question (2 credits).',
+    'err.credits.detail': 'Your balance does not cover this question ({credits} credits).',
     'err.session.titre': 'Session expired',
     'err.session.detail': 'Your session has expired, please sign in again.',
     'auth.session_expiree': 'Your session has expired, please sign in again.',
@@ -750,14 +767,16 @@ const STRINGS = {
     'conv.recherche.min': 'Three characters minimum to search inside message content.',
     'conv.recherche.encours': 'Searching…',
     'conv.regenerer': 'Regenerate',
-    'conv.regenerer.aide': 'Run this answer again (2 credits). The current answer is replaced.',
+    'conv.regenerer.aide': 'Run this answer again ({credits} credits). The current answer is replaced.',
     'conv.editer': 'Edit',
-    'conv.editer.aide': 'Edit this message and run the answer again (2 credits). Later messages are deleted.',
+    'conv.editer.aide': 'Edit this message and run the answer again ({credits} credits). Later messages are deleted.',
     'conv.editer.renvoyer': 'Resend',
     'err.dossier_non_vide.titre': 'Folder not empty',
     'err.dossier_non_vide.detail': 'This folder still holds active conversations. Move or archive them before deleting the folder.',
     'err.regen_impossible.titre': 'This message cannot be changed',
     'err.regen_impossible.detail': 'The thread has changed since it was displayed. Reopen the conversation to work from its real state.',
+    'err.facturation.titre': 'The charge did not go through',
+    'err.facturation.detail': 'No credits were debited and the answer was not saved. Please try again in a moment.',
     'err.defaut.titre': 'The answer failed',
     'err.defaut.detail': 'An unexpected error occurred.',
   },
@@ -771,7 +790,7 @@ window.AXIAL_I18N = STRINGS;
    l'ordre des hooks entre les deux branches. */
 function texteI18n(cle) {
   const lang = window.AXIAL_LANG || 'fr';
-  return (STRINGS[lang] && STRINGS[lang][cle]) || STRINGS.fr[cle] || cle;
+  return _avecCredits((STRINGS[lang] && STRINGS[lang][cle]) || STRINGS.fr[cle] || cle);
 }
 
 window.useT = function useT() {
@@ -782,7 +801,7 @@ window.useT = function useT() {
     return () => window.removeEventListener('axial:lang', onChange);
   }, []);
   const lang = window.AXIAL_LANG || 'fr';
-  return (key) => (STRINGS[lang] && STRINGS[lang][key]) || STRINGS.fr[key] || key;
+  return (key) => _avecCredits((STRINGS[lang] && STRINGS[lang][key]) || STRINGS.fr[key] || key);
 };
 
 window.setAxialLang = function (lang) {
@@ -2497,10 +2516,6 @@ var { useRef: useConvRef, useMemo: useConvMemo } = React;
    Erreurs nommées + modale crédits (spec §2, §8)
    ============================================================ */
 
-// Coût d'un tour de conversation, aligné sur CREDIT_COSTS backend. Sert de
-// garde AVANT l'envoi : lancer une requête vouée à un 402 fait perdre 30 s.
-const CREDITS_PAR_MESSAGE = 2;
-
 /* Une erreur d'envoi n'est plus « ⚠️ + e.message » : on la nomme, on explique
    quoi faire, et on rend l'action possible. `action` dit quel bouton poser :
    'credits' (modale), 'reconnexion' (session expirée), 'reessayer' (même clé
@@ -2544,6 +2559,13 @@ function decrireErreur(e, t) {
   // de laisser fuiter `stream_unavailable` tel quel dans l'interface.
   if (code === 'flux_indisponible') {
     return { titre: t('err.flux.titre'), detail: t('err.flux.detail'), action: 'reessayer' };
+  }
+  // Débit refusé pour autre chose qu'un solde insuffisant (un 402 garde son
+  // propre code). Le message et le débit forment une seule transaction côté
+  // backend : le tour entier est annulé, donc réessayer est la bonne action —
+  // et la même clé d'idempotence interdit tout double débit.
+  if (code === 'facturation_echec') {
+    return { titre: t('err.facturation.titre'), detail: t('err.facturation.detail'), action: 'reessayer' };
   }
   // Panne réseau : bridge.js pose `code: 'reseau'` sur le `TypeError` de
   // `fetch` et sur un flux coupé avant son `done` — plus de comparaison sur
@@ -7024,10 +7046,13 @@ function App() {
       }).catch(() => {});
     }
   }, [route]);
-  const [reportsState, setReportsState] = useState('empty'); // empty | generating | editor | quota
+  const [reportsState, setReportsState] = useState('empty'); // empty | generating | editor | quota | erreur
   const [reportData, setReportData] = useState(null);
   const [genMeta, setGenMeta] = useState(null); // { prompt } pendant la génération
   const [quotaInfo, setQuotaInfo] = useState(null); // { needed, available } quand le solde ne suffit pas
+  /* Échec de génération : { erreur, args } — `args` permet au bouton
+     « Réessayer » de relancer EXACTEMENT la même demande. */
+  const [erreurRapport, setErreurRapport] = useState(null);
   const startReport = async ({ type, analysisType, prompt }) => {
     // Le solde est connu côté client (axBal) et le coût aussi (REPORT_TYPES) :
     // autant prévenir avant de lancer une génération vouée à l'échec.
@@ -7039,6 +7064,7 @@ function App() {
       return;
     }
     setGenMeta({ prompt, progress: 5, step: 'start' });
+    setErreurRapport(null);
     setReportsState('generating');
     try {
       const r = await axStreamAnalysis(
@@ -7046,11 +7072,24 @@ function App() {
         (evt) => setGenMeta((m) => ({ ...(m || { prompt }), progress: evt.progress ?? (m && m.progress), step: evt.step, message: evt.message })),
       );
       setReportData(r);
+      setGenMeta(null);
+      setReportsState('editor');
     } catch (e) {
-      setReportData({ title: 'Erreur', content: '⚠️ ' + ((e && e.message) || 'Échec de génération'), sources: [] });
+      /* Plus de message d'exception brut collé dans un faux rapport : l'échec est
+         NOMMÉ par `decrireErreur` et rendu par la carte d'erreur du fil, avec
+         l'action qui va avec. Un message de bibliothèque (« Failed to fetch »)
+         affiché comme contenu de rapport n'apprenait rien et laissait l'écran
+         en mode éditeur, comme si un document avait été produit. */
+      const erreur = decrireErreur(e, t);
+      setGenMeta(null);
+      if (erreur.action === 'reconnexion') { sessionExpiree(); return; }
+      if (erreur.action === 'credits') {
+        setModaleCredits(true);
+        axBalance().then((b) => setAxBal(b.available)).catch(() => {});
+      }
+      setErreurRapport({ erreur, args: { type, analysisType, prompt } });
+      setReportsState('erreur');
     }
-    setGenMeta(null);
-    setReportsState('editor');
   };
   const openSavedReport = async (id) => {
     try {
@@ -8076,6 +8115,25 @@ function App() {
             data={reportData}
             onBack={() => setReportsState('empty')}
           />
+        )}
+        {subRoute === 'reports' && reportsState === 'erreur' && erreurRapport && (
+          <div className="rep-gen">
+            <div className="rep-gen-doc">
+              <CarteErreur
+                erreur={erreurRapport.erreur}
+                onAction={() => {
+                  const { erreur, args } = erreurRapport;
+                  if (erreur.action === 'credits') { setSubRoute('credits'); return; }
+                  if (erreur.action === 'reessayer') { startReport(args); return; }
+                  setReportsState('empty');
+                }}
+              />
+              <button className="btn btn-secondary btn-sm" style={{ marginTop: 12 }}
+                onClick={() => { setErreurRapport(null); setReportsState('empty'); }}>
+                {t('common.back')}
+              </button>
+            </div>
+          </div>
         )}
         {subRoute === 'reports' && reportsState === 'quota' && (
           <ReportsQuota

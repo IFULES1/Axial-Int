@@ -1841,12 +1841,6 @@ html[data-theme="light"] .sidebar {
 /* ============================================================
    Reports — Editor (3-column)
    ============================================================ */
-.rep-editor {
-  display: grid;
-  grid-template-columns: 240px 1fr 320px;
-  gap: 24px;
-  height: calc(100vh - 56px - 32px);
-}
 .rep-outline {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -2140,22 +2134,8 @@ html[data-theme="light"] .sidebar {
   margin-top: 14px;
   display: flex; flex-direction: column; gap: 8px;
 }
-.quota-bar-row {
-  display: grid;
-  grid-template-columns: 90px 1fr 50px;
-  gap: 10px;
-  align-items: center;
-  font-size: 12.5px;
-}
-.quota-bar-row .lbl { color: var(--fg-2); }
 .quota-bar { height: 4px; background: rgba(121,118,247,0.12); border-radius: 999px; overflow: hidden; }
 .quota-bar-fill { height: 100%; background: var(--v-bright); }
-.quota-bar-row .num {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--fg-3);
-  text-align: right;
-}
 
 /* ============================================================
    Agents
@@ -2560,12 +2540,6 @@ html[data-theme="light"] .sidebar {
   grid-template-columns: 2fr 1fr;
   gap: 24px;
 }
-.credits-chart-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 24px;
-}
 .credits-summary {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -2596,30 +2570,6 @@ html[data-theme="light"] .sidebar {
   color: var(--fg-3);
   font-weight: 500;
 }
-
-.credits-chart {
-  height: 200px;
-  display: flex;
-  align-items: flex-end;
-  gap: 6px;
-  padding: 16px 0 8px;
-  border-bottom: 1px solid var(--border);
-}
-.credits-bar {
-  flex: 1;
-  display: flex;
-  flex-direction: column-reverse;
-  border-radius: 4px 4px 0 0;
-  overflow: hidden;
-  min-height: 4px;
-  position: relative;
-  cursor: pointer;
-}
-.credits-bar:hover { filter: brightness(1.15); }
-.credits-bar-seg { width: 100%; }
-.credits-bar-seg.reports { background: var(--v-bright); }
-.credits-bar-seg.conv { background: var(--v-deep); }
-.credits-bar-seg.agents { background: var(--v-soft); }
 
 .credits-x {
   display: flex; gap: 6px; margin-top: 8px;
@@ -2818,7 +2768,7 @@ html[data-theme="light"] .sidebar {
 /* mobile */
 @media (max-width: 960px) {
   .rep-types { grid-template-columns: repeat(2, 1fr); }
-  .rep-gen, .rep-editor, .agent-session, .credits-grid, .quota-card, .memory-cats, .settings-shell { grid-template-columns: 1fr; }
+  .rep-gen, .agent-session, .credits-grid, .quota-card, .memory-cats, .settings-shell { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
   .rep-types { grid-template-columns: 1fr; }
@@ -3253,7 +3203,7 @@ html[data-theme="light"] .sidebar {
 
 /* Confirmation de suppression : le bouton principal doit dire qu'il détruit. */
 .ax-bouton-danger { background: var(--error); border-color: var(--error); }
-/* Éclaircissement au survol par `filter` (comme `.credits-bar:hover`) : plus de
+/* Éclaircissement au survol par `filter` : plus de
    rouge en dur, aucun jeton ne portant une variante claire de `--error`. */
 .ax-bouton-danger:hover { filter: brightness(1.12); }
 
@@ -3444,8 +3394,8 @@ html[data-theme="light"] .sidebar {
 
   /* Rapports. La hauteur figée `calc(100vh - 88px)` empilait deux panneaux
      défilants dans la hauteur d'un seul : en une colonne, c'est la page qui
-     défile. `.rep-editor` (également remis à `1fr` à 960 px) n'est pas repris
-     ici : la classe n'existe dans aucun rendu de `App.jsx`. */
+     défile. (`.rep-editor` a été retiré du fichier : la classe n'était rendue
+     nulle part dans `App.jsx`.) */
   .rep-gen { height: auto; }
   .rep-gen-doc { padding: 20px 14px; }
   .rep-gen-doc h1 { font-size: 22px; }
@@ -3463,9 +3413,9 @@ html[data-theme="light"] .sidebar {
 
   /* Crédits : trois valeurs en chiffres monospace de 26 px côte à côte
      dans 347 px ne tenaient pas ; deux colonnes suffisent.
-     `.credits-chart`, `.credits-chart-card`, `.quota-bar-row` et
-     `.fact-*` (mémoire) ne sont PAS reprises : ces classes ne sont rendues
-     nulle part dans `App.jsx` (règles héritées du prototype). */
+     (`.credits-chart`, `.credits-chart-card`, `.credits-bar`, `.quota-bar-row`
+     ont été retirées du fichier : héritées du prototype, elles n'étaient
+     rendues nulle part dans `App.jsx`. `.fact-*`, mémoire, reste à trier.) */
   .credits-summary { grid-template-columns: 1fr 1fr; }
   .quota-usage { padding: 16px; }
 

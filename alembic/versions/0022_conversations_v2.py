@@ -37,6 +37,41 @@ branch_labels = None
 depends_on = None
 
 
+INDEX_IDEMPOTENCE = "ix_messages_conversation_cle_idempotence"
+
+
+def _index_idempotence(*, creer: bool) -> None:
+    """Crée (ou retire) l'unicité composite sans verrouiller `messages`.
+
+    Index unique partiel impossible en Alembic portable : un index unique
+    ordinaire suffit, les NULL n'entrent pas en collision en PostgreSQL.
+    Composite : la clé n'est unique QUE dans sa conversation (voir en-tête).
+
+    `CREATE UNIQUE INDEX` ordinaire prend un ACCESS EXCLUSIVE sur la table
+    pendant toute la construction — lectures ET écritures bloquées. Instantané
+    sur la volumétrie d'aujourd'hui, mais `messages` ne fera que grossir et
+    c'est le seul point de cette migration qui ne soit pas instantané par
+    construction. `CONCURRENTLY` ne peut pas tourner dans une transaction :
+    d'où l'`autocommit_block`. SQLite (tests) ne connaît ni l'un ni l'autre.
+    """
+    postgres = op.get_bind().dialect.name == "postgresql"
+    colonnes = ["conversation_id", "cle_idempotence"]
+
+    def _appliquer() -> None:
+        if creer:
+            op.create_index(INDEX_IDEMPOTENCE, "messages", colonnes, unique=True,
+                            **({"postgresql_concurrently": True} if postgres else {}))
+        else:
+            op.drop_index(INDEX_IDEMPOTENCE, table_name="messages",
+                          **({"postgresql_concurrently": True} if postgres else {}))
+
+    if postgres:
+        with op.get_context().autocommit_block():
+            _appliquer()
+    else:
+        _appliquer()
+
+
 def upgrade() -> None:
     op.add_column("messages", sa.Column(
         "statut", sa.String(length=16), nullable=False,
@@ -47,11 +82,7 @@ def upgrade() -> None:
         "cout_recherche_micro_eur", sa.Integer(), nullable=True))
     op.add_column("messages", sa.Column(
         "appels_recherche", sa.Integer(), nullable=True))
-    # Index unique partiel impossible en Alembic portable : un index unique
-    # ordinaire suffit, les NULL n'entrent pas en collision en PostgreSQL.
-    # Composite : la clé n'est unique QUE dans sa conversation (voir en-tête).
-    op.create_index("ix_messages_conversation_cle_idempotence", "messages",
-                    ["conversation_id", "cle_idempotence"], unique=True)
+    _index_idempotence(creer=True)
 
     op.add_column("conversations", sa.Column("resume", sa.Text(), nullable=True))
     op.add_column("conversations", sa.Column(
@@ -76,8 +107,7 @@ def downgrade() -> None:
     op.drop_column("conversations", "resume_messages")
     op.drop_column("conversations", "resume")
 
-    op.drop_index("ix_messages_conversation_cle_idempotence",
-                  table_name="messages")
+    _index_idempotence(creer=False)
     op.drop_column("messages", "appels_recherche")
     op.drop_column("messages", "cout_recherche_micro_eur")
     op.drop_column("messages", "cle_idempotence")

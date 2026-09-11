@@ -178,3 +178,72 @@ def test_gestionnaire_envoie_une_notification(monkeypatch):
     assert r.status_code == 500
     assert len(envois) == 1
     get_settings.cache_clear()
+
+
+def _corps(monkeypatch, exc: BaseException) -> str:
+    """Corps de l'email produit pour `exc`."""
+    capture: dict = {}
+    monkeypatch.setattr(
+        notifier, "envoyer_brut",
+        lambda dest, sujet, texte, **k: (capture.update(texte=texte, sujet=sujet),
+                                         (True, "id"))[1])
+    notifier.notifier_erreur(titre="t", route="intelligence.stream_message",
+                             methode="POST", user_email=None, exc=exc,
+                             action="agir")
+    return capture["texte"]
+
+
+def test_la_cle_d_api_ne_part_pas_par_email(monkeypatch):
+    """Finding 2 — `httpx` met l'URL complète dans son message d'erreur, clé
+    d'API comprise (Gemini la passe en paramètre de requête). Le traceback
+    partait tel quel vers une boîte Gmail et les logs Resend.
+    """
+    _active(monkeypatch)
+    try:
+        raise RuntimeError(
+            "Client error '400 Bad Request' for url "
+            "'https://generativelanguage.googleapis.com/v1beta/models/"
+            "gemini-2.5-flash:streamGenerateContent?key=AIzaFAKE123'")
+    except RuntimeError as e:
+        texte = _corps(monkeypatch, e)
+    assert "AIzaFAKE123" not in texte
+    assert notifier.MASQUE in texte
+    # L'incident reste diagnosticable : la route et le type restent lisibles.
+    assert "RuntimeError" in texte
+    assert "generativelanguage.googleapis.com" in texte
+    get_settings.cache_clear()
+
+
+def test_en_tete_d_autorisation_et_sk_masques(monkeypatch):
+    _active(monkeypatch)
+    try:
+        raise RuntimeError("headers={'Authorization': 'Bearer abc.def.ghi'} "
+                           "openai_key=sk-live-XYZ987654321")
+    except RuntimeError as e:
+        texte = _corps(monkeypatch, e)
+    assert "abc.def.ghi" not in texte
+    assert "sk-live-XYZ987654321" not in texte
+    get_settings.cache_clear()
+
+
+def test_valeur_d_une_variable_d_environnement_secrete_masquee(monkeypatch):
+    """Un secret peut apparaître autrement qu'en `key=…` (message d'une
+    bibliothèque tierce). Toute valeur d'un `*_KEY` / `*_SECRET` / `*_TOKEN`
+    de l'environnement est retirée telle quelle."""
+    monkeypatch.setenv("GEMINI_API_KEY", "SECRETABSOLUMENTPASDEVINABLE")
+    _active(monkeypatch)
+    try:
+        raise RuntimeError("auth refusée pour SECRETABSOLUMENTPASDEVINABLE")
+    except RuntimeError as e:
+        texte = _corps(monkeypatch, e)
+    assert "SECRETABSOLUMENTPASDEVINABLE" not in texte
+    assert notifier.MASQUE in texte
+    get_settings.cache_clear()
+
+
+def test_le_masquage_en_echec_ne_leve_pas(monkeypatch):
+    """Un masquage cassé ne doit pas transformer un incident en second
+    incident — et rien ne doit partir en clair pour autant."""
+    monkeypatch.setattr(notifier, "_valeurs_d_environnement",
+                        lambda: (_ for _ in ()).throw(RuntimeError("env HS")))
+    assert notifier._sans_secrets("clé=1234567890") == notifier.MASQUE
