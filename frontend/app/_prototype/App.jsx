@@ -107,6 +107,36 @@ window.useSidebar = function useSidebar() {
   document.documentElement.dataset.sidebar = window.AXIAL_SIDEBAR;
 })();
 
+/* ---- Tiroir du panneau des conversations (mobile, < 768 px) ----
+   MÊME mécanisme que la surcouche mobile de la barre latérale : un attribut
+   sur <html> (`data-convlist-mobile="open"`) que le CSS lit, plus un voile.
+   La différence, c'est le partage : le bouton qui ouvre vit dans la topbar
+   (AppShell) et les actions qui doivent refermer vivent dans la liste
+   (ConvListPanel, y compris sur un résultat de recherche) — deux branches
+   éloignées de l'arbre. L'état est donc global + événement, comme
+   `useSidebar`, plutôt que descendu en cascade de props.
+   L'état n'est PAS persisté : un tiroir rouvert au rechargement masquerait
+   le fil. Rien n'est lu au-dessus de 768 px, aucune règle ne cite
+   l'attribut hors du bloc `@media (max-width: 767px)`. */
+window.AXIAL_CONVLIST_MOBILE = false;
+window.setAxialConvListMobile = function (ouvert) {
+  const v = !!ouvert;
+  if (window.AXIAL_CONVLIST_MOBILE === v) return;
+  window.AXIAL_CONVLIST_MOBILE = v;
+  document.documentElement.dataset.convlistMobile = v ? 'open' : '';
+  window.dispatchEvent(new Event('axial:convlist'));
+};
+
+window.useConvListMobile = function useConvListMobile() {
+  const [ouvert, setOuvert] = React.useState(() => !!window.AXIAL_CONVLIST_MOBILE);
+  React.useEffect(() => {
+    const onChange = () => setOuvert(!!window.AXIAL_CONVLIST_MOBILE);
+    window.addEventListener('axial:convlist', onChange);
+    return () => window.removeEventListener('axial:convlist', onChange);
+  }, []);
+  return [ouvert, window.setAxialConvListMobile];
+};
+
 
 
 
@@ -146,6 +176,7 @@ const STRINGS = {
     'nav.collapse': 'Réduire le menu',
     'nav.expand': 'Développer le menu',
     'nav.menu_open': 'Ouvrir le menu',
+    'nav.convlist_open': 'Ouvrir la liste des conversations',
     'conv.search': 'Rechercher une analyse…',
     'conv.none': 'Aucun résultat.',
     'conv.hook': "Quelle question stratégique aujourd'hui ?",
@@ -458,6 +489,7 @@ const STRINGS = {
     'nav.collapse': 'Collapse menu',
     'nav.expand': 'Expand menu',
     'nav.menu_open': 'Open menu',
+    'nav.convlist_open': 'Open the conversation list',
     'conv.search': 'Search an analysis…',
     'conv.none': 'No result.',
     'conv.hook': 'What strategic question today?',
@@ -2307,16 +2339,36 @@ function AppShell({ user, onLogout, children, topbar, subRoute, onSubRoute }) {
   const lang = window.AXIAL_LANG || 'fr';
   const [sidebarMode, setSidebarMode] = window.useSidebar();
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const [convListOpen, setConvListOpen] = window.useConvListMobile();
 
   React.useEffect(() => {
     document.documentElement.dataset.sidebarMobile = mobileOpen ? 'open' : '';
   }, [mobileOpen]);
-  // Referme la surcouche mobile si l'écran repasse au-dessus du seuil (rotation, redimensionnement).
+  // Referme les deux surcouches mobiles si l'écran repasse au-dessus du seuil
+  // (rotation, redimensionnement) : au-dessus de 768 px la liste redevient une
+  // colonne du `grid`, un attribut « ouvert » resté posé n'y veut plus rien dire.
   React.useEffect(() => {
-    const onResize = () => { if (window.innerWidth >= 768) setMobileOpen(false); };
+    // L'état du tiroir est global (il survit au démontage de `AppShell`) : une
+    // déconnexion puis reconnexion ne doit pas retrouver un tiroir ouvert.
+    window.setAxialConvListMobile(false);
+    const onResize = () => {
+      if (window.innerWidth >= 768) { setMobileOpen(false); window.setAxialConvListMobile(false); }
+    };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+  // Le tiroir des conversations n'existe que sur cette sous-route : le quitter
+  // le referme, sinon le voile resterait posé sur Rapports ou Paramètres.
+  React.useEffect(() => {
+    if (subRoute !== 'conversations') window.setAxialConvListMobile(false);
+  }, [subRoute]);
+  // Échap referme le tiroir — même sortie de secours que le clic sur le voile.
+  React.useEffect(() => {
+    if (!convListOpen) return;
+    const onKey = (e) => { if (e.key === 'Escape') window.setAxialConvListMobile(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [convListOpen]);
 
   const isRail = sidebarMode === 'rail';
 
@@ -2341,6 +2393,9 @@ function AppShell({ user, onLogout, children, topbar, subRoute, onSubRoute }) {
     <div className="app-shell">
       {mobileOpen && (
         <div className="sidebar-backdrop" onClick={() => setMobileOpen(false)} />
+      )}
+      {convListOpen && (
+        <div className="convlist-backdrop" onClick={() => setConvListOpen(false)} />
       )}
       <aside className="sidebar">
         <Lockup sub="Intelligence" />
@@ -2399,9 +2454,24 @@ function AppShell({ user, onLogout, children, topbar, subRoute, onSubRoute }) {
             className="topbar-hamburger"
             aria-label={t('nav.menu_open')}
             title={t('nav.menu_open')}
-            onClick={() => setMobileOpen(true)}>
+            onClick={() => { setConvListOpen(false); setMobileOpen(true); }}>
             <Icon name="menu" size={18} />
           </button>
+          {/* Tiroir des conversations : le bouton ne vit que sur sa sous-route,
+              et le CSS ne le montre que sous 768 px (classe `.topbar-hamburger`
+              partagée, donc une seule règle d'affichage pour les deux boutons).
+              Il ferme le tiroir de la barre latérale, et réciproquement : les
+              deux voiles superposés n'auraient aucun sens. */}
+          {subRoute === 'conversations' && (
+            <button
+              className="topbar-hamburger topbar-convlist"
+              aria-label={t('nav.convlist_open')}
+              title={t('nav.convlist_open')}
+              aria-expanded={convListOpen}
+              onClick={() => { setMobileOpen(false); setConvListOpen(!convListOpen); }}>
+              <Icon name="message-square" size={18} />
+            </button>
+          )}
           {topbar}
         </header>
         <div className={`app-body ${subRoute !== 'conversations' ? 'app-body-single' : ''}`}>
@@ -2759,6 +2829,12 @@ function ConvListPanel({
   onOuvrirArchives, archivesChargees, erreur, onFermerErreur,
 }) {
   const t = window.useT();
+  /* Mobile (§6) : ce panneau est un tiroir. Choisir un fil — y compris depuis
+     un résultat de recherche — ou en créer un doit le refermer, sinon on
+     ouvre un fil qu'on ne voit pas. Au-dessus de 768 px l'appel est inerte :
+     aucune règle ne lit l'attribut hors du bloc mobile. */
+  const choisir = (id, resultat) => { window.setAxialConvListMobile(false); onPick(id, resultat); };
+  const nouveau = () => { window.setAxialConvListMobile(false); onNew(); };
   const [q, setQ] = React.useState('');
   // Résultats de `GET /conversations/search` : `null` = pas en mode recherche
   // (moins de 3 caractères → filtre local sur le titre, comme avant).
@@ -2917,7 +2993,7 @@ function ConvListPanel({
         {enRenommage ? champRenommage() : (
           <button
             className={`conv-item ${c.id === activeId ? 'active' : ''}`}
-            onClick={() => onPick(c.id)}>
+            onClick={() => choisir(c.id)}>
             <span className="conv-item-title">
               {c.pinnedAt && <Icon name="pin" size={11} className="ax-conv-epingle" />}
               {c.title || libelle('Conversation')}
@@ -2955,7 +3031,7 @@ function ConvListPanel({
         </div>
       )}
 
-      <button className="sidebar-newconv ax-nouvelle-conv" onClick={onNew}>
+      <button className="sidebar-newconv ax-nouvelle-conv" onClick={nouveau}>
         <Icon name="plus" size={14} /> {t('nav.new_analysis')}
       </button>
       {nouveauDossier == null ? (
@@ -2991,7 +3067,7 @@ function ConvListPanel({
             {(recherche.items || []).map((r, i) => (
               <li key={(r.message_id || r.conversation_id) + '-' + i}>
                 <button className={`conv-item ${r.conversation_id === activeId ? 'active' : ''}`}
-                  onClick={() => onPick(r.conversation_id, r)}>
+                  onClick={() => choisir(r.conversation_id, r)}>
                   <span className="conv-item-title">{r.title || libelle('Conversation')}</span>
                   {r.extrait && (
                     <span className="ax-resultat-extrait">
@@ -4794,9 +4870,9 @@ function FeedsManager({ onClose }) {
             </div>
           )}
           <div className="label" style={{ marginBottom: 8 }}>{libelle("OU UNE AUTRE SOURCE")}</div>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
             <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/feed"
-              style={{ flex: 1, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--fg)', fontSize: 13, padding: '9px 11px', outline: 'none' }} />
+              style={{ flex: '1 1 160px', minWidth: 0, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--fg)', fontSize: 13, padding: '9px 11px', outline: 'none' }} />
             <select value={category} onChange={(e) => setCategory(e.target.value)}
               style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--fg)', fontSize: 13, padding: '9px 8px' }}>
               {FEED_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -5411,7 +5487,10 @@ function MemorySurface() {
               <div key={k} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 <label style={{ fontSize: 11, fontFamily: 'var(--font-mono)', letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--fg-3)' }}>{l}</label>
                 <input value={profile[k] == null ? '' : profile[k]} onChange={(e) => set(k, e.target.value)} type={num ? 'number' : 'text'}
-                  style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--fg)', fontSize: 13.5, padding: '9px 11px', outline: 'none' }} />
+                  /* `width: 100%` + `minWidth: 0` : sans eux, la largeur
+                     intrinsèque d'un <input> (~200 px) fixe le minimum des
+                     deux colonnes de la grille et la page déborde à 375 px. */
+                  style={{ width: '100%', minWidth: 0, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--fg)', fontSize: 13.5, padding: '9px 11px', outline: 'none' }} />
               </div>
             ))}
           </div>

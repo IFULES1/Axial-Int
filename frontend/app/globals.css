@@ -3295,3 +3295,179 @@ html[data-theme="light"] .sidebar {
   .ax-menu-declencheur, .ax-editer { opacity: 1; }
   .ax-edition-actions .btn { flex: 1; justify-content: center; }
 }
+
+/* ============================================================
+   CONVERSATIONS V2 — MOBILE (§6 de la spec, priorité)
+
+   Deux choses : (1) sous 768 px le panneau des conversations devient un
+   tiroir et le fil prend toute la largeur ; (2) une passe générale pour
+   qu'aucune surface ne déborde horizontalement à 375 px.
+
+   ÉCHELLE DES z-index de l'application, de bas en haut :
+     topbar 10 · voile de la barre latérale 40 · voile de citation 40 ·
+     barre latérale 41 · panneau de citation 41 · VOILE DU TIROIR 41 ·
+     TIROIR DES CONVERSATIONS 42 · modales (.wizard-modal) 50.
+   Le tiroir est donc au-dessus de son propre voile et sous les modales. Il
+   passe aussi au-dessus de la barre latérale (41), mais les deux tiroirs
+   sont rendus mutuellement exclusifs côté JS — chaque bouton de la topbar
+   ferme l'autre tiroir — et le panneau de citation est plein écran sous
+   768 px, où il n'est jamais ouvert en même temps que la liste.
+   ============================================================ */
+
+/* Voile du tiroir : invisible par défaut, exactement comme
+   `.sidebar-backdrop`. Seul le bloc mobile ci-dessous l'affiche. */
+.convlist-backdrop { display: none; }
+
+@media (max-width: 767px) {
+  /* ---------- Une colonne : le fil prend toute la largeur ----------
+     Neutralise `.app-body { grid-template-columns: 280px 1fr }`
+     (posé pour la seule sous-route Conversations). `.app-body-single`
+     est déjà à `1fr` : son `!important` ne peut pas entrer en conflit,
+     et aucun `!important` n'est ajouté ici. */
+  .app-body { grid-template-columns: 1fr; }
+
+  /* ---------- Le panneau des conversations devient un tiroir ----------
+     Neutralise `.conv-list-panel { height: calc(100vh - 56px) }` : le
+     tiroir est ancré par `top`/`bottom`, sa hauteur est déduite. */
+  .conv-list-panel {
+    position: fixed;
+    top: 56px; left: 0; bottom: 0;
+    width: min(300px, 86vw);
+    height: auto;
+    background: var(--bg);
+    transform: translateX(-100%);
+    transition: transform 180ms ease-out;
+    z-index: 42;
+  }
+  html[data-convlist-mobile="open"] .conv-list-panel { transform: none; }
+  .convlist-backdrop {
+    display: block;
+    position: fixed; inset: 0;
+    background: rgba(0, 0, 0, .45);
+    z-index: 41;
+  }
+  /* Le bouton de la topbar est un interrupteur : il porte l'état ouvert,
+     en écho à son `aria-expanded`. Son affichage vient de la classe
+     `.topbar-hamburger` qu'il partage avec le bouton du menu. */
+  html[data-convlist-mobile="open"] .topbar-convlist {
+    background: rgba(121, 118, 247, 0.12);
+    border-color: var(--border-active);
+    color: var(--fg);
+  }
+
+  /* ---------- topbar : un titre qui ne pousse plus ----------
+     Neutralise le `min-width: auto` implicite des éléments flex : sans
+     `min-width: 0`, un titre de conversation long élargissait la topbar
+     et donc le document. */
+  .topbar-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar-actions { flex-shrink: 0; }
+
+  /* ---------- Fil ---------- */
+  /* `dvh` exclut la barre d'URL rétractable : avec `vh`, le composer
+     tombait sous le pli. Si le navigateur ignore l'unité, la déclaration
+     est simplement écartée et la base en `vh` reprend la main. */
+  .thread-region { height: calc(100dvh - 56px); }
+  .thread-scroll { padding: 18px 12px 16px; }
+  .thread-inner { gap: 18px; }
+  /* État vide (« Nouvelle analyse ») : 40 px de marge de chaque côté.
+     Son `<h2>` porte sa taille en `style={{…}}` : rien à faire ici, une
+     règle CSS n'y passerait pas. */
+  .empty-state { padding: 24px 14px; gap: 14px; }
+  /* Bulles à 100 % : `max-width: 80%` laissait 75 px perdus à gauche. */
+  .msg-user { max-width: 100%; }
+  .msg-ai-wrap { gap: 8px; }
+  /* Pas de survol au doigt : les actions d'une réponse (copier, signaler,
+     régénérer) seraient inatteignables. Même correctif que `.ax-editer`. */
+  .msg-ai-actions { opacity: 1; }
+
+  /* Composer collé en bas. `.thread-region` est déjà un flex colonne dont
+     `.thread-scroll` prend `flex: 1` — le composer est donc en dernière
+     position ; `sticky` le maintient visible même si le navigateur calcule
+     la hauteur du bloc autrement, et le `z-index` le pose AU-DESSUS du
+     bouton « ↓ » (z-index 3) qui ne peut donc pas le chevaucher.
+     `env(safe-area-inset-bottom)` dégage la barre gestuelle iOS. */
+  .composer-shell {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+  }
+  .composer { padding: 8px 8px 8px 14px; }
+  .composer-tip { margin-top: 8px; }
+
+  /* Tableaux et graphiques : le scroll horizontal reste DANS la bulle.
+     `.md-table-wrap` porte déjà `overflow-x: auto` ; il manquait la
+     largeur minimale qui rend le tableau lisible plutôt qu'écrasé sur
+     trois mots par cellule. Idem pour l'image d'une visualisation. */
+  .md-table { min-width: 460px; }
+  figure.viz { overflow-x: auto; padding: 10px 10px 6px; }
+  figure.viz img { min-width: 480px; }
+
+  /* Titres longs : un identifiant ou une URL sans espace ne doit pas
+     élargir son conteneur. */
+  .conv-item-title, .surface-head h1, .rep-doc h1,
+  .msg-ai, .msg-user { overflow-wrap: anywhere; }
+
+  /* ---------- Panneau de citation : plein écran ----------
+     Neutralise `width: 420px; max-width: 92vw` et l'ancrage à droite. */
+  .cite-panel {
+    inset: 0;
+    width: 100%; max-width: 100vw;
+    border-left: 0;
+  }
+  .cite-panel-head { padding: 14px 16px; }
+  .cite-panel-body { padding: 16px; }
+
+  /* ============================================================
+     PASSE GÉNÉRALE À 375 px — toutes les autres sous-routes
+     ============================================================ */
+
+  /* Le cadre commun (rapports, agents, mémoire, crédits, documentation,
+     paramètres, pilotage) : 40 px de marge de chaque côté ne laissaient
+     que 295 px de contenu sur un écran de 375. */
+  .surface { padding: 20px 14px 48px; }
+  .surface-head { flex-direction: column; gap: 14px; margin-bottom: 20px; }
+  .surface-head h1 { font-size: 24px; }
+
+  /* Modales : `.wizard-modal` cadrait sa carte à 32 px de chaque côté ;
+     16 px donne ~92 vw à 375 px, sans toucher aux `max-width` des cartes
+     (640/620/680/440 px) qui ne mordent qu'au-delà. */
+  .wizard-modal { padding: 16px; }
+
+  /* Rapports. La hauteur figée `calc(100vh - 88px)` empilait deux panneaux
+     défilants dans la hauteur d'un seul : en une colonne, c'est la page qui
+     défile. `.rep-editor` (également remis à `1fr` à 960 px) n'est pas repris
+     ici : la classe n'existe dans aucun rendu de `App.jsx`. */
+  .rep-gen { height: auto; }
+  .rep-gen-doc { padding: 20px 14px; }
+  .rep-gen-doc h1 { font-size: 22px; }
+  /* Rapport enregistré : 64 px de marge de chaque côté ne laissaient que
+     219 px de texte sur un écran de 375. */
+  .rep-doc { padding: 20px 14px; }
+  .rep-doc h1 { font-size: 22px; }
+  .rep-prompt-card { padding: 14px 14px 12px; }
+
+  /* Agents : `minmax(320px, 1fr)` forçait une colonne de 320 px dans un
+     conteneur de ~347 px de contenu — la carte suivante débordait. */
+  .agent-grid { grid-template-columns: 1fr; }
+  .agent-session { height: auto; }
+  .agent-timeline { padding: 16px; }
+
+  /* Crédits : trois valeurs en chiffres monospace de 26 px côte à côte
+     dans 347 px ne tenaient pas ; deux colonnes suffisent.
+     `.credits-chart`, `.credits-chart-card`, `.quota-bar-row` et
+     `.fact-*` (mémoire) ne sont PAS reprises : ces classes ne sont rendues
+     nulle part dans `App.jsx` (règles héritées du prototype). */
+  .credits-summary { grid-template-columns: 1fr 1fr; }
+  .quota-usage { padding: 16px; }
+
+  /* Paramètres : la colonne de contrôle figée à 280 px débordait. */
+  .settings-row { grid-template-columns: 1fr; gap: 12px; padding: 16px 0; }
+  .sub-card { flex-direction: column; align-items: flex-start; padding: 16px; }
+
+  /* Documentation : la table des matières redevient une liste en ligne dès
+     860 px (bloc déjà en place), il ne restait que la densité des cartes.
+     Les `max-width` en px du fichier (780, 640, 480…) ne sont PAS reprises
+     ici : une `max-width` ne peut pas élargir un conteneur. */
+  .docs-compare-col { padding: 12px; }
+}
