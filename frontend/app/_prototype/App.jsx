@@ -4,7 +4,7 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, AX_API, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, AX_API, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument } from "./bridge";
 import { parserMarkdown } from "./markdown";
 
 
@@ -392,6 +392,38 @@ const STRINGS = {
     'err.flux.detail': 'Réessayez, vous ne serez pas débité deux fois.',
     'err.trop_court.titre': 'Question trop courte',
     'err.trop_court.detail': 'Écrivez au moins quelques mots pour qu\u2019Axial puisse chercher.',
+    // --- Conversations v2 · dossiers, épingles, archives, recherche (Task 8) ---
+    'conv.section.epinglees': 'ÉPINGLÉES',
+    'conv.section.archivees': 'ARCHIVÉES',
+    'conv.section.dossiers_archives': 'DOSSIERS ARCHIVÉS',
+    'conv.section.resultats': 'RÉSULTATS',
+    'conv.dossier.nouveau': 'Nouveau dossier',
+    'conv.dossier.nom': 'Nom du dossier',
+    'conv.dossier.vide': 'Aucune conversation ici.',
+    'conv.menu.aide': 'Actions de la conversation',
+    'conv.menu.dossier.aide': 'Actions du dossier',
+    'conv.menu.renommer': 'Renommer',
+    'conv.menu.epingler': 'Épingler',
+    'conv.menu.desepingler': 'Désépingler',
+    'conv.menu.archiver': 'Archiver',
+    'conv.menu.desarchiver': 'Désarchiver',
+    'conv.menu.deplacer': 'Déplacer vers…',
+    'conv.renommer.aide': 'Entrée pour valider, Échap pour annuler',
+    'conv.suppr.titre': 'Supprimer cette conversation ?',
+    'conv.suppr.detail': 'La conversation et tous ses messages seront définitivement supprimés. Cette action est irréversible.',
+    'conv.dossier.suppr.titre': 'Supprimer ce dossier ?',
+    'conv.dossier.suppr.detail': 'Le dossier sera supprimé, ainsi que les conversations qu\u2019il contient encore et qui sont archivées. Cette action est irréversible.',
+    'conv.recherche.min': 'Trois caractères au minimum pour chercher dans le contenu des messages.',
+    'conv.recherche.encours': 'Recherche…',
+    'conv.regenerer': 'Régénérer',
+    'conv.regenerer.aide': 'Relancer cette réponse (2 crédits). La réponse actuelle est remplacée.',
+    'conv.editer': 'Modifier',
+    'conv.editer.aide': 'Modifier ce message et relancer la réponse (2 crédits). Les messages suivants sont supprimés.',
+    'conv.editer.renvoyer': 'Renvoyer',
+    'err.dossier_non_vide.titre': 'Dossier non vide',
+    'err.dossier_non_vide.detail': 'Ce dossier contient encore des conversations actives. Déplacez-les ou archivez-les avant de supprimer le dossier.',
+    'err.regen_impossible.titre': 'Action impossible sur ce message',
+    'err.regen_impossible.detail': 'Le fil a changé depuis l\u2019affichage. Rouvrez la conversation pour repartir de son état réel.',
     'err.defaut.titre': 'La réponse a échoué',
     'err.defaut.detail': 'Une erreur inattendue est survenue.',
   },
@@ -658,6 +690,38 @@ const STRINGS = {
     'err.flux.detail': 'Try again, you will not be charged twice.',
     'err.trop_court.titre': 'Question too short',
     'err.trop_court.detail': 'Write at least a few words so Axial can search.',
+    // --- Conversations v2 · folders, pins, archives, search (Task 8) ---
+    'conv.section.epinglees': 'PINNED',
+    'conv.section.archivees': 'ARCHIVED',
+    'conv.section.dossiers_archives': 'ARCHIVED FOLDERS',
+    'conv.section.resultats': 'RESULTS',
+    'conv.dossier.nouveau': 'New folder',
+    'conv.dossier.nom': 'Folder name',
+    'conv.dossier.vide': 'Nothing here yet.',
+    'conv.menu.aide': 'Conversation actions',
+    'conv.menu.dossier.aide': 'Folder actions',
+    'conv.menu.renommer': 'Rename',
+    'conv.menu.epingler': 'Pin',
+    'conv.menu.desepingler': 'Unpin',
+    'conv.menu.archiver': 'Archive',
+    'conv.menu.desarchiver': 'Unarchive',
+    'conv.menu.deplacer': 'Move to…',
+    'conv.renommer.aide': 'Enter to save, Esc to cancel',
+    'conv.suppr.titre': 'Delete this conversation?',
+    'conv.suppr.detail': 'The conversation and all its messages will be permanently deleted. This cannot be undone.',
+    'conv.dossier.suppr.titre': 'Delete this folder?',
+    'conv.dossier.suppr.detail': 'The folder will be deleted, along with any archived conversations it still holds. This cannot be undone.',
+    'conv.recherche.min': 'Three characters minimum to search inside message content.',
+    'conv.recherche.encours': 'Searching…',
+    'conv.regenerer': 'Regenerate',
+    'conv.regenerer.aide': 'Run this answer again (2 credits). The current answer is replaced.',
+    'conv.editer': 'Edit',
+    'conv.editer.aide': 'Edit this message and run the answer again (2 credits). Later messages are deleted.',
+    'conv.editer.renvoyer': 'Resend',
+    'err.dossier_non_vide.titre': 'Folder not empty',
+    'err.dossier_non_vide.detail': 'This folder still holds active conversations. Move or archive them before deleting the folder.',
+    'err.regen_impossible.titre': 'This message cannot be changed',
+    'err.regen_impossible.detail': 'The thread has changed since it was displayed. Reopen the conversation to work from its real state.',
     'err.defaut.titre': 'The answer failed',
     'err.defaut.detail': 'An unexpected error occurred.',
   },
@@ -762,6 +826,19 @@ function Icon({ name, size = 18, stroke = 1.6, ...rest }) {
     // l'arrêt (le triangle « play » a déjà son pendant `pause`).
     case 'stop': return (
       <svg {...common}><rect x="6.5" y="6.5" width="11" height="11" rx="1.5" fill="currentColor" stroke="none" /></svg>
+    );
+    // Menu « ⋯ » d'une conversation ou d'un dossier (Task 8).
+    case 'dots': return (
+      <svg {...common}><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none" /></svg>
+    );
+    case 'pin': return (
+      <svg {...common}><path d="M12 17v5" /><path d="M9 3h6l-1 5 3 3v2H7v-2l3-3-1-5z" /></svg>
+    );
+    case 'archive': return (
+      <svg {...common}><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" /><path d="M10 12h4" /></svg>
+    );
+    case 'folder': return (
+      <svg {...common}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></svg>
     );
     case 'arrow-down': return (
       <svg {...common}><path d="M12 5v14M5 12l7 7 7-7" /></svg>
@@ -2371,6 +2448,20 @@ function decrireErreur(e, t) {
   if (code === 'requete_trop_courte') {
     return { titre: t('err.trop_court.titre'), detail: t('err.trop_court.detail'), action: null };
   }
+  // Suppression d'un dossier encore peuplé (409). Le backend rend un message
+  // déjà rédigé, mais en français uniquement : on garde nos deux clés pour que
+  // l'anglais ne reçoive pas une phrase française.
+  if (code === 'projet_non_vide') {
+    return { titre: t('err.dossier_non_vide.titre'), detail: t('err.dossier_non_vide.detail'), action: null };
+  }
+  // Régénérer / éditer refusés par le backend : le fil a changé sous nos pieds
+  // (autre onglet, réponse plus récente). L'interface n'offre ces actions que
+  // sur le dernier tour, donc c'est un désaccord d'état, pas une faute de
+  // l'utilisateur — d'où « Rechargez le fil » plutôt que « Réessayer ».
+  if (code === 'pas_le_dernier_message' || code === 'question_introuvable'
+      || code === 'pas_une_reponse' || code === 'pas_un_message_utilisateur') {
+    return { titre: t('err.regen_impossible.titre'), detail: t('err.regen_impossible.detail'), action: null };
+  }
   // `axRegenerer`/`axEditerMessage` n'ont pas de repli bloquant (contrairement
   // à `axStreamChatIn`) : bridge.js nomme l'indisponibilité du flux plutôt que
   // de laisser fuiter `stream_unavailable` tel quel dans l'interface.
@@ -2451,6 +2542,31 @@ function CarteErreur({ erreur, onAction }) {
   );
 }
 
+/* Confirmation avant une suppression irréversible (conversation, dossier).
+   Même voile et même boîte étroite que `ModaleCredits` : c'est le motif de
+   modale déjà en place, il n'y en avait pas d'autre dans l'application. */
+function ModaleConfirmation({ titre, detail, onConfirmer, onAnnuler }) {
+  const t = window.useT();
+  return (
+    <div className="wizard-modal" onClick={onAnnuler} role="presentation">
+      <div className="ax-modale-etroite" role="dialog" aria-modal="true"
+        aria-label={titre} onClick={(e) => e.stopPropagation()}>
+        <div className="ax-modale-head">
+          <div className="ax-modale-icone"><Icon name="alert" size={18} /></div>
+          <h3>{titre}</h3>
+          <p>{detail}</p>
+        </div>
+        <div className="ax-modale-actions">
+          <button className="btn btn-primary ax-bouton-danger" onClick={onConfirmer}>
+            <Icon name="trash" size={13} /> {t('common.delete')}
+          </button>
+          <button className="btn btn-ghost" onClick={onAnnuler}>{t('common.cancel')}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ============================================================
    Conversations region — combines list-panel, thread, composer
    ============================================================ */
@@ -2459,6 +2575,8 @@ function ConversationsRegion({
   suggestedPrompts, showCitePanelFor, setShowCitePanelFor,
   profil, onCompleterProfil, onErreurAction, erreurCreation, onRetryCreation,
   etapes, couts, estAdmin, filsEnFlux, onStop, onAgentChange, onChargerPrecedents,
+  projets, gestion, erreurListe, onFermerErreurListe,
+  onRegenerer, onEditerMessage,
 }) {
   const active = conversations.find((c) => c.id === activeId);
 
@@ -2466,9 +2584,23 @@ function ConversationsRegion({
     <>
       <ConvListPanel
         conversations={conversations}
+        projets={projets}
         activeId={activeId}
         onPick={setActiveId}
         onNew={onNewChat}
+        erreur={erreurListe}
+        onFermerErreur={onFermerErreurListe}
+        archivesChargees={gestion.archivesChargees}
+        onOuvrirArchives={gestion.chargerArchives}
+        onRenommer={gestion.renommer}
+        onEpingler={gestion.epingler}
+        onArchiver={gestion.archiver}
+        onDeplacer={gestion.deplacer}
+        onSupprimer={gestion.demanderSuppression}
+        onCreerDossier={gestion.creerDossier}
+        onRenommerDossier={gestion.renommerDossier}
+        onArchiverDossier={gestion.archiverDossier}
+        onSupprimerDossier={gestion.demanderSuppressionDossier}
       />
       {active ? (
         <ConvThread
@@ -2481,6 +2613,8 @@ function ConversationsRegion({
           onStop={() => onStop(active.id)}
           onAgentChange={onAgentChange}
           onChargerPrecedents={() => onChargerPrecedents(active.id)}
+          onRegenerer={(m) => onRegenerer(active.id, m)}
+          onEditerMessage={(m, contenu) => onEditerMessage(active.id, m, contenu)}
           profil={profil}
           onCompleterProfil={onCompleterProfil}
           onErreurAction={(m) => onErreurAction(active.id, m)}
@@ -2505,10 +2639,267 @@ function ConversationsRegion({
 /* ============================================================
    Conversation list panel (middle column)
    ============================================================ */
-function ConvListPanel({ conversations, activeId, onPick, onNew }) {
+
+/* Surligne les occurrences du terme cherché dans un extrait renvoyé par
+   `GET /conversations/search`. Le motif est échappé : un utilisateur qui
+   cherche « c++ » ou « (2026) » ne doit pas casser la construction de la
+   regex — et surtout pas voir sa recherche disparaître sans explication. */
+function surlignerExtrait(texte, terme) {
+  const contenu = String(texte == null ? '' : texte);
+  const q = String(terme || '').trim();
+  if (!q) return contenu;
+  const motif = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const morceaux = contenu.split(new RegExp('(' + motif + ')', 'ig'));
+  const bas = q.toLowerCase();
+  return morceaux.map((m, i) => (m.toLowerCase() === bas
+    ? <mark key={i}>{m}</mark>
+    : <React.Fragment key={i}>{m}</React.Fragment>));
+}
+
+/* Menu « ⋯ » d'une conversation ou d'un dossier.
+
+   `actions` : [{ cle, libelle, icone, onClick, danger, sousMenu }]. Un
+   `sousMenu` s'ouvre en accordéon DANS le menu (« Déplacer vers… ») plutôt
+   qu'en panneau flottant : le panneau des conversations défile et est étroit,
+   un second niveau positionné en absolu sortirait de l'écran.
+
+   `onMouseDown` est stoppé sur le conteneur : la fermeture au clic extérieur
+   écoute `mousedown` sur le document, et sans ce garde le menu se démonterait
+   AVANT que le `click` d'un de ses propres éléments n'ait pu partir. */
+function MenuConversation({ ouvert, onBasculer, actions, aide }) {
+  const [sousOuvert, setSousOuvert] = React.useState(null);
+  React.useEffect(() => { if (!ouvert) setSousOuvert(null); }, [ouvert]);
+  return (
+    <div className="ax-menu-conteneur">
+      <button className="ax-menu-declencheur" title={aide} aria-label={aide}
+        aria-expanded={!!ouvert} aria-haspopup="menu"
+        onClick={(e) => { e.stopPropagation(); onBasculer(); }}>
+        <Icon name="dots" size={14} />
+      </button>
+      {ouvert && (
+        <div className="ax-menu" role="menu" onMouseDown={(e) => e.stopPropagation()}>
+          {actions.filter(Boolean).map((a) => (a.sousMenu ? (
+            <div key={a.cle}>
+              <button className="ax-menu-item" role="menuitem" aria-expanded={sousOuvert === a.cle}
+                onClick={(e) => { e.stopPropagation(); setSousOuvert(sousOuvert === a.cle ? null : a.cle); }}>
+                {a.icone && <Icon name={a.icone} size={13} />} {a.libelle}
+                <Icon name={sousOuvert === a.cle ? 'chevron-down' : 'chevron-right'} size={12} />
+              </button>
+              {sousOuvert === a.cle && (
+                <div className="ax-menu-sous">
+                  {a.sousMenu.length === 0 && (
+                    <div className="ax-menu-vide">{a.videLibelle}</div>
+                  )}
+                  {a.sousMenu.map((s) => (
+                    <button key={s.cle} className="ax-menu-item" role="menuitem"
+                      onClick={(e) => { e.stopPropagation(); s.onClick(); }}>
+                      <Icon name="folder" size={13} /> {s.libelle}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <button key={a.cle} role="menuitem"
+              className={`ax-menu-item ${a.danger ? 'danger' : ''}`}
+              onClick={(e) => { e.stopPropagation(); a.onClick(); }}>
+              {a.icone && <Icon name={a.icone} size={13} />} {a.libelle}
+            </button>
+          )))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Un groupe repliable du panneau : un dossier (projet), « Épinglées » ou
+   « Archivées ». `nom` est un nœud, pas une chaîne — le renommage inline
+   remplace le titre par un champ. */
+function DossierGroupe({ nom, champ, compte, replie, onBasculer, menu, icone, children }) {
+  return (
+    <div className="ax-dossier">
+      <div className="ax-dossier-tete">
+        {/* `champ` (renommage inline) REMPLACE la bascule : un <input> logé
+            dans le <button> serait un imbriquement interdit, et chaque clic
+            dans le champ replierait le dossier. */}
+        {champ ? <div className="ax-dossier-champ">{champ}</div> : (
+          <button className="ax-dossier-bascule" onClick={onBasculer} aria-expanded={!replie}>
+            <Icon name={replie ? 'chevron-right' : 'chevron-down'} size={12} />
+            {icone && <Icon name={icone} size={12} />}
+            <span className="ax-dossier-nom">{nom}</span>
+            {typeof compte === 'number' && <span className="ax-dossier-compte mono">{compte}</span>}
+          </button>
+        )}
+        {menu}
+      </div>
+      {!replie && <div className="ax-dossier-corps">{children}</div>}
+    </div>
+  );
+}
+
+const CLE_DOSSIERS_REPLIES = 'axial_dossiers_replies';
+
+function ConvListPanel({
+  conversations, projets, activeId, onPick, onNew,
+  onRenommer, onEpingler, onArchiver, onDeplacer, onSupprimer,
+  onCreerDossier, onRenommerDossier, onArchiverDossier, onSupprimerDossier,
+  onOuvrirArchives, archivesChargees, erreur, onFermerErreur,
+}) {
   const t = window.useT();
   const [q, setQ] = React.useState('');
-  const filtered = conversations.filter((c) => c.title.toLowerCase().includes(q.toLowerCase()));
+  // Résultats de `GET /conversations/search` : `null` = pas en mode recherche
+  // (moins de 3 caractères → filtre local sur le titre, comme avant).
+  const [recherche, setRecherche] = React.useState(null);
+  const [menuOuvert, setMenuOuvert] = React.useState(null);
+  const [renommage, setRenommage] = React.useState(null); // { kind, id, initial, valeur }
+  const annuleRef = useConvRef(false);
+  const [nouveauDossier, setNouveauDossier] = React.useState(null); // null | chaîne saisie
+  const [archivesOuvertes, setArchivesOuvertes] = React.useState(false);
+  const [replies, setReplies] = React.useState(() => {
+    try {
+      const brut = JSON.parse(localStorage.getItem(CLE_DOSSIERS_REPLIES) || '[]');
+      return Array.isArray(brut) ? brut.filter((x) => typeof x === 'string') : [];
+    } catch (e) { return []; }
+  });
+
+  const basculerDossier = (id) => setReplies((r) => {
+    const suivant = r.includes(id) ? r.filter((x) => x !== id) : [...r, id];
+    try { localStorage.setItem(CLE_DOSSIERS_REPLIES, JSON.stringify(suivant)); } catch (e) {}
+    return suivant;
+  });
+
+  /* Recherche dans le contenu à partir de 3 caractères, 300 ms de débounce.
+     `annule` couvre ce que le `clearTimeout` ne couvre pas : une réponse déjà
+     partie qui reviendrait APRÈS une frappe plus récente et écraserait ses
+     résultats. */
+  React.useEffect(() => {
+    const terme = q.trim();
+    if (terme.length < 3) { setRecherche(null); return undefined; }
+    let annule = false;
+    setRecherche((r) => ({ q: terme, items: (r && r.items) || null, chargement: true }));
+    const minuteur = setTimeout(() => {
+      axRechercherConversations(terme)
+        .then((res) => { if (!annule) setRecherche({ q: terme, items: res || [], chargement: false }); })
+        .catch(() => { if (!annule) setRecherche({ q: terme, items: [], chargement: false }); });
+    }, 300);
+    return () => { annule = true; clearTimeout(minuteur); };
+  }, [q]);
+
+  // Fermeture du menu ⋯ au clic extérieur et à Échap.
+  React.useEffect(() => {
+    if (!menuOuvert) return undefined;
+    const fermer = () => setMenuOuvert(null);
+    const surTouche = (e) => { if (e.key === 'Escape') setMenuOuvert(null); };
+    document.addEventListener('mousedown', fermer);
+    document.addEventListener('keydown', surTouche);
+    return () => {
+      document.removeEventListener('mousedown', fermer);
+      document.removeEventListener('keydown', surTouche);
+    };
+  }, [menuOuvert]);
+
+  const ouvrirRenommage = (kind, id, initial) => {
+    setMenuOuvert(null);
+    annuleRef.current = false;
+    setRenommage({ kind, id, initial, valeur: initial });
+  };
+  const validerRenommage = () => {
+    const r = renommage;
+    if (!r) return;
+    setRenommage(null);
+    const v = (r.valeur || '').trim();
+    // Un nom vide n'est pas un renommage : le backend rend 400 `titre_vide` /
+    // `nom_vide`, et l'utilisateur qui vide le champ veut annuler.
+    if (!v || v === r.initial) return;
+    if (r.kind === 'conv') onRenommer(r.id, v);
+    else onRenommerDossier(r.id, v);
+  };
+  const annulerRenommage = () => { annuleRef.current = true; setRenommage(null); };
+  const champRenommage = () => (
+    <input className="ax-renommer" autoFocus value={renommage.valeur}
+      title={t('conv.renommer.aide')} aria-label={t('conv.menu.renommer')}
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onChange={(e) => setRenommage((r) => (r ? { ...r, valeur: e.target.value } : r))}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') { e.preventDefault(); validerRenommage(); }
+        else if (e.key === 'Escape') { e.preventDefault(); annulerRenommage(); }
+      }}
+      onBlur={() => {
+        // Échap a déjà démonté le champ : ne pas enregistrer par-dessus.
+        if (annuleRef.current) { annuleRef.current = false; return; }
+        validerRenommage();
+      }} />
+  );
+
+  const creerDossier = () => {
+    const nom = (nouveauDossier || '').trim();
+    setNouveauDossier(null);
+    if (nom) onCreerDossier(nom);
+  };
+
+  const dossiersActifs = (projets || []).filter((p) => !p.archived_at);
+  const dossiersArchives = (projets || []).filter((p) => !!p.archived_at);
+  const epinglees = conversations.filter((c) => c.pinnedAt && !c.archivedAt);
+  const archivees = conversations.filter((c) => c.archivedAt);
+  /* Filet de sécurité : un fil dont le dossier n'est PAS dans `projets` (liste
+     des dossiers pas encore revenue, fil ouvert depuis un résultat de
+     recherche) n'appartient à aucun groupe et serait invisible. Il est rendu à
+     plat sous « Récentes ». Un fil rangé dans un dossier ARCHIVÉ, lui, a bien
+     son dossier dans `projets` : il reste donc masqué, ce qui est le sens même
+     d'archiver un dossier. */
+  const connus = new Set((projets || []).map((p) => p.id));
+  const sansDossier = conversations.filter(
+    (c) => !c.archivedAt && !c.pinnedAt && !connus.has(c.projectId));
+
+  const actionsConversation = (c) => [
+    { cle: 'renommer', libelle: t('conv.menu.renommer'), icone: 'edit',
+      onClick: () => ouvrirRenommage('conv', c.id, c.title || '') },
+    { cle: 'epingler', icone: 'pin',
+      libelle: c.pinnedAt ? t('conv.menu.desepingler') : t('conv.menu.epingler'),
+      onClick: () => { setMenuOuvert(null); onEpingler(c.id, !c.pinnedAt); } },
+    { cle: 'archiver', icone: 'archive',
+      libelle: c.archivedAt ? t('conv.menu.desarchiver') : t('conv.menu.archiver'),
+      onClick: () => { setMenuOuvert(null); onArchiver(c.id, !c.archivedAt); } },
+    { cle: 'deplacer', libelle: t('conv.menu.deplacer'), icone: 'folder',
+      videLibelle: t('conv.dossier.vide'),
+      sousMenu: dossiersActifs.filter((p) => p.id !== c.projectId).map((p) => ({
+        cle: p.id, libelle: p.name,
+        onClick: () => { setMenuOuvert(null); onDeplacer(c.id, p.id); },
+      })) },
+    { cle: 'supprimer', libelle: t('common.delete'), icone: 'trash', danger: true,
+      onClick: () => { setMenuOuvert(null); onSupprimer(c); } },
+  ];
+
+  const ligne = (c) => {
+    const enRenommage = renommage && renommage.kind === 'conv' && renommage.id === c.id;
+    const cleMenu = 'conv:' + c.id;
+    return (
+      <li key={c.id} className="ax-conv-ligne">
+        {/* Le champ de renommage REMPLACE le bouton, il ne s'y niche pas : un
+            <input> dans un <button> est un imbriquement interdit par HTML (le
+            bouton n'accepte pas de contenu interactif) et le navigateur est
+            libre de ne jamais donner le focus au champ. */}
+        {enRenommage ? champRenommage() : (
+          <button
+            className={`conv-item ${c.id === activeId ? 'active' : ''}`}
+            onClick={() => onPick(c.id)}>
+            <span className="conv-item-title">
+              {c.pinnedAt && <Icon name="pin" size={11} className="ax-conv-epingle" />}
+              {c.title || libelle('Conversation')}
+            </span>
+            <span className="conv-item-meta">{(c.lastUpdated || '').toUpperCase()}</span>
+          </button>
+        )}
+        <MenuConversation
+          aide={t('conv.menu.aide')}
+          ouvert={menuOuvert === cleMenu}
+          onBasculer={() => setMenuOuvert(menuOuvert === cleMenu ? null : cleMenu)}
+          actions={actionsConversation(c)}
+        />
+      </li>
+    );
+  };
 
   return (
     <div className="conv-list-panel">
@@ -2518,31 +2909,176 @@ function ConvListPanel({ conversations, activeId, onPick, onNew }) {
           placeholder={t('conv.search')} />
       </div>
 
-      <button className="sidebar-newconv" onClick={onNew} style={{ marginBottom: 12 }}>
+      {erreur && (
+        <div className="ax-carte-erreur ax-erreur-liste" role="alert">
+          <div className="ax-carte-erreur-titre">
+            <Icon name="alert" size={14} /> {erreur.titre}
+          </div>
+          <p>{erreur.detail}</p>
+          <button className="btn btn-secondary btn-sm" onClick={onFermerErreur}>
+            {t('common.close')}
+          </button>
+        </div>
+      )}
+
+      <button className="sidebar-newconv ax-nouvelle-conv" onClick={onNew}>
         <Icon name="plus" size={14} /> {t('nav.new_analysis')}
       </button>
+      {nouveauDossier == null ? (
+        <button className="sidebar-newconv ax-nouveau-dossier"
+          onClick={() => setNouveauDossier('')}>
+          <Icon name="folder" size={14} /> {t('conv.dossier.nouveau')}
+        </button>
+      ) : (
+        <input className="ax-renommer ax-nouveau-dossier-champ" autoFocus
+          value={nouveauDossier} placeholder={t('conv.dossier.nom')}
+          aria-label={t('conv.dossier.nom')}
+          onChange={(e) => setNouveauDossier(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); creerDossier(); }
+            else if (e.key === 'Escape') { e.preventDefault(); setNouveauDossier(null); }
+          }}
+          onBlur={creerDossier} />
+      )}
 
-      <div className="sidebar-section-label">{t('nav.recent')}</div>
-      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        {filtered.map((c) => (
-          <li key={c.id}>
-            <button
-              className={`conv-item ${c.id === activeId ? 'active' : ''}`}
-              onClick={() => onPick(c.id)}
-              style={{ width: '100%', textAlign: 'left', border: 'none' }}>
-              <span className="conv-item-title">{c.title}</span>
-              <span className="conv-item-meta">{(c.lastUpdated || '').toUpperCase()}</span>
-            </button>
-          </li>
-        ))}
-        {filtered.length === 0 && (
-          <li className="caption" style={{ padding: '12px', color: 'var(--fg-3)' }}>
-            {t('conv.none')}
-          </li>
-        )}
-      </ul>
+      {recherche ? (
+        /* Mode recherche : résultats du backend avec leur extrait. Les
+           sections et les dossiers laissent la place — on cherche, on ne
+           range pas. */
+        <div>
+          <div className="sidebar-section-label">{t('conv.section.resultats')}</div>
+          {recherche.chargement && !recherche.items && (
+            <div className="caption ax-liste-vide">{t('conv.recherche.encours')}</div>
+          )}
+          {recherche.items && recherche.items.length === 0 && !recherche.chargement && (
+            <div className="caption ax-liste-vide">{t('conv.none')}</div>
+          )}
+          <ul className="ax-liste">
+            {(recherche.items || []).map((r, i) => (
+              <li key={(r.message_id || r.conversation_id) + '-' + i}>
+                <button className={`conv-item ${r.conversation_id === activeId ? 'active' : ''}`}
+                  onClick={() => onPick(r.conversation_id, r)}>
+                  <span className="conv-item-title">{r.title || libelle('Conversation')}</span>
+                  {r.extrait && (
+                    <span className="ax-resultat-extrait">
+                      {surlignerExtrait(r.extrait, recherche.q)}
+                    </span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <>
+          {q.trim().length > 0 && (
+            <div className="caption ax-recherche-indice">{t('conv.recherche.min')}</div>
+          )}
+
+          {epinglees.length > 0 && (
+            <>
+              <div className="sidebar-section-label">{t('conv.section.epinglees')}</div>
+              <ul className="ax-liste">{epinglees.filter(filtreLocal(q)).map(ligne)}</ul>
+            </>
+          )}
+
+          {/* « Récentes » ne coiffe QUE les fils sans dossier d'accueil :
+              chaque dossier porte déjà son propre titre, et laisser ce libellé
+              au-dessus d'eux donnait à lire « Récentes » comme le nom du
+              premier dossier. */}
+          {sansDossier.length > 0 && (
+            <>
+              <div className="sidebar-section-label">{t('nav.recent')}</div>
+              <ul className="ax-liste">{sansDossier.filter(filtreLocal(q)).map(ligne)}</ul>
+            </>
+          )}
+          {dossiersActifs.map((p) => {
+            const dedans = conversations.filter(
+              (c) => c.projectId === p.id && !c.archivedAt && !c.pinnedAt);
+            const visibles = dedans.filter(filtreLocal(q));
+            const enRenommage = renommage && renommage.kind === 'dossier' && renommage.id === p.id;
+            const cleMenu = 'dossier:' + p.id;
+            return (
+              <DossierGroupe key={p.id} icone="folder" compte={dedans.length}
+                replie={replies.includes(p.id)}
+                onBasculer={() => basculerDossier(p.id)}
+                nom={p.name} champ={enRenommage ? champRenommage() : null}
+                menu={(
+                  <MenuConversation
+                    aide={t('conv.menu.dossier.aide')}
+                    ouvert={menuOuvert === cleMenu}
+                    onBasculer={() => setMenuOuvert(menuOuvert === cleMenu ? null : cleMenu)}
+                    actions={[
+                      { cle: 'renommer', libelle: t('conv.menu.renommer'), icone: 'edit',
+                        onClick: () => ouvrirRenommage('dossier', p.id, p.name || '') },
+                      { cle: 'archiver', libelle: t('conv.menu.archiver'), icone: 'archive',
+                        onClick: () => { setMenuOuvert(null); onArchiverDossier(p.id, true); } },
+                      { cle: 'supprimer', libelle: t('common.delete'), icone: 'trash', danger: true,
+                        onClick: () => { setMenuOuvert(null); onSupprimerDossier(p); } },
+                    ]}
+                  />
+                )}>
+                {visibles.length ? <ul className="ax-liste">{visibles.map(ligne)}</ul>
+                  : <div className="caption ax-liste-vide">{t('conv.dossier.vide')}</div>}
+              </DossierGroupe>
+            );
+          })}
+          {dossiersActifs.length === 0 && conversations.length === 0 && (
+            <div className="caption ax-liste-vide">{t('conv.none')}</div>
+          )}
+
+          {/* « Archivées » : repliée par défaut, et les conversations
+              archivées ne sont demandées au backend qu'à la première
+              ouverture (`inclure_archivees=true`). */}
+          <DossierGroupe icone="archive"
+            compte={archivesChargees ? archivees.length : undefined}
+            replie={!archivesOuvertes}
+            nom={<span className="sidebar-section-label ax-dossier-section">{t('conv.section.archivees')}</span>}
+            onBasculer={() => {
+              const ouvrir = !archivesOuvertes;
+              setArchivesOuvertes(ouvrir);
+              if (ouvrir && !archivesChargees) onOuvrirArchives();
+            }}>
+            {archivees.filter(filtreLocal(q)).length
+              ? <ul className="ax-liste">{archivees.filter(filtreLocal(q)).map(ligne)}</ul>
+              : <div className="caption ax-liste-vide">
+                  {archivesChargees ? t('conv.none') : t('conv.chargement')}
+                </div>}
+            {dossiersArchives.length > 0 && (
+              <>
+                <div className="sidebar-section-label">{t('conv.section.dossiers_archives')}</div>
+                <ul className="ax-liste">
+                  {dossiersArchives.map((p) => (
+                    <li key={p.id} className="ax-conv-ligne">
+                      <span className="conv-item ax-dossier-archive">
+                        <span className="conv-item-title">
+                          <Icon name="folder" size={11} /> {p.name}
+                        </span>
+                      </span>
+                      <button className="ax-menu-declencheur" title={t('conv.menu.desarchiver')}
+                        aria-label={t('conv.menu.desarchiver')}
+                        onClick={() => onArchiverDossier(p.id, false)}>
+                        <Icon name="refresh" size={13} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </DossierGroupe>
+        </>
+      )}
     </div>
   );
+}
+
+/* Filtre LOCAL sur le titre — ce que faisait le champ de recherche avant, et
+   ce qu'il continue de faire sous 3 caractères (aucun appel réseau pour une
+   ou deux lettres). */
+function filtreLocal(q) {
+  const terme = String(q || '').trim().toLowerCase();
+  if (!terme) return () => true;
+  return (c) => String(c.title || '').toLowerCase().includes(terme);
 }
 
 /* ============================================================
@@ -2650,7 +3186,8 @@ function BoutonCopier({ texte, libelleCourt, titreLibelle }) {
 
 function ConvThread({ conversation, onSend, openCite, profil,
                      onCompleterProfil, onErreurAction, etape, cout, estAdmin,
-                     enFlux, onStop, onAgentChange, onChargerPrecedents }) {
+                     enFlux, onStop, onAgentChange, onChargerPrecedents,
+                     onRegenerer, onEditerMessage }) {
   const t = window.useT();
   const [draft, setDraft] = React.useState('');
   const scrollRef = useConvRef(null);
@@ -2679,6 +3216,16 @@ function ConvThread({ conversation, onSend, openCite, profil,
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [longueurContenu, conversation.messages.length, conversation.id, enBas, etape]);
+
+  /* « Régénérer » ne vaut que pour la DERNIÈRE réponse du fil : le backend
+     refuse le reste (409 `pas_le_dernier_message`, Task 3). On n'offre donc le
+     bouton que là, et jamais pendant un flux, sur une carte d'erreur, sur une
+     bulle encore en flux, ni sur une bulle qui n'a pas d'identifiant serveur
+     (un partiel interrompu avant le `done` n'existe pas côté serveur). */
+  const messages = conversation.messages || [];
+  const dernier = messages[messages.length - 1];
+  const idRegenerable = (!enFlux && dernier && dernier.role === 'assistant'
+    && !dernier.erreur && !dernier.live && dernier.messageId) ? dernier.messageId : null;
 
   const allerEnBas = () => {
     const el = scrollRef.current;
@@ -2761,7 +3308,9 @@ function ConvThread({ conversation, onSend, openCite, profil,
                 // flux n'est pas remontée à la fin du flux ; `messageId` pour
                 // les messages venus du backend, qui n'ont pas de `localId`.
                 m.role === 'user'
-                  ? <UserMsg key={m.localId || m.messageId || `i-${i}`} text={m.content} />
+                  ? <UserMsg key={m.localId || m.messageId || `i-${i}`} text={m.content}
+                      onEditer={(!enFlux && m.messageId)
+                        ? ((contenu) => onEditerMessage(m, contenu)) : null} />
                   : m.role === 'system'
                     ? <NoteSysteme key={m.localId || m.messageId || `i-${i}`} text={m.content} />
                     : m.erreur
@@ -2770,7 +3319,9 @@ function ConvThread({ conversation, onSend, openCite, profil,
                           openCite={openCite} live={m.live} viz={m.viz || null}
                           statut={m.statut} credits={m.credits} estAdmin={estAdmin}
                           tokensEntree={m.tokensEntree} tokensSortie={m.tokensSortie}
-                          coutMicroEur={m.coutMicroEur} />
+                          coutMicroEur={m.coutMicroEur}
+                          onRegenerer={(idRegenerable && m.messageId === idRegenerable)
+                            ? (() => onRegenerer(m)) : null} />
               ))}
               {etape && (
                 <BandeauEtape etape={etape.etape} nombre={etape.nombre} depuis={etape.depuis} />
@@ -2801,10 +3352,45 @@ function ConvThread({ conversation, onSend, openCite, profil,
   );
 }
 
-function UserMsg({ text }) {
+/* Bulle utilisateur — avec le crayon d'édition (spec §4). « Renvoyer »
+   supprime ce message et tout ce qui suit (côté serveur comme à l'écran) puis
+   relance le flux : c'est destructif, d'où un bouton explicite et jamais un
+   enregistrement au `blur`. */
+function UserMsg({ text, onEditer }) {
+  const t = window.useT();
+  const [edition, setEdition] = React.useState(null);
+
+  if (edition != null) {
+    const propre = edition.trim();
+    return (
+      <div className="msg-user-wrap ax-edition-wrap">
+        <textarea className="ax-edition" autoFocus value={edition}
+          maxLength={MAX_CARACTERES} rows={3} aria-label={t('conv.editer')}
+          onChange={(e) => setEdition(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setEdition(null); } }} />
+        <div className="ax-edition-actions">
+          <button className="btn btn-primary btn-sm"
+            disabled={!propre || propre === String(text || '').trim()}
+            onClick={() => { setEdition(null); onEditer(propre); }}>
+            <Icon name="send" size={12} /> {t('conv.editer.renvoyer')}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={() => setEdition(null)}>
+            {t('common.cancel')}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="msg-user-wrap">
       <div className="msg-user">{text}</div>
+      {onEditer && (
+        <button className="ax-editer" title={t('conv.editer.aide')} aria-label={t('conv.editer')}
+          onClick={() => setEdition(String(text == null ? '' : text))}>
+          <Icon name="edit" size={12} />
+        </button>
+      )}
     </div>
   );
 }
@@ -2888,7 +3474,8 @@ function NoteSysteme({ text }) {
 }
 
 function AiMsg({ content, sources, agent, openCite, live, viz, statut,
-                credits, tokensEntree, tokensSortie, coutMicroEur, estAdmin }) {
+                credits, tokensEntree, tokensSortie, coutMicroEur, estAdmin,
+                onRegenerer }) {
   // En attente : la réponse est en route (recherche + RAG + LLM = 20-40 s).
   // Le détail de l'attente est porté par le bandeau d'étapes du fil ; la bulle
   // se contente d'exister pour que le fil ne saute pas à l'arrivée du texte.
@@ -2937,6 +3524,12 @@ function AiMsg({ content, sources, agent, openCite, live, viz, statut,
         {!live && (
           <div className="msg-ai-actions">
             <BoutonCopier texte={fullText} />
+            {onRegenerer && (
+              <button className="btn btn-ghost btn-sm" onClick={onRegenerer}
+                title={texteI18n('conv.regenerer.aide')}>
+                <Icon name="refresh" size={12} /> {texteI18n('conv.regenerer')}
+              </button>
+            )}
           </div>
         )}
         {/* La pastille de coût vit HORS de `.msg-ai-actions`, qui n'apparaît
@@ -6107,6 +6700,23 @@ function App() {
   // Appels `axMessagesPage` en vol, par identifiant de fil : garde contre un
   // double chargement sur double clic (voir `openConversation`).
   const chargementsEnVol = useConvRef({});
+  /* Dossiers (projets) — citoyens de première classe depuis la Task 8 : la
+     liste est GROUPÉE par dossier. On charge les archivés aussi
+     (`inclure_archives=true`) : sans leur nom, une conversation logée dans un
+     dossier archivé n'aurait pas de groupe d'accueil, et un dossier archivé
+     serait invisible donc impossible à désarchiver.
+     Forme : [{ id, name, description, created_at, archived_at }] — `ProjectOut`
+     tel quel, aucune traduction de champ (le seul consommateur est la liste). */
+  const [projets, setProjets] = useState([]);
+  // Les conversations archivées ne sont demandées qu'à la première ouverture
+  // de la section « Archivées » (`inclure_archivees=true`).
+  const [archivesChargees, setArchivesChargees] = useState(false);
+  const archivesEnVol = useConvRef(false);
+  // Échec d'une action de gestion (renommer, épingler, archiver, déplacer,
+  // supprimer) : carte d'erreur EN TÊTE DE LISTE, là où le geste a eu lieu.
+  const [erreurListe, setErreurListe] = useState(null);
+  // Confirmation avant suppression : { kind: 'conv' | 'dossier', id, titre, detail }.
+  const [confirmation, setConfirmation] = useState(null);
 
   /* Purge des registres indexés par identifiant de fil quand le fil DISPARAÎT
      de `conversations` (suppression — Task 8 —, déconnexion, rechargement de la
@@ -6260,20 +6870,13 @@ function App() {
         ];
         setSuggested(qs);
       }).catch(() => { setProfil({}); });
-      // Historique persistant : recharger les conversations du compte.
-      axListConversations().then((list) => {
-        setConversations((cs) => {
-          const known = new Set(cs.map((c) => c.id));
-          const fetched = list.filter((c) => !known.has(c.id)).map((c) => ({
-            id: c.id,
-            title: c.title || 'Conversation',
-            lastUpdated: c.last_message_at ? depuisLabel(c.last_message_at, window.AXIAL_LANG) : '',
-            loaded: false,
-            messages: [],
-          }));
-          return [...cs, ...fetched];
-        });
-      }).catch(() => {});
+      // Historique persistant : dossiers PUIS conversations. Les deux appels
+      // sont indépendants (la liste des conversations refait sa propre lecture
+      // des projets dans le bridge), mais le nom des dossiers est nécessaire
+      // pour grouper la liste, et le dossier par défaut « Général » doit
+      // exister avant la première conversation.
+      chargerDossiers().catch(() => {});
+      axListConversations().then(fusionnerListe).catch(() => {});
       axBalance().then((b) => setAxBal(b.available)).catch(() => {});
       axMe().then((u) => {
         const nm = u.full_name || u.email;
@@ -6353,6 +6956,231 @@ function App() {
         messageId: m.id,
       });
 
+  /* `ConversationOut` → forme de la liste. Les trois champs de la Task 3
+     (`project_id`, `pinned_at`, `archived_at`) sont conservés : ils décident du
+     groupe d'accueil, de la section « Épinglées » et de la section
+     « Archivées ». */
+  const mapConversation = (c) => ({
+    id: c.id,
+    title: c.title || 'Conversation',
+    lastUpdated: c.last_message_at ? depuisLabel(c.last_message_at, window.AXIAL_LANG) : '',
+    projectId: c.project_id || null,
+    pinnedAt: c.pinned_at || null,
+    archivedAt: c.archived_at || null,
+    loaded: false,
+    messages: [],
+  });
+
+  /* Fusion d'une liste reçue du backend dans l'état : les MÉTADONNÉES sont
+     rafraîchies sur les fils déjà connus (titre, dossier, épingle, archive),
+     `messages` / `loaded` / `hasMore` ne sont JAMAIS touchés — un fil ouvert,
+     voire en cours de flux, ne doit pas être vidé par un rechargement de la
+     liste. C'est aussi ce qui rend la fonction réutilisable pour le second
+     appel, celui des archives. */
+  const fusionnerListe = (list) => setConversations((cs) => {
+    const restants = new Map((list || []).map((c) => [c.id, c]));
+    const majs = cs.map((c) => {
+      const r = restants.get(c.id);
+      if (!r) return c;
+      restants.delete(c.id);
+      return {
+        ...c,
+        title: r.title || c.title,
+        lastUpdated: r.last_message_at ? depuisLabel(r.last_message_at, window.AXIAL_LANG) : c.lastUpdated,
+        projectId: r.project_id || null,
+        pinnedAt: r.pinned_at || null,
+        archivedAt: r.archived_at || null,
+      };
+    });
+    return [...majs, ...Array.from(restants.values()).map(mapConversation)];
+  });
+
+  /* Dossiers, archivés compris. `axProjetParDefaut()` crée « Général » quand le
+     compte n'a encore aucun dossier : sans lui, la liste s'afficherait sans le
+     moindre groupe et « Déplacer vers… » serait vide. */
+  const chargerDossiers = async () => {
+    let ps = await axProjets(true);
+    if (!ps.filter((p) => !p.archived_at).length) {
+      await axProjetParDefaut();
+      ps = await axProjets(true);
+    }
+    setProjets(ps);
+    return ps;
+  };
+
+  /* Dossier d'accueil des nouvelles conversations : « Général » s'il existe,
+     sinon le plus ANCIEN dossier. `GET /projects` trie par `created_at desc`
+     (service.py:49), donc le premier élément est le plus récent : s'appuyer sur
+     `projets[0]` — ce que fait `axProjetParDefaut` — ferait basculer la
+     destination des nouvelles conversations à chaque « Nouveau dossier ». */
+  const idDossierParDefaut = (() => {
+    const actifs = (projets || []).filter((p) => !p.archived_at);
+    if (!actifs.length) return null;
+    const general = actifs.find((p) => p.name === 'Général');
+    return (general || actifs[actifs.length - 1]).id;
+  })();
+
+  /* ---- Gestion de la liste (§4) ----------------------------------------
+     Motif commun : mise à jour OPTIMISTE de l'état, appel API, retour en
+     arrière sur échec + carte d'erreur nommée. L'optimisme est ici le bon
+     choix : ces cinq actions sont instantanées à l'œil et l'attente d'un
+     aller-retour ferait clignoter la liste à chaque clic. Le retour en arrière
+     ne restaure QUE les clés du patch, jamais l'objet entier — le fil peut
+     avoir reçu des messages entre-temps. */
+  /* Échec d'une action de gestion. Une session expirée ne doit pas se lire
+     « reconnectez-vous » dans une carte sans suite : c'est `sessionExpiree()`
+     qui reconnecte, exactement comme pour un envoi raté (`poserErreur`). */
+  const poserErreurListe = (e) => {
+    const erreur = decrireErreur(e, t);
+    if (erreur.action === 'reconnexion') { sessionExpiree(); return; }
+    setErreurListe(erreur);
+  };
+  const majConv = (id, patch) => setConversations(
+    (cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+
+  const muterConversation = async (id, patch, appel) => {
+    const avant = conversations.find((c) => c.id === id);
+    if (!avant) return;
+    const retour = {};
+    Object.keys(patch).forEach((k) => { retour[k] = avant[k]; });
+    setErreurListe(null);
+    majConv(id, patch);
+    try { await appel(); } catch (e) { majConv(id, retour); poserErreurListe(e); }
+  };
+
+  const maintenantISO = () => new Date().toISOString();
+
+  const renommerConversation = (id, titre) => muterConversation(
+    id, { title: titre }, () => axRenommerConversation(id, titre));
+  const epinglerConversation = (id, epingle) => muterConversation(
+    id, { pinnedAt: epingle ? maintenantISO() : null },
+    () => axEpinglerConversation(id, epingle));
+  const archiverConversation = (id, archive) => muterConversation(
+    id, { archivedAt: archive ? maintenantISO() : null },
+    () => axArchiverConversation(id, archive));
+  const deplacerConversation = (id, projectId) => muterConversation(
+    id, { projectId }, () => axDeplacerConversation(id, projectId));
+
+  /* Suppression : l'élément est retiré de la liste et RÉINSÉRÉ À SA PLACE si
+     l'API refuse. On ne restaure pas le tableau d'avant : il serait périmé (un
+     autre fil peut avoir reçu des messages pendant l'aller-retour). */
+  const supprimerConversation = async (id) => {
+    const idx = conversations.findIndex((c) => c.id === id);
+    if (idx < 0) return;
+    const item = conversations[idx];
+    setErreurListe(null);
+    setConversations((cs) => cs.filter((c) => c.id !== id));
+    // L'effet de purge (registres indexés par fil) suit la disparition du fil.
+    if (activeId === id) setActiveId(null);
+    try {
+      await axSupprimerConversation(id);
+    } catch (e) {
+      setConversations((cs) => {
+        if (cs.some((c) => c.id === id)) return cs;
+        const suivant = [...cs];
+        suivant.splice(Math.min(idx, suivant.length), 0, item);
+        return suivant;
+      });
+      poserErreurListe(e);
+    }
+  };
+
+  /* Dossiers. La création n'est PAS optimiste : l'identifiant vient du serveur
+     et un dossier fantôme sans identifiant ne pourrait ni recevoir une
+     conversation ni être renommé. */
+  const creerDossier = async (nom) => {
+    setErreurListe(null);
+    try {
+      const p = await axCreerProjet(nom);
+      setProjets((ps) => [p, ...ps]);
+    } catch (e) { poserErreurListe(e); }
+  };
+
+  const muterDossier = async (id, patch, appel) => {
+    const avant = (projets || []).find((p) => p.id === id);
+    if (!avant) return;
+    const retour = {};
+    Object.keys(patch).forEach((k) => { retour[k] = avant[k]; });
+    setErreurListe(null);
+    setProjets((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    try {
+      await appel();
+    } catch (e) {
+      setProjets((ps) => ps.map((p) => (p.id === id ? { ...p, ...retour } : p)));
+      poserErreurListe(e);
+    }
+  };
+
+  const renommerDossier = (id, nom) => muterDossier(
+    id, { name: nom }, () => axRenommerProjet(id, nom));
+  const archiverDossier = (id, archive) => muterDossier(
+    id, { archived_at: archive ? maintenantISO() : null },
+    () => axArchiverProjet(id, archive));
+
+  /* Suppression d'un dossier : refusée par le backend (409 `projet_non_vide`)
+     s'il reste des conversations NON archivées ; celles qui sont archivées
+     partent avec lui (cascade ORM), on les retire donc aussi de l'état. */
+  const supprimerDossier = async (id) => {
+    const idx = (projets || []).findIndex((p) => p.id === id);
+    if (idx < 0) return;
+    const item = projets[idx];
+    setErreurListe(null);
+    setProjets((ps) => ps.filter((p) => p.id !== id));
+    try {
+      await axSupprimerProjet(id);
+      setConversations((cs) => cs.filter((c) => c.projectId !== id));
+    } catch (e) {
+      setProjets((ps) => {
+        if (ps.some((p) => p.id === id)) return ps;
+        const suivant = [...ps];
+        suivant.splice(Math.min(idx, suivant.length), 0, item);
+        return suivant;
+      });
+      poserErreurListe(e);
+    }
+  };
+
+  // Première ouverture de « Archivées » : un seul appel, gardé par un `ref`
+  // (comme `chargementsEnVol`) pour que deux clics rapides n'en fassent pas deux.
+  const chargerArchives = async () => {
+    if (archivesChargees || archivesEnVol.current) return;
+    archivesEnVol.current = true;
+    try {
+      const list = await axListConversations({ inclureArchivees: true });
+      fusionnerListe(list);
+      setArchivesChargees(true);
+    } catch (e) {
+      poserErreurListe(e);
+    } finally { archivesEnVol.current = false; }
+  };
+
+  const confirmerSuppression = () => {
+    const c = confirmation;
+    setConfirmation(null);
+    if (!c) return;
+    if (c.kind === 'conv') supprimerConversation(c.id);
+    else supprimerDossier(c.id);
+  };
+
+  const gestion = {
+    archivesChargees,
+    chargerArchives,
+    renommer: renommerConversation,
+    epingler: epinglerConversation,
+    archiver: archiverConversation,
+    deplacer: deplacerConversation,
+    demanderSuppression: (c) => setConfirmation({
+      kind: 'conv', id: c.id, titre: t('conv.suppr.titre'), detail: t('conv.suppr.detail'),
+    }),
+    creerDossier,
+    renommerDossier,
+    archiverDossier,
+    demanderSuppressionDossier: (p) => setConfirmation({
+      kind: 'dossier', id: p.id,
+      titre: t('conv.dossier.suppr.titre'), detail: t('conv.dossier.suppr.detail'),
+    }),
+  };
+
   // Historique persistant : sélection d'une conversation -> chargement paresseux
   // de ses messages depuis le backend (une seule fois).
   // La route est paginée depuis Task 2 : elle rend `{ items, has_more }`, et
@@ -6363,9 +7191,46 @@ function App() {
       .catch(() => {});
   };
 
-  const openConversation = async (id) => {
+  /* Identifiant serveur de la QUESTION qui vient d'être posée.
+     Le payload final du flux ne décrit que la réponse (`_stream_payload`,
+     service.py:1468) : la question, elle, n'a qu'un identifiant local. Or
+     « Modifier » appelle `POST …/messages/{id}/editer` avec l'identifiant de
+     la question — sans ce complément, le crayon n'apparaîtrait jamais sur un
+     message envoyé dans la session en cours, seulement après réouverture du
+     fil. La page est demandée à 2 messages (la route rend les N DERNIERS en
+     ordre chronologique, router.py:357) et on ne touche QUE `messageId`, sur
+     la dernière bulle utilisateur qui en est dépourvue ET dont le contenu
+     correspond : aucun risque pour un fil qui aurait bougé entre-temps. */
+  const completerIdQuestion = (cid) => {
+    axMessagesPage(cid, { limit: 2 }).then((page) => {
+      const question = (page.items || []).filter((m) => m.role === 'user').pop();
+      if (!question) return;
+      setConversations((cs) => cs.map((c) => {
+        if (c.id !== cid) return c;
+        const messages = [...(c.messages || [])];
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+          const m = messages[i];
+          if (m.role !== 'user' || m.messageId) continue;
+          if (String(m.content || '') !== String(question.content || '')) break;
+          messages[i] = { ...m, messageId: question.id };
+          return { ...c, messages };
+        }
+        return c;
+      }));
+    }).catch(() => {});
+  };
+
+  const openConversation = async (id, resultat) => {
     setActiveId(id);
-    const conv = conversations.find((c) => c.id === id);
+    let conv = conversations.find((c) => c.id === id);
+    if (!conv && resultat) {
+      /* Résultat de recherche pointant un fil absent de l'état (dossier chargé
+         plus tard, liste tronquée à 100). On le crée depuis les champs de
+         `RechercheOut` — `conversation_id`, `title`, `project_id` — puis on
+         charge ses messages par le chemin normal. */
+      conv = mapConversation({ id, title: resultat.title, project_id: resultat.project_id });
+      setConversations((cs) => (cs.some((c) => c.id === id) ? cs : [conv, ...cs]));
+    }
     if (!conv || conv.loaded) return;
     // `loaded` n'arrive qu'à la réponse : deux clics rapides sur un fil non
     // chargé lançaient deux `axMessagesPage`. Le registre des appels en vol
@@ -6492,10 +7357,20 @@ function App() {
     return (fin.length >= accumule.length) ? fin : accumule;
   };
 
-  // Envoi en flux : le message assistant grandit mot à mot dans la conversation.
-  // `onEvent` transmet TOUS les événements ; l'avertissement `contexte_absent`
-  // est déjà rendu par le bandeau du composer (Task 5) — pas de doublon ici.
-  const sendStreamed = async (cid, text, localId, cleIdem) => {
+  /* Consommateur de flux PARTAGÉ par les trois routes SSE : envoi
+     (`axStreamChatIn`), régénération (`axRegenerer`) et édition
+     (`axEditerMessage`). Elles rendent la même séquence d'événements — le
+     backend les fait littéralement passer par le même générateur
+     (`_reponse_sse`, Task 3) — donc dupliquer ce gestionnaire aurait dupliqué
+     le bandeau d'étapes, le verrou, le Stop, la fusion du payload final, la
+     mise à jour du solde et l'archivage du partiel.
+
+     `ouvrir(onEvent, { signal, idempotencyKey })` est le seul paramètre qui
+     change : la fonction du bridge à appeler.
+
+     `onEvent` transmet TOUS les événements ; l'avertissement `contexte_absent`
+     est déjà rendu par le bandeau du composer (Task 5) — pas de doublon ici. */
+  const consommerFlux = async (cid, localId, ouvrir, cleIdem) => {
     let acc = '';
     // Agent et citations annoncés par le flux : à conserver si le Stop tombe
     // avant le payload final (qui, lui, ne viendra jamais).
@@ -6539,7 +7414,7 @@ function App() {
     };
 
     try {
-      const final = await axStreamChatIn(cid, text, onEvent, { idempotencyKey: cleIdem, signal: ctrl.signal });
+      const final = await ouvrir(onEvent, { idempotencyKey: cleIdem, signal: ctrl.signal });
       majMessage(cid, localId, () => ({
         role: 'assistant', content: fusionnerContenu(acc, final.content), agent: final.agent || agentFlux,
         sources: mapCitations(final.citations), viz: final.viz || null, live: false,
@@ -6553,6 +7428,7 @@ function App() {
         axBalance().then((b) => setAxBal(b.available)).catch(() => {});
       }
       rafraichirCout(cid);
+      completerIdQuestion(cid);
     } catch (e) {
       // Stop demandé : ce n'est pas une erreur. La bulle garde le texte partiel
       // et porte le badge « Réponse partielle » — côté serveur le tour est
@@ -6572,6 +7448,8 @@ function App() {
         }));
         axBalance().then((b) => setAxBal(b.available)).catch(() => {});
         rafraichirCout(cid);
+        // La question a bien été archivée, elle : elle reste modifiable.
+        completerIdQuestion(cid);
         return;
       }
       throw e;
@@ -6586,6 +7464,10 @@ function App() {
       if (controleursFlux.current[cid] === ctrl) delete controleursFlux.current[cid];
     }
   };
+
+  // Envoi d'un message : le message assistant grandit mot à mot dans le fil.
+  const sendStreamed = (cid, text, localId, cleIdem) => consommerFlux(
+    cid, localId, (onEvent, opts) => axStreamChatIn(cid, text, onEvent, opts), cleIdem);
 
   // Rend `false` quand la garde de crédits se déclenche (le composer garde son
   // brouillon, la modale prend le relais), sinon la promesse de l'envoi.
@@ -6628,7 +7510,12 @@ function App() {
     const cleIdem = nouvelleCleIdempotence();
     let id;
     try {
-      id = await axCreateConversation(null, title);  // id backend réel -> l'historique persiste
+      // Dossier EXPLICITE : « Général » (ou le plus ancien). Passer `null`
+      // laisserait le bridge choisir `projets[0]`, c'est-à-dire le dossier le
+      // plus RÉCEMMENT créé — la destination changerait à chaque nouveau
+      // dossier, et le fil n'aurait pas de `project_id` connu ici, donc aucun
+      // groupe d'accueil dans la liste.
+      id = await axCreateConversation(idDossierParDefaut, title);
     } catch (e) {
       // Aucune conversation créée côté serveur : rien n'est ajouté à la
       // liste (plus de faux fil `'c-' + Date.now()`, qui pointait vers un
@@ -6642,6 +7529,7 @@ function App() {
     const idReponse = nouvelIdLocal();
     setConversations((cs) => [{
       id, title, lastUpdated: now, loaded: true, hasMore: false,
+      projectId: idDossierParDefaut || null, pinnedAt: null, archivedAt: null,
       messages: [{ role: 'user', content: text, localId: idQuestion },
                  { role: 'assistant', content: '__PENDING__', localId: idReponse }],
     }, ...cs]);
@@ -6678,6 +7566,92 @@ function App() {
     } catch (e) {
       poserErreur(cid, localId, e, m.question, m.cleIdem);
     }
+  };
+
+  /* ---- Régénérer et éditer (§4) ----------------------------------------
+     Les deux passent par `consommerFlux`, donc par le même bandeau d'étapes,
+     le même verrou de fil, le même Stop et la même fusion du payload final que
+     l'envoi. Ce qui les distingue est purement local : quels messages
+     disparaissent de l'écran avant que le flux ne reconstruise la suite.
+
+     Garde de crédits et verrou de fil sont revérifiés ici : les boutons sont
+     déjà masqués pendant un flux, mais un clic parti juste avant le verrou
+     (ou sur un solde tombé à zéro entre-temps) ne doit pas déclencher un
+     second flux sur le même fil. */
+  const peutLancerUnFlux = (cid) => {
+    if (!cid || filsEnFlux[cid]) return false;
+    if (axBal != null && axBal < CREDITS_PAR_MESSAGE) { setModaleCredits(true); return false; }
+    return true;
+  };
+
+  /* Régénérer : le backend supprime la réponse ET la question qui l'a produite,
+     puis rejoue cette question (Task 3, `preparer_regeneration`). À l'écran, on
+     retire les deux et on repose la question avec un identifiant LOCAL — son
+     identifiant serveur est caduc, et le nouveau n'est pas renvoyé. La bulle en
+     attente prend la place de la réponse. */
+  const regenererReponse = (cid, m) => {
+    if (!m || !m.messageId || !peutLancerUnFlux(cid)) return;
+    const conv = conversations.find((c) => c.id === cid);
+    if (!conv) return;
+    const idx = (conv.messages || []).findIndex((x) => x.messageId === m.messageId);
+    if (idx < 0) return;
+    const question = (idx > 0 && conv.messages[idx - 1].role === 'user')
+      ? conv.messages[idx - 1] : null;
+    const debut = question ? idx - 1 : idx;
+    const idQuestion = nouvelIdLocal();
+    const idReponse = nouvelIdLocal();
+    const cleIdem = nouvelleCleIdempotence();
+    const texteQuestion = question ? question.content : '';
+    setConversations((cs) => cs.map((c) => (c.id !== cid ? c : {
+      ...c,
+      messages: [
+        ...c.messages.slice(0, debut),
+        ...(question ? [{ role: 'user', content: question.content, localId: idQuestion }] : []),
+        { role: 'assistant', content: '__PENDING__', localId: idReponse },
+      ],
+    })));
+    (async () => {
+      try {
+        await consommerFlux(cid, idReponse,
+          (onEvent, opts) => axRegenerer(cid, m.messageId, onEvent, opts), cleIdem);
+      } catch (e) {
+        // « Réessayer » repartira par `sendStreamed` avec la même question et la
+        // même clé d'idempotence : côté serveur le tour d'origine a été
+        // supprimé, le renvoyer est exactement la bonne reprise.
+        poserErreur(cid, idReponse, e, texteQuestion, cleIdem);
+      }
+    })();
+  };
+
+  /* Éditer : le backend supprime ce message et TOUT ce qui suit, puis rejoue le
+     nouveau contenu. À l'écran, on tronque le fil à cet index et on repose la
+     question éditée (identifiant local) + la bulle en attente. */
+  const editerMessage = (cid, m, contenu) => {
+    const texte = String(contenu || '').trim();
+    if (!m || !m.messageId || !texte || !peutLancerUnFlux(cid)) return;
+    const conv = conversations.find((c) => c.id === cid);
+    if (!conv) return;
+    const idx = (conv.messages || []).findIndex((x) => x.messageId === m.messageId);
+    if (idx < 0) return;
+    const idQuestion = nouvelIdLocal();
+    const idReponse = nouvelIdLocal();
+    const cleIdem = nouvelleCleIdempotence();
+    setConversations((cs) => cs.map((c) => (c.id !== cid ? c : {
+      ...c,
+      messages: [
+        ...c.messages.slice(0, idx),
+        { role: 'user', content: texte, localId: idQuestion },
+        { role: 'assistant', content: '__PENDING__', localId: idReponse },
+      ],
+    })));
+    (async () => {
+      try {
+        await consommerFlux(cid, idReponse,
+          (onEvent, opts) => axEditerMessage(cid, m.messageId, texte, onEvent, opts), cleIdem);
+      } catch (e) {
+        poserErreur(cid, idReponse, e, texte, cleIdem);
+      }
+    })();
   };
 
   /* ---- Render top-level routes ---- */
@@ -6834,6 +7808,12 @@ function App() {
             onStop={arreterFlux}
             onAgentChange={noterChangementAgent}
             onChargerPrecedents={chargerMessagesPrecedents}
+            projets={projets}
+            gestion={gestion}
+            erreurListe={erreurListe}
+            onFermerErreurListe={() => setErreurListe(null)}
+            onRegenerer={regenererReponse}
+            onEditerMessage={editerMessage}
             showCitePanelFor={showCitePanelFor}
             setShowCitePanelFor={setShowCitePanelFor}
           />
@@ -6877,6 +7857,15 @@ function App() {
         {subRoute === 'docs' && <DocsSurface />}
         {subRoute === 'settings' && <SettingsSurface />}
       </AppShell>
+
+      {confirmation && (
+        <ModaleConfirmation
+          titre={confirmation.titre}
+          detail={confirmation.detail}
+          onConfirmer={confirmerSuppression}
+          onAnnuler={() => setConfirmation(null)}
+        />
+      )}
 
       {modaleCredits && (
         <ModaleCredits
