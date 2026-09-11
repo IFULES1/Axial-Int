@@ -3127,6 +3127,13 @@ html[data-theme="light"] .sidebar {
    régénérer et éditer (Task 8)
    ============================================================ */
 
+/* Teintes de survol : `rgba(121,118,247,0.06-0.10)` reste écrit en dur ici,
+   comme dans tout le fichier (`.icon-btn:hover`, `.conv-item:hover`, …). Aucun
+   jeton ne porte le violet de marque à faible opacité : `--v-glow` est à 0.30
+   et `--border-*` à 0.15-0.55, tous trop marqués pour un survol. Idem pour
+   `rgba(229,72,77,0.12)` (survol d'une action destructrice) : il n'existe pas
+   de variante translucide de `--error`. */
+
 /* Listes du panneau : le <ul> nu portait ses styles en `style={{…}}` sur
    chaque instance ; il y en a maintenant une par dossier. */
 .ax-liste { list-style: none; padding: 0; margin: 0 0 6px; display: flex; flex-direction: column; gap: 2px; }
@@ -3160,9 +3167,11 @@ html[data-theme="light"] .sidebar {
   position: absolute; right: 0; top: 26px; z-index: 20;
   min-width: 180px;
   padding: 4px;
-  border: 1px solid var(--border-strong, var(--border));
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
-  background: var(--surface-2, #1a1a22);
+  background: var(--surface-2);
+  /* Ombre en dur : le fichier n'a aucun jeton d'ombre (toutes les ombres y
+     sont écrites à la main). */
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.38);
   display: flex; flex-direction: column; gap: 1px;
 }
@@ -3176,7 +3185,7 @@ html[data-theme="light"] .sidebar {
   cursor: pointer;
 }
 .ax-menu-item:hover { background: rgba(121, 118, 247, 0.10); color: var(--fg); }
-.ax-menu-item.danger { color: var(--error, #e5484d); }
+.ax-menu-item.danger { color: var(--error); }
 .ax-menu-item.danger:hover { background: rgba(229, 72, 77, 0.12); }
 .ax-menu-sous { padding-left: 10px; display: flex; flex-direction: column; gap: 1px; }
 .ax-menu-vide { padding: 6px 9px; color: var(--fg-3); font-size: 12px; }
@@ -3203,8 +3212,8 @@ html[data-theme="light"] .sidebar {
 /* Renommage inline (conversation, dossier) et création d'un dossier. */
 .ax-renommer {
   width: 100%;
-  background: var(--surface-2, #1a1a22);
-  border: 1px solid var(--border-active, var(--border));
+  background: var(--surface-2);
+  border: 1px solid var(--border-active);
   border-radius: 6px;
   color: var(--fg);
   font: inherit; font-size: 13px;
@@ -3231,7 +3240,9 @@ html[data-theme="light"] .sidebar {
   white-space: normal;
 }
 .ax-resultat-extrait mark {
-  background: rgba(121, 118, 247, 0.24);
+  /* Jeton de marque, pas un violet recopié : `--v-glow` EST le violet de
+     marque à faible opacité, exactement ce que doit être un surlignage. */
+  background: var(--v-glow);
   color: var(--fg);
   border-radius: 3px;
   padding: 0 1px;
@@ -3241,8 +3252,10 @@ html[data-theme="light"] .sidebar {
 .ax-erreur-liste { margin-bottom: 12px; }
 
 /* Confirmation de suppression : le bouton principal doit dire qu'il détruit. */
-.ax-bouton-danger { background: var(--error, #e5484d); border-color: var(--error, #e5484d); }
-.ax-bouton-danger:hover { background: #ef5f63; }
+.ax-bouton-danger { background: var(--error); border-color: var(--error); }
+/* Éclaircissement au survol par `filter` (comme `.credits-bar:hover`) : plus de
+   rouge en dur, aucun jeton ne portant une variante claire de `--error`. */
+.ax-bouton-danger:hover { filter: brightness(1.12); }
 
 /* Crayon d'édition d'une bulle utilisateur : révélé au survol de la ligne.
    `.msg-user-wrap` est déjà en `justify-content: flex-end` (ligne 1234) : le
@@ -3267,8 +3280,8 @@ html[data-theme="light"] .sidebar {
   width: 100%;
   min-height: 72px;
   resize: vertical;
-  background: var(--surface-2, #1a1a22);
-  border: 1px solid var(--border-active, var(--border));
+  background: var(--surface-2);
+  border: 1px solid var(--border-active);
   border-radius: 10px;
   color: var(--fg);
   font: inherit; font-size: 13.5px; line-height: 1.5;

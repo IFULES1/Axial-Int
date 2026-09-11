@@ -349,6 +349,7 @@ const STRINGS = {
     'conv.charger_precedents': 'Charger les messages précédents',
     'conv.chargement': 'Chargement du fil…',
     'conv.stop.aide': 'Arrêter la réponse en cours',
+    'conv.verrou.aide': 'Une réponse est en cours sur cette conversation : patientez avant de renvoyer.',
     'conv.agent_change': 'Agent changé : ',
     // Accord du pluriel : « 1 crédit » / « 0 crédits », « 2 crédits ». Un
     // message `partiel` rechargé affiche `credits: 0`, d'où le besoin.
@@ -379,6 +380,7 @@ const STRINGS = {
     'err.action.credits': 'Voir les crédits',
     'err.action.reconnexion': 'Se reconnecter',
     'err.action.reessayer': 'Réessayer',
+    'err.action.rouvrir': 'Rouvrir la conversation',
     'err.credits.titre': 'Plus de crédits disponibles',
     'err.credits.detail': 'Votre solde ne couvre pas cette question (2 crédits).',
     'err.session.titre': 'Session expirée',
@@ -652,6 +654,7 @@ const STRINGS = {
     'conv.charger_precedents': 'Load earlier messages',
     'conv.chargement': 'Loading the thread…',
     'conv.stop.aide': 'Stop the answer in progress',
+    'conv.verrou.aide': 'An answer is in progress in this conversation: please wait before resending.',
     'conv.agent_change': 'Agent switched: ',
     'conv.credits.one': 'credit',
     'conv.credits.other': 'credits',
@@ -677,6 +680,7 @@ const STRINGS = {
     'err.action.credits': 'See credits',
     'err.action.reconnexion': 'Sign in again',
     'err.action.reessayer': 'Try again',
+    'err.action.rouvrir': 'Reopen the conversation',
     'err.credits.titre': 'No credits left',
     'err.credits.detail': 'Your balance does not cover this question (2 credits).',
     'err.session.titre': 'Session expired',
@@ -2460,7 +2464,10 @@ function decrireErreur(e, t) {
   // l'utilisateur — d'où « Rechargez le fil » plutôt que « Réessayer ».
   if (code === 'pas_le_dernier_message' || code === 'question_introuvable'
       || code === 'pas_une_reponse' || code === 'pas_un_message_utilisateur') {
-    return { titre: t('err.regen_impossible.titre'), detail: t('err.regen_impossible.detail'), action: null };
+    // `rouvrir` recharge VRAIMENT la première page du fil
+    // (`openConversation(..., { force: true })`) : le conseil « Rouvrez la
+    // conversation » était auparavant sans bouton, donc inopérant.
+    return { titre: t('err.regen_impossible.titre'), detail: t('err.regen_impossible.detail'), action: 'rouvrir' };
   }
   // `axRegenerer`/`axEditerMessage` n'ont pas de repli bloquant (contrairement
   // à `axStreamChatIn`) : bridge.js nomme l'indisponibilité du flux plutôt que
@@ -2523,6 +2530,7 @@ function CarteErreur({ erreur, onAction }) {
     credits: t('err.action.credits'),
     reconnexion: t('err.action.reconnexion'),
     reessayer: t('err.action.reessayer'),
+    rouvrir: t('err.action.rouvrir'),
   }[erreur.action];
   return (
     <div className="msg-ai-wrap">
@@ -2671,7 +2679,12 @@ function MenuConversation({ ouvert, onBasculer, actions, aide }) {
   React.useEffect(() => { if (!ouvert) setSousOuvert(null); }, [ouvert]);
   return (
     <div className="ax-menu-conteneur">
+      {/* `data-ax-menu` marque CE bouton pour la fermeture au clic extérieur :
+          l'écouteur `mousedown` du document fermait le menu avant que le
+          `click` du déclencheur ne parte, donc le même bouton ne pouvait
+          jamais refermer son propre menu. */}
       <button className="ax-menu-declencheur" title={aide} aria-label={aide}
+        data-ax-menu="1"
         aria-expanded={!!ouvert} aria-haspopup="menu"
         onClick={(e) => { e.stopPropagation(); onBasculer(); }}>
         <Icon name="dots" size={14} />
@@ -2788,7 +2801,14 @@ function ConvListPanel({
   // Fermeture du menu ⋯ au clic extérieur et à Échap.
   React.useEffect(() => {
     if (!menuOuvert) return undefined;
-    const fermer = () => setMenuOuvert(null);
+    /* Un `mousedown` SUR un déclencheur ⋯ est ignoré : c'est son propre
+       `onClick` qui bascule le menu (fermer ici, puis rouvrir là, laissait le
+       menu toujours ouvert et rendait le bouton incapable de le refermer). */
+    const fermer = (e) => {
+      const cible = e.target;
+      if (cible && cible.closest && cible.closest('[data-ax-menu]')) return;
+      setMenuOuvert(null);
+    };
     const surTouche = (e) => { if (e.key === 'Escape') setMenuOuvert(null); };
     document.addEventListener('mousedown', fermer);
     document.addEventListener('keydown', surTouche);
@@ -2832,16 +2852,30 @@ function ConvListPanel({
       }} />
   );
 
+  /* Création d'un dossier : MÊME garde `annuleRef` que le renommage. Échap
+     démonte le champ, et le navigateur est libre d'émettre un `blur` sur ce
+     démontage — sans la garde, Échap créait quand même le dossier. */
+  const ouvrirNouveauDossier = () => { annuleRef.current = false; setNouveauDossier(''); };
+  const annulerNouveauDossier = () => { annuleRef.current = true; setNouveauDossier(null); };
   const creerDossier = () => {
     const nom = (nouveauDossier || '').trim();
     setNouveauDossier(null);
     if (nom) onCreerDossier(nom);
   };
+  const creerDossierAuBlur = () => {
+    if (annuleRef.current) { annuleRef.current = false; return; }
+    creerDossier();
+  };
 
   const dossiersActifs = (projets || []).filter((p) => !p.archived_at);
   const dossiersArchives = (projets || []).filter((p) => !!p.archived_at);
+  // Le filtre local est construit UNE fois par rendu, et « Archivées » n'est
+  // filtrée qu'une fois (la liste était parcourue trois fois : le test de
+  // présence, puis le rendu).
+  const filtre = filtreLocal(q);
   const epinglees = conversations.filter((c) => c.pinnedAt && !c.archivedAt);
   const archivees = conversations.filter((c) => c.archivedAt);
+  const archiveesVisibles = archivees.filter(filtre);
   /* Filet de sécurité : un fil dont le dossier n'est PAS dans `projets` (liste
      des dossiers pas encore revenue, fil ouvert depuis un résultat de
      recherche) n'appartient à aucun groupe et serait invisible. Il est rendu à
@@ -2926,7 +2960,7 @@ function ConvListPanel({
       </button>
       {nouveauDossier == null ? (
         <button className="sidebar-newconv ax-nouveau-dossier"
-          onClick={() => setNouveauDossier('')}>
+          onClick={ouvrirNouveauDossier}>
           <Icon name="folder" size={14} /> {t('conv.dossier.nouveau')}
         </button>
       ) : (
@@ -2936,9 +2970,9 @@ function ConvListPanel({
           onChange={(e) => setNouveauDossier(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') { e.preventDefault(); creerDossier(); }
-            else if (e.key === 'Escape') { e.preventDefault(); setNouveauDossier(null); }
+            else if (e.key === 'Escape') { e.preventDefault(); annulerNouveauDossier(); }
           }}
-          onBlur={creerDossier} />
+          onBlur={creerDossierAuBlur} />
       )}
 
       {recherche ? (
@@ -2978,7 +3012,7 @@ function ConvListPanel({
           {epinglees.length > 0 && (
             <>
               <div className="sidebar-section-label">{t('conv.section.epinglees')}</div>
-              <ul className="ax-liste">{epinglees.filter(filtreLocal(q)).map(ligne)}</ul>
+              <ul className="ax-liste">{epinglees.filter(filtre).map(ligne)}</ul>
             </>
           )}
 
@@ -2989,13 +3023,13 @@ function ConvListPanel({
           {sansDossier.length > 0 && (
             <>
               <div className="sidebar-section-label">{t('nav.recent')}</div>
-              <ul className="ax-liste">{sansDossier.filter(filtreLocal(q)).map(ligne)}</ul>
+              <ul className="ax-liste">{sansDossier.filter(filtre).map(ligne)}</ul>
             </>
           )}
           {dossiersActifs.map((p) => {
             const dedans = conversations.filter(
               (c) => c.projectId === p.id && !c.archivedAt && !c.pinnedAt);
-            const visibles = dedans.filter(filtreLocal(q));
+            const visibles = dedans.filter(filtre);
             const enRenommage = renommage && renommage.kind === 'dossier' && renommage.id === p.id;
             const cleMenu = 'dossier:' + p.id;
             return (
@@ -3039,8 +3073,8 @@ function ConvListPanel({
               setArchivesOuvertes(ouvrir);
               if (ouvrir && !archivesChargees) onOuvrirArchives();
             }}>
-            {archivees.filter(filtreLocal(q)).length
-              ? <ul className="ax-liste">{archivees.filter(filtreLocal(q)).map(ligne)}</ul>
+            {archiveesVisibles.length
+              ? <ul className="ax-liste">{archiveesVisibles.map(ligne)}</ul>
               : <div className="caption ax-liste-vide">
                   {archivesChargees ? t('conv.none') : t('conv.chargement')}
                 </div>}
@@ -3308,8 +3342,14 @@ function ConvThread({ conversation, onSend, openCite, profil,
                 // flux n'est pas remontée à la fin du flux ; `messageId` pour
                 // les messages venus du backend, qui n'ont pas de `localId`.
                 m.role === 'user'
+                  // `onEditer` ne devient PAS `null` pendant un flux : un
+                  // textarea déjà ouvert gardait son bouton « Renvoyer »
+                  // actif et le clic appelait `null(...)`. C'est
+                  // `verrouille` qui grise le bouton (et masque le crayon)
+                  // le temps du flux ; l'édition en cours survit.
                   ? <UserMsg key={m.localId || m.messageId || `i-${i}`} text={m.content}
-                      onEditer={(!enFlux && m.messageId)
+                      verrouille={enFlux}
+                      onEditer={m.messageId
                         ? ((contenu) => onEditerMessage(m, contenu)) : null} />
                   : m.role === 'system'
                     ? <NoteSysteme key={m.localId || m.messageId || `i-${i}`} text={m.content} />
@@ -3356,7 +3396,7 @@ function ConvThread({ conversation, onSend, openCite, profil,
    supprime ce message et tout ce qui suit (côté serveur comme à l'écran) puis
    relance le flux : c'est destructif, d'où un bouton explicite et jamais un
    enregistrement au `blur`. */
-function UserMsg({ text, onEditer }) {
+function UserMsg({ text, onEditer, verrouille }) {
   const t = window.useT();
   const [edition, setEdition] = React.useState(null);
 
@@ -3369,9 +3409,18 @@ function UserMsg({ text, onEditer }) {
           onChange={(e) => setEdition(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); setEdition(null); } }} />
         <div className="ax-edition-actions">
+          {/* « Renvoyer » est grisé tant que le fil est verrouillé (un flux
+              tourne) et l'appel est gardé : l'édition ouverte survit au flux
+              au lieu de lever une TypeError sur un gestionnaire absent. */}
           <button className="btn btn-primary btn-sm"
-            disabled={!propre || propre === String(text || '').trim()}
-            onClick={() => { setEdition(null); onEditer(propre); }}>
+            disabled={!propre || propre === String(text || '').trim()
+              || !!verrouille || !onEditer}
+            title={verrouille ? t('conv.verrou.aide') : undefined}
+            onClick={() => {
+              if (!onEditer || verrouille) return;
+              setEdition(null);
+              onEditer(propre);
+            }}>
             <Icon name="send" size={12} /> {t('conv.editer.renvoyer')}
           </button>
           <button className="btn btn-ghost btn-sm" onClick={() => setEdition(null)}>
@@ -3385,7 +3434,7 @@ function UserMsg({ text, onEditer }) {
   return (
     <div className="msg-user-wrap">
       <div className="msg-user">{text}</div>
-      {onEditer && (
+      {onEditer && !verrouille && (
         <button className="ax-editer" title={t('conv.editer.aide')} aria-label={t('conv.editer')}
           onClick={() => setEdition(String(text == null ? '' : text))}>
           <Icon name="edit" size={12} />
@@ -6700,6 +6749,12 @@ function App() {
   // Appels `axMessagesPage` en vol, par identifiant de fil : garde contre un
   // double chargement sur double clic (voir `openConversation`).
   const chargementsEnVol = useConvRef({});
+  /* Identifiants des fils encore présents dans `conversations`, tenus à jour
+     par l'effet de purge ci-dessous. Un `ref` : les rappels asynchrones d'un
+     flux (`completerIdQuestion`) doivent savoir si le fil a disparu entre
+     temps sans dépendre de la closure du rendu où ils ont été créés.
+     `null` = pas encore calculé (on ne saute alors aucune mise à jour). */
+  const filsVivants = useConvRef(null);
   /* Dossiers (projets) — citoyens de première classe depuis la Task 8 : la
      liste est GROUPÉE par dossier. On charge les archivés aussi
      (`inclure_archives=true`) : sans leur nom, une conversation logée dans un
@@ -6728,6 +6783,7 @@ function App() {
   const idsFils = conversations.map((c) => c.id).join('|');
   React.useEffect(() => {
     const vivants = new Set(conversations.map((c) => c.id));
+    filsVivants.current = vivants;
     const purger = (registre) => {
       const morts = Object.keys(registre).filter((k) => !vivants.has(k));
       if (!morts.length) return registre;
@@ -7038,14 +7094,26 @@ function App() {
   const majConv = (id, patch) => setConversations(
     (cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
 
+  /* L'instantané de retour en arrière est pris DANS la mise à jour
+     fonctionnelle, jamais dans la closure de rendu : deux mutations du même
+     fil dans le même tick (deux clics rapides) auraient sinon restauré la
+     valeur d'AVANT la première mutation, c'est-à-dire une valeur périmée. */
   const muterConversation = async (id, patch, appel) => {
-    const avant = conversations.find((c) => c.id === id);
-    if (!avant) return;
-    const retour = {};
-    Object.keys(patch).forEach((k) => { retour[k] = avant[k]; });
+    if (!conversations.some((c) => c.id === id)) return;
+    const cles = Object.keys(patch);
+    let retour = null;
     setErreurListe(null);
-    majConv(id, patch);
-    try { await appel(); } catch (e) { majConv(id, retour); poserErreurListe(e); }
+    setConversations((cs) => {
+      const avant = cs.find((c) => c.id === id);
+      if (!avant) return cs;
+      retour = {};
+      cles.forEach((k) => { retour[k] = avant[k]; });
+      return cs.map((c) => (c.id === id ? { ...c, ...patch } : c));
+    });
+    try { await appel(); } catch (e) {
+      if (retour) majConv(id, retour);
+      poserErreurListe(e);
+    }
   };
 
   const maintenantISO = () => new Date().toISOString();
@@ -7096,17 +7164,23 @@ function App() {
     } catch (e) { poserErreurListe(e); }
   };
 
+  // Même instantané fonctionnel que `muterConversation`.
   const muterDossier = async (id, patch, appel) => {
-    const avant = (projets || []).find((p) => p.id === id);
-    if (!avant) return;
-    const retour = {};
-    Object.keys(patch).forEach((k) => { retour[k] = avant[k]; });
+    if (!(projets || []).some((p) => p.id === id)) return;
+    const cles = Object.keys(patch);
+    let retour = null;
     setErreurListe(null);
-    setProjets((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    setProjets((ps) => {
+      const avant = ps.find((p) => p.id === id);
+      if (!avant) return ps;
+      retour = {};
+      cles.forEach((k) => { retour[k] = avant[k]; });
+      return ps.map((p) => (p.id === id ? { ...p, ...patch } : p));
+    });
     try {
       await appel();
     } catch (e) {
-      setProjets((ps) => ps.map((p) => (p.id === id ? { ...p, ...retour } : p)));
+      if (retour) setProjets((ps) => ps.map((p) => (p.id === id ? { ...p, ...retour } : p)));
       poserErreurListe(e);
     }
   };
@@ -7202,9 +7276,16 @@ function App() {
      la dernière bulle utilisateur qui en est dépourvue ET dont le contenu
      correspond : aucun risque pour un fil qui aurait bougé entre-temps. */
   const completerIdQuestion = (cid) => {
+    // Fil supprimé entre le `done` et ici : aucun appel. Sans ce garde, le
+    // complément partait en `GET` sur un fil effacé (404, muet mais inutile).
+    const vivantsAvant = filsVivants.current;
+    if (vivantsAvant && !vivantsAvant.has(cid)) return;
     axMessagesPage(cid, { limit: 2 }).then((page) => {
       const question = (page.items || []).filter((m) => m.role === 'user').pop();
       if (!question) return;
+      // Le fil peut avoir disparu PENDANT l'aller-retour.
+      const vivants = filsVivants.current;
+      if (vivants && !vivants.has(cid)) return;
       setConversations((cs) => cs.map((c) => {
         if (c.id !== cid) return c;
         const messages = [...(c.messages || [])];
@@ -7220,7 +7301,14 @@ function App() {
     }).catch(() => {});
   };
 
-  const openConversation = async (id, resultat) => {
+  /* `options.force` : recharge la PREMIÈRE page même si le fil est déjà
+     `loaded`. C'est ce dont a besoin « Rouvrir la conversation » de la carte
+     d'erreur — sans ça, le conseil restait un vœu, la fonction sortant tôt sur
+     `conv.loaded` et le fil restant dans l'état où l'échec l'a laissé. Le
+     `hasMore` et les messages sont repris du serveur : on repart de son état
+     réel, ce que le message d'erreur promet. */
+  const openConversation = async (id, resultat, options) => {
+    const force = !!(options && options.force);
     setActiveId(id);
     let conv = conversations.find((c) => c.id === id);
     if (!conv && resultat) {
@@ -7231,7 +7319,7 @@ function App() {
       conv = mapConversation({ id, title: resultat.title, project_id: resultat.project_id });
       setConversations((cs) => (cs.some((c) => c.id === id) ? cs : [conv, ...cs]));
     }
-    if (!conv || conv.loaded) return;
+    if (!conv || (conv.loaded && !force)) return;
     // `loaded` n'arrive qu'à la réponse : deux clics rapides sur un fil non
     // chargé lançaient deux `axMessagesPage`. Le registre des appels en vol
     // (un `ref`, pas un state : la garde doit valoir sans attendre un rendu)
@@ -7340,6 +7428,28 @@ function App() {
     majMessage(cid, localId, () => ({ role: 'assistant', erreur, question, cleIdem }));
   };
 
+  /* Échec d'une régénération / édition AVANT le premier événement : le backend
+     a refusé (400, 402, 409) ou le réseau a coupé, et il n'a donc RIEN
+     supprimé. Le fil est intact et il n'y a aucune bulle en attente à
+     remplacer : la carte est AJOUTÉE en fin de fil.
+     `reessayer` est retiré de l'action : ce bouton rejoue un envoi normal, ce
+     qui ajouterait une réponse sans sa question. Le bouton « Régénérer » (ou
+     le crayon) est toujours là, à sa place, pour refaire le geste. */
+  const ajouterCarteErreur = (cid, e, question, cleIdem) => {
+    const decrite = decrireErreur(e, t);
+    if (decrite.action === 'reconnexion') { sessionExpiree(); return; }
+    if (decrite.action === 'credits') {
+      setModaleCredits(true);
+      axBalance().then((b) => setAxBal(b.available)).catch(() => {});
+    }
+    const erreur = (decrite.action === 'reessayer') ? { ...decrite, action: null } : decrite;
+    const localId = nouvelIdLocal();
+    setConversations((cs) => cs.map((c) => (c.id !== cid ? c : {
+      ...c,
+      messages: [...(c.messages || []), { role: 'assistant', erreur, question, cleIdem, localId }],
+    })));
+  };
+
   /* Le texte affiché ne rétrécit JAMAIS. Le payload final ne fait que compléter
      le texte accumulé par les `delta` :
        - payload sans texte (repli, coupure) → on garde l'accumulé ;
@@ -7370,7 +7480,12 @@ function App() {
 
      `onEvent` transmet TOUS les événements ; l'avertissement `contexte_absent`
      est déjà rendu par le bandeau du composer (Task 5) — pas de doublon ici. */
-  const consommerFlux = async (cid, localId, ouvrir, cleIdem) => {
+  /* `surPremierEvenement` (facultatif) est appelé UNE fois, au premier
+     événement reçu quel qu'il soit (`etape`, `sources`, `delta`, `done`) :
+     c'est le signal que le backend a accepté la demande. Régénérer et éditer
+     s'en servent pour ne tronquer le fil qu'à ce moment-là — un refus (400,
+     402, 409, panne réseau) arrive AVANT et laisse donc l'écran intact. */
+  const consommerFlux = async (cid, localId, ouvrir, cleIdem, surPremierEvenement) => {
     let acc = '';
     // Agent et citations annoncés par le flux : à conserver si le Stop tombe
     // avant le payload final (qui, lui, ne viendra jamais).
@@ -7391,7 +7506,12 @@ function App() {
     });
     poserEtape('attente', null);
 
+    let premierRecu = false;
     const onEvent = (evt) => {
+      if (!premierRecu) {
+        premierRecu = true;
+        if (surPremierEvenement) surPremierEvenement();
+      }
       if (evt.step === 'etape') {
         poserEtape(evt.etape, (evt.detail && evt.detail.nombre));
       } else if (evt.step === 'sources') {
@@ -7415,6 +7535,12 @@ function App() {
 
     try {
       const final = await ouvrir(onEvent, { idempotencyKey: cleIdem, signal: ctrl.signal });
+      // Réponse arrivée sans aucun événement (repli bloquant) : la bulle en
+      // attente doit exister avant qu'on n'écrive dedans.
+      if (!premierRecu) {
+        premierRecu = true;
+        if (surPremierEvenement) surPremierEvenement();
+      }
       majMessage(cid, localId, () => ({
         role: 'assistant', content: fusionnerContenu(acc, final.content), agent: final.agent || agentFlux,
         sources: mapCitations(final.citations), viz: final.viz || null, live: false,
@@ -7555,6 +7681,10 @@ function App() {
     const action = m.erreur && m.erreur.action;
     if (action === 'credits') { setModaleCredits(true); return; }
     if (action === 'reconnexion') { sessionExpiree(); return; }
+    // « Rouvrir la conversation » : rechargement FORCÉ de la première page. Le
+    // fil affiché a été amputé par une régénération / édition que le backend a
+    // menée puis interrompue ; seul le serveur sait ce qu'il en reste.
+    if (action === 'rouvrir') { openConversation(cid, null, { force: true }); return; }
     if (action !== 'reessayer') return;
     // La carte d'erreur porte le `localId` de la bulle qu'elle a remplacée :
     // « Réessayer » réécrit la MÊME entrée, sans jamais tronquer le fil.
@@ -7588,7 +7718,13 @@ function App() {
      puis rejoue cette question (Task 3, `preparer_regeneration`). À l'écran, on
      retire les deux et on repose la question avec un identifiant LOCAL — son
      identifiant serveur est caduc, et le nouveau n'est pas renvoyé. La bulle en
-     attente prend la place de la réponse. */
+     attente prend la place de la réponse.
+
+     ORDRE, et c'est tout l'enjeu : verrou du fil → ouverture du flux → et la
+     troncature SEULEMENT au premier événement reçu. Tronquer avant l'accord du
+     backend amputait le fil pour rien sur un 400 / 402 / 409 ou une panne
+     réseau, alors que le serveur n'avait rien supprimé (`verifier_credits` et
+     les gardes précèdent `_supprimer_messages`) — et rien ne le restaurait. */
   const regenererReponse = (cid, m) => {
     if (!m || !m.messageId || !peutLancerUnFlux(cid)) return;
     const conv = conversations.find((c) => c.id === cid);
@@ -7597,35 +7733,52 @@ function App() {
     if (idx < 0) return;
     const question = (idx > 0 && conv.messages[idx - 1].role === 'user')
       ? conv.messages[idx - 1] : null;
-    const debut = question ? idx - 1 : idx;
     const idQuestion = nouvelIdLocal();
     const idReponse = nouvelIdLocal();
     const cleIdem = nouvelleCleIdempotence();
     const texteQuestion = question ? question.content : '';
-    setConversations((cs) => cs.map((c) => (c.id !== cid ? c : {
-      ...c,
-      messages: [
-        ...c.messages.slice(0, debut),
-        ...(question ? [{ role: 'user', content: question.content, localId: idQuestion }] : []),
-        { role: 'assistant', content: '__PENDING__', localId: idReponse },
-      ],
-    })));
+    let tronque = false;
+    /* La coupe est recalculée ICI, à l'instant de l'appliquer, et par
+       identifiant de message : entre le clic et le premier événement le fil a
+       pu bouger (autre onglet, page précédente chargée). */
+    const appliquerTroncature = () => {
+      tronque = true;
+      setConversations((cs) => cs.map((c) => {
+        if (c.id !== cid) return c;
+        const msgs = c.messages || [];
+        const i = msgs.findIndex((x) => x.messageId === m.messageId);
+        if (i < 0) return c;
+        const q = (i > 0 && msgs[i - 1].role === 'user') ? msgs[i - 1] : null;
+        return {
+          ...c,
+          messages: [
+            ...msgs.slice(0, q ? i - 1 : i),
+            ...(q ? [{ role: 'user', content: q.content, localId: idQuestion }] : []),
+            { role: 'assistant', content: '__PENDING__', localId: idReponse },
+          ],
+        };
+      }));
+    };
     (async () => {
       try {
         await consommerFlux(cid, idReponse,
-          (onEvent, opts) => axRegenerer(cid, m.messageId, onEvent, opts), cleIdem);
+          (onEvent, opts) => axRegenerer(cid, m.messageId, onEvent, opts),
+          cleIdem, appliquerTroncature);
       } catch (e) {
-        // « Réessayer » repartira par `sendStreamed` avec la même question et la
-        // même clé d'idempotence : côté serveur le tour d'origine a été
-        // supprimé, le renvoyer est exactement la bonne reprise.
-        poserErreur(cid, idReponse, e, texteQuestion, cleIdem);
+        // Après le premier événement, le backend a bel et bien supprimé le
+        // tour : la carte remplace la bulle en attente, et « Réessayer »
+        // repartira par `sendStreamed` avec la même clé d'idempotence.
+        if (tronque) poserErreur(cid, idReponse, e, texteQuestion, cleIdem);
+        // Avant : le fil n'a pas été touché, la carte s'ajoute en fin de fil.
+        else ajouterCarteErreur(cid, e, texteQuestion, cleIdem);
       }
     })();
   };
 
   /* Éditer : le backend supprime ce message et TOUT ce qui suit, puis rejoue le
      nouveau contenu. À l'écran, on tronque le fil à cet index et on repose la
-     question éditée (identifiant local) + la bulle en attente. */
+     question éditée (identifiant local) + la bulle en attente — là encore
+     seulement au premier événement reçu (voir `regenererReponse`). */
   const editerMessage = (cid, m, contenu) => {
     const texte = String(contenu || '').trim();
     if (!m || !m.messageId || !texte || !peutLancerUnFlux(cid)) return;
@@ -7636,20 +7789,32 @@ function App() {
     const idQuestion = nouvelIdLocal();
     const idReponse = nouvelIdLocal();
     const cleIdem = nouvelleCleIdempotence();
-    setConversations((cs) => cs.map((c) => (c.id !== cid ? c : {
-      ...c,
-      messages: [
-        ...c.messages.slice(0, idx),
-        { role: 'user', content: texte, localId: idQuestion },
-        { role: 'assistant', content: '__PENDING__', localId: idReponse },
-      ],
-    })));
+    let tronque = false;
+    const appliquerTroncature = () => {
+      tronque = true;
+      setConversations((cs) => cs.map((c) => {
+        if (c.id !== cid) return c;
+        const msgs = c.messages || [];
+        const i = msgs.findIndex((x) => x.messageId === m.messageId);
+        if (i < 0) return c;
+        return {
+          ...c,
+          messages: [
+            ...msgs.slice(0, i),
+            { role: 'user', content: texte, localId: idQuestion },
+            { role: 'assistant', content: '__PENDING__', localId: idReponse },
+          ],
+        };
+      }));
+    };
     (async () => {
       try {
         await consommerFlux(cid, idReponse,
-          (onEvent, opts) => axEditerMessage(cid, m.messageId, texte, onEvent, opts), cleIdem);
+          (onEvent, opts) => axEditerMessage(cid, m.messageId, texte, onEvent, opts),
+          cleIdem, appliquerTroncature);
       } catch (e) {
-        poserErreur(cid, idReponse, e, texte, cleIdem);
+        if (tronque) poserErreur(cid, idReponse, e, texte, cleIdem);
+        else ajouterCarteErreur(cid, e, texte, cleIdem);
       }
     })();
   };
