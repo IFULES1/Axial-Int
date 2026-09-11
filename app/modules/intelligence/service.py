@@ -892,6 +892,23 @@ def _preparer_contexte(db: Session, user_id: str, conversation_id: str, content:
                      user_msg_id=user_msg.id)
 
 
+def requete_de_recherche(ctx: _Contexte, content: str) -> str:
+    """La requête envoyée au web et au RAG.
+
+    Une question de suite (« Développe le point 2 ») ne veut rien dire hors du
+    fil : cherchée telle quelle, elle ramenait des sources sans rapport
+    (constaté en prod le 11/09 : égalité professionnelle, glacerie, pesticides)
+    et le modèle, fidèle à ses sources, refusait de répondre. Le titre de la
+    conversation — la première question — porte le sujet ; on l'accole.
+    """
+    if not ctx.history:
+        return content
+    titre = (ctx.conv.title or "").strip()
+    if not titre or titre.lower() in TITRES_GENERIQUES:
+        return content
+    return f"{titre} — {content}"
+
+
 def _rechercher(db: Session, user_id: str, content: str,
                 ctx: _Contexte) -> _Recherche:
     """La partie lente : web, RAG, Notion, rerank. Le flux l'annonce."""
@@ -901,6 +918,7 @@ def _rechercher(db: Session, user_id: str, content: str,
     # de recherche d'une conversation n'apparaît sur aucune facture ventilée,
     # il faut le compter à la source (même mécanique que `analysis`).
     appels_recherche: dict[str, int] = {}
+    requete = requete_de_recherche(ctx, content)
 
     if ctx.trivial:
         doc_passages, web_results = [], []
@@ -909,8 +927,8 @@ def _rechercher(db: Session, user_id: str, content: str,
         from concurrent.futures import ThreadPoolExecutor
 
         with ThreadPoolExecutor(max_workers=2) as ex:
-            f_docs = ex.submit(_retrieve_context, content, user_id)
-            f_web = ex.submit(web_search.search, content, 6,
+            f_docs = ex.submit(_retrieve_context, requete, user_id)
+            f_web = ex.submit(web_search.search, requete, 6,
                               compteur=appels_recherche)
             try:
                 web_results = f_web.result()
@@ -926,12 +944,12 @@ def _rechercher(db: Session, user_id: str, content: str,
             from app.modules.integrations import notion_context
 
             doc_passages = list(doc_passages) + notion_context.passages_pour(
-                db, user_id, content)
+                db, user_id, requete)
         except Exception as e:  # noqa: BLE001 — un outil injoignable ne bloque rien
             logger.warning("Espace Notion indisponible : %s", e)
 
     # Rerank web + internal together → one relevance-ordered context + citations.
-    combined_context, citations = _assemble_sources(content, web_results, doc_passages)
+    combined_context, citations = _assemble_sources(requete, web_results, doc_passages)
     return _Recherche(combined_context=combined_context, citations=citations,
                       doc_passages=list(doc_passages),
                       appels_recherche=_appels(appels_recherche),

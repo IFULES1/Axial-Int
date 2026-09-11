@@ -3039,3 +3039,25 @@ def test_la_question_precede_sa_reponse_meme_a_la_meme_microseconde():
         page = intel.list_messages(db, uid, str(conv.id), limit=50, before=None)
         items = page["items"] if isinstance(page, dict) else page[0]
         assert [m.role for m in items] == ["user", "assistant"]
+
+
+def test_une_question_de_suite_est_cherchee_avec_le_sujet_du_fil():
+    """« Développe le point 2 » cherché tel quel ramenait des sources sans
+    rapport ; avec historique, la requête accole le titre de la conversation."""
+    ctx_premier = intel._Contexte(conv=type("C", (), {"title": "Nouvelle conversation"})(),
+                                  agent_key="conseiller", redirect_note=None, persona=None,
+                                  conversation_libre=True, company_context="",
+                                  attached_context="", history=[], trivial=False)
+    assert intel.requete_de_recherche(ctx_premier, "Quels risques ?") == "Quels risques ?"
+
+    conv = type("C", (), {"title": "Quels sont les trois principaux risques pour un SaaS B2B ?"})()
+    ctx_suite = intel._Contexte(conv=conv, agent_key="conseiller", redirect_note=None,
+                                persona=None, conversation_libre=True, company_context="",
+                                attached_context="", trivial=False,
+                                history=[{"role": "user", "content": "q"},
+                                         {"role": "assistant", "content": "r"}])
+    assert intel.requete_de_recherche(ctx_suite, "Développe le point 2") == (
+        "Quels sont les trois principaux risques pour un SaaS B2B ? — Développe le point 2")
+    # Titre générique (pas encore posé) : la question seule.
+    conv.title = "Workspace"
+    assert intel.requete_de_recherche(ctx_suite, "Développe le point 2") == "Développe le point 2"
