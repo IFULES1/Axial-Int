@@ -3428,6 +3428,14 @@ html[data-theme="light"] .sidebar {
   .surface { padding: 20px 14px 48px; }
   .surface-head { flex-direction: column; gap: 14px; margin-bottom: 20px; }
   .surface-head h1 { font-size: 24px; }
+  /* La rangée d'actions (Agents : Historique / Sources RSS / Créer + langue
+     + thème) restait sur une ligne et poussait l'écran à 588 px. */
+  .surface-head > * { max-width: 100%; }
+  .surface-head > div { flex-wrap: wrap; row-gap: 10px; }
+  /* En-tête du fil : titre + coût sur une ligne, exports sur la suivante,
+     sinon le coût total était coupé (« 0 toke… ») par les boutons. */
+  .thread-head { flex-wrap: wrap; row-gap: 8px; }
+  .thread-head-title { flex: 1 1 100%; }
 
   /* Modales : `.wizard-modal` cadrait sa carte à 32 px de chaque côté ;
      16 px donne ~92 vw à 375 px, sans toucher aux `max-width` des cartes

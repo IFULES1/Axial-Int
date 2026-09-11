@@ -3363,9 +3363,11 @@ function ConvThread({ conversation, onSend, openCite, profil,
   // discret, qui porte l'export.
   return (
     <div className="thread-region">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      <div className="thread-head"
+           style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     gap: 12, padding: '10px 20px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 10, overflow: 'hidden' }}>
+        <div className="thread-head-title"
+             style={{ minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 10, overflow: 'hidden' }}>
           <div style={{ minWidth: 0, fontSize: 13.5, color: 'var(--fg-2)', overflow: 'hidden',
                         textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {conversation.title || libelle('Conversation')}
@@ -6051,10 +6053,10 @@ var { useState: useDocsState } = React;
 
 const DOCS_TOPICS = [
   { id: 'use-cases', icon: 'sparkles', fr: 'Cas d\u2019usage', en: 'Use cases' },
-  { id: 'prompts',   icon: 'document', fr: 'Mod\u00e8les de prompts', en: 'Prompt templates' },
+  { id: 'prompts',   icon: 'document', fr: 'Modèles de prompts', en: 'Prompt templates' },
   { id: 'agents',    icon: 'cpu',      fr: 'Agents', en: 'Agents' },
-  { id: 'memory',    icon: 'key',      fr: 'M\u00e9moire', en: 'Memory' },
-  { id: 'credits',   icon: 'zap',      fr: 'Cr\u00e9dits & plans', en: 'Credits & plans' },
+  { id: 'memory',    icon: 'key',      fr: 'Mémoire', en: 'Memory' },
+  { id: 'credits',   icon: 'zap',      fr: 'Crédits & plans', en: 'Credits & plans' },
 ];
 
 function DocsSurface() {
@@ -6087,7 +6089,7 @@ function DocsSurface() {
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--fg-2)', lineHeight: 1.5 }}>
             {isFR
-              ? <>\u00c9crivez \u00e0 <a href="#" style={{ color: 'var(--v-bright)' }}>support@axial.intelligence</a>. R\u00e9ponse sous 24h ouvr\u00e9es.</>
+              ? <>Écrivez à <a href="#" style={{ color: 'var(--v-bright)' }}>support@axial.intelligence</a>. Réponse sous 24h ouvrées.</>
               : <>Reach <a href="#" style={{ color: 'var(--v-bright)' }}>support@axial.intelligence</a>. Reply within 24 business hours.</>}
           </div>
         </div>
@@ -6111,21 +6113,21 @@ function DocsUseCases({ isFR }) {
   const cases = isFR ? [
     {
       tag: 'GTM',
-      title: 'Cadrer une mise sur le march\u00e9',
-      body: 'Vous lancez un nouveau produit ou un nouveau march\u00e9 g\u00e9ographique. Axial vous aide \u00e0 d\u00e9finir la s\u00e9quence de canaux, le persona prioritaire, et les hypoth\u00e8ses \u00e0 valider en premier.',
-      ex: '\u00ab Quels sont les 3 leviers GTM les plus efficaces pour un SaaS B2B Seed lan\u00e7ant en France et au DACH ? \u00bb',
+      title: 'Cadrer une mise sur le marché',
+      body: 'Vous lancez un nouveau produit ou un nouveau marché géographique. Axial vous aide à définir la séquence de canaux, le persona prioritaire, et les hypothèses à valider en premier.',
+      ex: '« Quels sont les 3 leviers GTM les plus efficaces pour un SaaS B2B Seed lançant en France et au DACH ? »',
     },
     {
       tag: 'CONCURRENCE',
       title: 'Cartographier vos concurrents',
-      body: 'Identifiez les acteurs structurants de votre march\u00e9, leurs angles, leurs forces. Axial cite ses sources et signale les zones de vide concurrentiel.',
-      ex: '\u00ab Mes 5 concurrents directs sur le SaaS RH en France et leurs positionnements respectifs \u00bb',
+      body: 'Identifiez les acteurs structurants de votre marché, leurs angles, leurs forces. Axial cite ses sources et signale les zones de vide concurrentiel.',
+      ex: '« Mes 5 concurrents directs sur le SaaS RH en France et leurs positionnements respectifs »',
     },
     {
       tag: 'FINANCEMENT',
-      title: 'Pr\u00e9parer une lev\u00e9e',
-      body: 'Calibrez le montant, le timing et les benchmarks. Axial confronte vos m\u00e9triques aux benchmarks publics et propose une fourchette d\u00e9fendable.',
-      ex: '\u00ab Combien lever en S\u00e9rie A pour un SaaS B2B \u00e0 1,2 M\u20ac d\u2019ARR avec 8 % de croissance mensuelle ? \u00bb',
+      title: 'Préparer une levée',
+      body: 'Calibrez le montant, le timing et les benchmarks. Axial confronte vos métriques aux benchmarks publics et propose une fourchette défendable.',
+      ex: '« Combien lever en Série A pour un SaaS B2B à 1,2 M€ d’ARR avec 8 % de croissance mensuelle ? »',
     },
     {
       tag: 'R\u00c9GLEMENTAIRE',
