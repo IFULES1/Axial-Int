@@ -59,8 +59,11 @@ def _valeurs_d_environnement() -> list[str]:
     """
     valeurs = {
         valeur for nom, valeur in os.environ.items()
-        if nom.upper().endswith(_SUFFIXES_SECRETS)
-        and valeur and len(valeur) >= _LONGUEUR_MIN_SECRET
+        if valeur and len(valeur) >= _LONGUEUR_MIN_SECRET
+        and (nom.upper().endswith(_SUFFIXES_SECRETS)
+             # URL avec identifiants (DATABASE_URL, QDRANT_URL…) : le mot de
+             # passe est dans la valeur, pas dans le nom.
+             or ("://" in valeur and "@" in valeur))
     }
     return sorted(valeurs, key=len, reverse=True)
 

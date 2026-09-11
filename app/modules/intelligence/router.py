@@ -259,11 +259,11 @@ def _flux_sse(generateur):
     la réponse partielle tournait alors sur une session morte.
 
     Un générateur ASYNC, lui, est fermé par Starlette (`aclose`) dès que le
-    client part. Le `finally` appelle `gen.close()` dans un thread du pool
-    (SQLAlchemy est synchrone et l'archivage commite) : `GeneratorExit` est
-    levé au `yield` courant du service, ENCORE dans le scope de la requête,
-    puisque le démontage des dépendances n'a lieu qu'après le retour de l'appel
-    à la réponse.
+    client part. Le `finally` appelle `gen.close()` dans un thread du pool :
+    `GeneratorExit` est levé au `yield` courant du service. À ce moment la
+    session `get_db` de la requête est déjà fermée (mesuré sous uvicorn) :
+    l'archivage de la réponse partielle ouvre donc sa PROPRE session
+    (`_archiver_partiel`) et ne touche plus à celle de la requête.
     """
     from starlette.concurrency import iterate_in_threadpool, run_in_threadpool
 

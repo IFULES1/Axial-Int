@@ -2934,7 +2934,7 @@ def test_pagination_departage_sur_id_a_horodatage_egal(monkeypatch):
         ids = sorted(uuidlib.uuid4() for _ in range(6))
         for n, mid in enumerate(ids):
             db.add(intel.Message(id=mid, conversation_id=conv.id,
-                                 role="user" if n % 2 == 0 else "assistant",
+                                 role="user",  # même rôle : seul l'id départage
                                  content=f"m{n}", created_at=instant))
         db.commit()
 
@@ -3009,3 +3009,33 @@ def test_la_tache_de_resume_libere_son_verrou(monkeypatch):
                         lambda: (_ for _ in ()).throw(RuntimeError("base HS")))
     intel._mettre_a_jour_resume_en_tache(cid)  # ne lève pas
     assert cid not in intel._resumes_en_cours
+
+
+def test_la_question_precede_sa_reponse_meme_a_la_meme_microseconde():
+    """Question et réponse sont flushées ensemble : à `created_at` égal, le tri
+    doit mettre la question d'abord, quel que soit l'ordre des uuid."""
+    import datetime as dt
+    import uuid as uuidlib
+
+    from sqlalchemy.orm import Session
+
+    from app.modules.intelligence.models import Message
+
+    engine = _base()
+    with Session(engine) as db:
+        uid = str(uuidlib.uuid4())
+        proj = intel.create_project(db, uid, "P", None)
+        conv = intel.create_conversation(db, uid, str(proj.id), None, None)
+        instant = dt.datetime(2026, 9, 11, 10, 0, 0, tzinfo=dt.timezone.utc)
+        # uuid de la réponse volontairement PLUS PETIT que celui de la question.
+        reponse = Message(id=uuidlib.UUID(int=1), conversation_id=conv.id, role="assistant",
+                          content="réponse", created_at=instant)
+        question = Message(id=uuidlib.UUID(int=2), conversation_id=conv.id, role="user",
+                           content="question", created_at=instant)
+        db.add_all([reponse, question])
+        db.commit()
+        roles = [m.role for m in intel._messages_ordonnes(db, conv)]
+        assert roles == ["user", "assistant"]
+        page = intel.list_messages(db, uid, str(conv.id), limit=50, before=None)
+        items = page["items"] if isinstance(page, dict) else page[0]
+        assert [m.role for m in items] == ["user", "assistant"]

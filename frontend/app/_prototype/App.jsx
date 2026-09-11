@@ -6690,7 +6690,7 @@ function DocsCredits({ isFR }) {
   ];
 
   const costs = isFR ? [
-    { action: 'Message \u00e0 un agent (conversation)', cost: '2 cr\u00e9dits' },
+    { action: 'Message \u00e0 un agent (conversation)', cost: `${CREDITS_PAR_MESSAGE} cr\u00e9dits` },
     { action: 'Run d\u2019un agent de veille (RSS + web + LLM)', cost: '5 cr\u00e9dits' },
     { action: 'Analyse concurrentielle / risques / veille techno', cost: '25 cr\u00e9dits' },
     { action: 'Synth\u00e8se ex\u00e9cutive', cost: '25 cr\u00e9dits' },
@@ -6698,7 +6698,7 @@ function DocsCredits({ isFR }) {
     { action: 'Mise \u00e0 jour de m\u00e9moire', cost: '0 cr\u00e9dit' },
     { action: 'Lecture d\u2019un rapport', cost: '0 cr\u00e9dit' },
   ] : [
-    { action: 'Message to an agent (conversation)', cost: '2 credits' },
+    { action: 'Message to an agent (conversation)', cost: `${CREDITS_PAR_MESSAGE} credits` },
     { action: 'Monitoring-agent run (RSS + web + LLM)', cost: '5 credits' },
     { action: 'Competitive / risk / tech-watch analysis', cost: '25 credits' },
     { action: 'Executive summary', cost: '25 credits' },

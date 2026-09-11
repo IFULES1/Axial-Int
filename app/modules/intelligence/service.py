@@ -238,12 +238,17 @@ def list_messages(db: Session, user_id: str, conversation_id: str, *,
         # microseconde rendaient la fenêtre instable, et une égalité stricte
         # sur `created_at` faisait carrément DISPARAÎTRE le jumeau du message
         # borne — un tour perdu au milieu du fil, jamais rattrapable.
+        rang_borne = 0 if borne.role == "user" else 1
         stmt = stmt.where(or_(Message.created_at < borne.created_at,
                               and_(Message.created_at == borne.created_at,
+                                   _rang_role() < rang_borne),
+                              and_(Message.created_at == borne.created_at,
+                                   _rang_role() == rang_borne,
                                    Message.id < borne.id)))
     # On lit un message de plus que demandé : sa présence EST la réponse à
     # « reste-t-il des messages plus anciens ? », sans second COUNT(*).
     fenetre = list(db.scalars(stmt.order_by(Message.created_at.desc(),
+                                            _rang_role().desc(),
                                             Message.id.desc())
                               .limit(limit + 1)))
     has_more = len(fenetre) > limit
@@ -384,7 +389,17 @@ def _messages_ordonnes(db: Session, conv: Conversation) -> list[Message]:
     """
     return list(db.scalars(select(Message)
                            .where(Message.conversation_id == conv.id)
-                           .order_by(Message.created_at.asc(), Message.id.asc())))
+                           .order_by(Message.created_at.asc(), _rang_role().asc(),
+                                     Message.id.asc())))
+
+
+def _rang_role():
+    """Question avant réponse quand les deux sont écrites dans la même
+    microseconde (elles sont flushées ensemble) : sans ce départage, 1 fil sur 5
+    affichait la réponse au-dessus de sa question."""
+    from sqlalchemy import case
+
+    return case((Message.role == "user", 0), else_=1)
 
 
 def _supprimer_messages(db: Session, conv: Conversation,
