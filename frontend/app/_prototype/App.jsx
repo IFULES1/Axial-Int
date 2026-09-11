@@ -3352,8 +3352,8 @@ function ConvThread({ conversation, onSend, openCite, profil,
   /* « Régénérer » ne vaut que pour la DERNIÈRE réponse du fil : le backend
      refuse le reste (409 `pas_le_dernier_message`, Task 3). On n'offre donc le
      bouton que là, et jamais pendant un flux, sur une carte d'erreur, sur une
-     bulle encore en flux, ni sur une bulle qui n'a pas d'identifiant serveur
-     (un partiel interrompu avant le `done` n'existe pas côté serveur). */
+     bulle encore en flux, ni sur une bulle qui n'a pas encore d'identifiant
+     serveur (un partiel interrompu le reçoit par `completerIdQuestion`). */
   const messages = conversation.messages || [];
   const dernier = messages[messages.length - 1];
   const idRegenerable = (!enFlux && dernier && dernier.role === 'assistant'
@@ -7401,22 +7401,40 @@ function App() {
     const vivantsAvant = filsVivants.current;
     if (vivantsAvant && !vivantsAvant.has(cid)) return;
     axMessagesPage(cid, { limit: 2 }).then((page) => {
-      const question = (page.items || []).filter((m) => m.role === 'user').pop();
-      if (!question) return;
+      const items = page.items || [];
+      const question = items.filter((m) => m.role === 'user').pop();
+      const reponse = items.filter((m) => m.role === 'assistant').pop();
+      if (!question && !reponse) return;
       // Le fil peut avoir disparu PENDANT l'aller-retour.
       const vivants = filsVivants.current;
       if (vivants && !vivants.has(cid)) return;
       setConversations((cs) => cs.map((c) => {
         if (c.id !== cid) return c;
         const messages = [...(c.messages || [])];
-        for (let i = messages.length - 1; i >= 0; i -= 1) {
-          const m = messages[i];
-          if (m.role !== 'user' || m.messageId) continue;
-          if (String(m.content || '') !== String(question.content || '')) break;
-          messages[i] = { ...m, messageId: question.id };
-          return { ...c, messages };
+        let change = false;
+        if (question) {
+          for (let i = messages.length - 1; i >= 0; i -= 1) {
+            const m = messages[i];
+            if (m.role !== 'user' || m.messageId) continue;
+            if (String(m.content || '') !== String(question.content || '')) break;
+            messages[i] = { ...m, messageId: question.id };
+            change = true;
+            break;
+          }
         }
-        return c;
+        // Réponse arrêtée par Stop : le backend l'archive en `partiel` mais le
+        // flux n'a pas livré de `done`, donc la bulle locale n'avait pas
+        // d'identifiant — et « Régénérer » restait invisible jusqu'au
+        // rechargement (constaté en prod le 11/09).
+        if (reponse) {
+          const dernier = messages[messages.length - 1];
+          if (dernier && dernier.role === 'assistant' && !dernier.messageId && !dernier.live) {
+            messages[messages.length - 1] = { ...dernier, messageId: reponse.id,
+                                              statut: reponse.statut || dernier.statut };
+            change = true;
+          }
+        }
+        return change ? { ...c, messages } : c;
       }));
     }).catch(() => {});
   };
