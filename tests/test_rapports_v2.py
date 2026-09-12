@@ -1820,7 +1820,7 @@ def test_la_page_publique_ne_montre_ni_couts_ni_documents_internes(http):
     engine, uid = http
     sources = [
         {"title": "INSEE", "url": "https://insee.fr", "source": "web"},
-        {"title": "business-plan-confidentiel.pdf", "source": "documents"},
+        {"title": "business-plan-confidentiel.pdf", "source": "document"},
         {"title": "Notes internes", "source": "notion"},
     ]
     with Session(engine) as db:
@@ -1862,7 +1862,7 @@ def test_page_publique_conserve_la_numerotation_des_sources(http):
     engine, uid = http
     sources = [
         {"title": "INSEE", "url": "https://insee.fr", "source": "web"},
-        {"title": "business-plan-confidentiel.pdf", "source": "documents"},
+        {"title": "business-plan-confidentiel.pdf", "source": "document"},
         {"title": "Eurostat", "url": "https://ec.europa.eu", "source": "web"},
     ]
     with Session(engine) as db:
@@ -2114,7 +2114,7 @@ def _avec_contenu(db, uid, **kw):
                     content=_MARKDOWN,
                     sources=[{"title": "INSEE", "url": "https://insee.fr",
                               "domain": "insee.fr", "source": "web"},
-                             {"title": "bp.pdf", "source": "documents"}], **kw)
+                             {"title": "bp.pdf", "source": "document"}], **kw)
 
 
 def test_export_markdown_rend_le_contenu_et_une_section_sources(http):
@@ -2457,3 +2457,21 @@ def test_routes_de_gestion_des_rapports_montees():
     # `items` / `has_more` (Task 4).
     liste = chemins["/reports"]["get"]["responses"]["200"]["content"]
     assert liste["application/json"]["schema"]["$ref"].endswith("ReportPage")
+
+
+def test_les_sources_internes_reelles_sont_masquees_sur_la_page_publique():
+    """Les valeurs sont celles de `grounding.py` : « interne », « document »,
+    « notion ». Tout ce qui n'est pas « web » devient un jalon au même index."""
+    from app.modules.reports import service as rep
+
+    sources = [{"title": "A", "url": "https://a", "source": "web"},
+               {"title": "Deck.pdf", "url": None, "source": "document"},
+               {"title": "KB", "url": None, "source": "interne"},
+               {"title": "Page", "url": "https://notion.so/x", "source": "notion"},
+               {"title": "B", "url": "https://b", "source": "web"}]
+    publiques = rep._sources_publiables(sources)
+    assert len(publiques) == 5
+    assert [s["title"] for s in publiques] == ["A", "Source interne, non partagée",
+                                               "Source interne, non partagée",
+                                               "Source interne, non partagée", "B"]
+    assert all(s.get("url") is None for s in publiques[1:4])

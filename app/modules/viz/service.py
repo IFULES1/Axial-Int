@@ -54,6 +54,12 @@ def empreintes_du_compte(db: Session, user_id: str) -> set[str]:
                 empreintes.update(v.get("empreinte") for v in viz
                                   if isinstance(v, dict) and v.get("empreinte"))
 
+    # Borné : au-delà de 500 comptes en cache, on purge les entrées expirées
+    # (un processus long-vivant ne doit pas croître sans limite).
+    if len(_cache_empreintes) > 500:
+        for cle in [k for k, (t0, _) in _cache_empreintes.items()
+                    if maintenant - t0 > _CACHE_TTL_SECONDES]:
+            _cache_empreintes.pop(cle, None)
     _cache_empreintes[user_id] = (maintenant, empreintes)
     return empreintes
 

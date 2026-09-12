@@ -42,7 +42,10 @@ PSEUDO_MAX = 40
 # Sources à ne JAMAIS publier : ce sont les documents privés de l'utilisateur
 # et son espace Notion. Le partage est public — un lien transmis par erreur ne
 # doit pas exposer le contenu de son coffre.
-SOURCES_INTERNES = ("documents", "notion")
+# Valeurs réellement produites par `app/shared/grounding.py` : « interne » (base
+# de connaissance), « document » (fichier déposé par l'utilisateur), « notion ».
+# Tout ce qui n'est pas « web » reste privé : la liste est fermée sur le web.
+SOURCES_INTERNES = ("interne", "document", "documents", "notion", "rag", "kb")
 
 # --- Export ----------------------------------------------------------------
 FORMATS_EXPORT = ("pdf", "md", "docx")
@@ -472,7 +475,7 @@ def _sources_publiables(sources: list | None) -> list | None:
     if not isinstance(sources, list):
         return None
     return [dict(_JALON_SOURCE_INTERNE)
-            if isinstance(s, dict) and s.get("source") in SOURCES_INTERNES
+            if isinstance(s, dict) and (s.get("source") or "web") != "web"
             else s
             for s in sources]
 
