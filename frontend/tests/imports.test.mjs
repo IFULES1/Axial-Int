@@ -22,7 +22,11 @@ const bridge = readFileSync(cheminBridge, 'utf8');
 
 /* La liste d'import du bridge, telle qu'elle est écrite dans App.jsx. */
 function importsDuBridge(source) {
-  const m = source.match(/import\s*\{([\s\S]*?)\}\s*from\s*["']\.\/bridge["']/);
+  // `[^{}]` et non `[\s\S]` : App.jsx importe désormais AUSSI
+  // `./rapports_etat`, et un motif paresseux sur n'importe quel caractère
+  // partait de la première accolade du fichier — donc mélangeait les deux
+  // listes et accusait le bridge de ne pas exporter `libelleEtape`.
+  const m = source.match(/import\s*\{([^{}]*?)\}\s*from\s*["']\.\/bridge["']/);
   assert.ok(m, "App.jsx doit importer depuis './bridge'");
   return new Set(
     m[1].split(',')

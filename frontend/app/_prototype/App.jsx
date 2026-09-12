@@ -4,7 +4,13 @@
 // Compiled by Next (no Babel-in-browser). Mock data still inline — wired to the
 // backend screen by screen.
 import React from "react";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, AX_API, axAddFeed, axDeleteFeed, axRunAnalysis, axStreamAnalysis, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axCreateReport, axListReports, axGetReport, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument } from "./bridge";
+import {
+  CLE_STOCKAGE as RAPPORT_CLE_STOCKAGE, EN_COURS, SOURCES_INSUFFISANTES,
+  ETAPES as RAPPORT_ETAPES, estTerminal, etatAuLancement, etatDepuisEvenement,
+  etatDepuisRapport, etatDepuisStockage, versStockage, libelleEtape,
+  libelleRaison,
+} from "./rapports_etat";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument } from "./bridge";
 import { parserMarkdown } from "./markdown";
 
 
@@ -20,10 +26,13 @@ import { parserMarkdown } from "./markdown";
 
 // Coûts RÉELS (= CREDIT_COSTS backend) — les anciennes estimations étaient des
 // chiffres de maquette sans lien avec le débit effectif.
-// Formulaire de retour sur les rapports. URL PUBLIQUE (/viewform) : le lien
-// /edit donnerait aux utilisateurs le droit de modifier le formulaire.
-const FORMULAIRE_FEEDBACK =
-  'https://docs.google.com/forms/d/1KShH0-tTloNKOnw9sZ3uXM1OeXIdpIfVFLm0JpYy_BM/viewform';
+// Le retour sur un rapport passe désormais par un formulaire DANS l'app
+// (`POST /reports/{id}/feedback`, spec §3) : le Google Form public a disparu,
+// il ne transmettait ni l'identifiant du rapport ni son titre, donc aucun
+// signalement n'était exploitable.
+
+// Motifs de signalement — mêmes valeurs que la colonne `report_feedback.motif`.
+const MOTIFS_SIGNALEMENT = ['faux', 'hors_sujet', 'incomplet', 'autre'];
 
 const REPORT_TYPES = [
   { id: 'market', icon: 'trending', at: 'etude_marche', cost: 40 },
@@ -229,6 +238,7 @@ const STRINGS = {
     'reports.template_strip': 'Exemples de questions',
     'reports.start': 'Lancer le rapport',
     'reports.estimate': 'Estimation',
+    'reports.estimate_delai': 'quelques minutes',
     'reports.depth': 'Profondeur',
     'reports.depth.scan': 'Scan',
     'reports.depth.standard': 'Standard',
@@ -245,29 +255,80 @@ const STRINGS = {
     'reports.gen.tasks.review': 'Vérification',
     'reports.gen.sources_found': 'sources trouvées',
     'reports.gen.elapsed': 'Temps écoulé',
+    'reports.gen.navigate': 'Vous pouvez naviguer ailleurs : la génération continue sur nos serveurs et vous recevrez un email. Ce rapport figure dans « Vos rapports » avec sa progression.',
+    'reports.gen.stop': 'Arrêter',
+    'reports.gen.stopping': 'Arrêt demandé…',
+    'reports.gen.progression': 'Progression',
+    'reports.gen.reprise': 'Reprise du suivi…',
+    'reports.gen.suivi_perdu': 'Le suivi en direct s\'est interrompu. La génération continue : cet écran interroge le serveur toutes les trois secondes.',
+
+    // Étapes réelles du moteur (statut/etape/progression de la ligne de rapport)
+    'reports.etape.demarrage': 'Démarrage de l\'analyse',
+    'reports.etape.recherche': 'Recherche des sources…',
+    'reports.etape.recherche_n': 'Recherche des sources… {n} trouvées',
+    'reports.etape.selection': 'Sélection des sources',
+    'reports.etape.selection_n': 'Sélection des sources — {n} retenues',
+    'reports.etape.couverture': 'Vérification de la couverture',
+    'reports.etape.redaction': 'Rédaction du rapport',
+    'reports.etape.redaction_section': 'Rédaction — section {section}',
+    'reports.etape.finalisation': 'Finalisation (graphiques, mise en forme)',
+
+    // Statuts terminaux
+    'reports.statut.annule': 'Génération arrêtée',
+    'reports.statut.annule_detail': 'Aucun crédit n\'a été débité. Vous pouvez relancer la même question.',
+    'reports.statut.echec': 'La génération a échoué',
+    'reports.statut.echec_detail': 'Aucun crédit n\'a été débité. Vous pouvez relancer la même question.',
+    'reports.statut.relancer': 'Relancer',
+
+    // Sources insuffisantes (spec §2)
+    'reports.sources_insuf.titre': 'Sources insuffisantes',
+    'reports.sources_insuf.body': 'Les sources trouvées ne permettent pas de traiter cette question de façon fiable. Aucun crédit n\'a été débité.',
+    'reports.sources_insuf.trouvees': 'Sources trouvées',
+    'reports.sources_insuf.aucune': 'Aucune source exploitable n\'a été trouvée.',
+    'reports.sources_insuf.reformuler': 'Reformuler la question',
+    'reports.sources_insuf.elargir': 'Recherche élargie',
+    'reports.sources_insuf.forcer': 'Générer quand même',
+    'reports.sources_insuf.forcer_aide': 'Le rapport sera produit et débité, avec la mention « couverture partielle ».',
+
+    // Bandeau d'un rapport dégradé (spec §3)
+    'reports.degrade.titre': 'Rapport incomplet',
+    'reports.degrade.defaut': 'Ce rapport n\'a pas été produit dans des conditions normales. Lisez-le avec prudence.',
+    'reports.degrade.truncated_generation': 'La rédaction a atteint la limite de sortie du modèle avant sa conclusion : le rapport s\'arrête en cours de route. Aucun crédit n\'a été débité — relancez la génération.',
+    'reports.degrade.llm_unavailable': 'Le modèle de rédaction était indisponible. Aucun crédit n\'a été débité — relancez la génération.',
+    'reports.degrade.generation_failed': 'La rédaction a échoué en cours de route. Aucun crédit n\'a été débité — relancez la génération.',
+    'reports.degrade.empty_generation': 'Le modèle n\'a rien produit. Aucun crédit n\'a été débité — relancez la génération.',
+    'reports.degrade.investors_unavailable': 'La base d\'investisseurs Axial était indisponible : ce rapport s\'appuie uniquement sur la recherche web.',
+    'reports.degrade.couverture_partielle': 'Couverture partielle : les sources trouvées ne couvrent qu\'une partie de la question. Vérifiez les points chiffrés avant de vous en servir.',
+    'reports.degrade.delai_depasse': 'La génération a dépassé le délai maximal et a été interrompue. Aucun crédit n\'a été débité.',
+    'reports.degrade.annule_par_utilisateur': 'Génération arrêtée à votre demande. Aucun crédit n\'a été débité.',
+
+    // Signalement / avis (spec §3)
+    'reports.signalement.ouvrir': 'Signaler un problème',
+    'reports.signalement.titre': 'Votre avis sur ce rapport',
+    'reports.signalement.body': 'Dites-nous ce qui ne va pas. Nous relisons chaque rapport signalé.',
+    'reports.signalement.motif': 'Motif',
+    'reports.signalement.motif.faux': 'Contenu faux',
+    'reports.signalement.motif.hors_sujet': 'Hors sujet',
+    'reports.signalement.motif.incomplet': 'Incomplet',
+    'reports.signalement.motif.autre': 'Autre',
+    'reports.signalement.note': 'Note (facultative)',
+    'reports.signalement.commentaire': 'Commentaire',
+    'reports.signalement.commentaire_aide': 'Ce qui est faux, ce qui manque, ce que vous attendiez.',
+    'reports.signalement.envoyer': 'Envoyer',
+    'reports.signalement.envoi': 'Envoi…',
+    'reports.signalement.merci': 'Merci — votre retour est arrivé. Nous relisons ce rapport.',
+    'reports.signalement.echec': 'L\'envoi a échoué. Réessayez dans un instant.',
 
     'reports.editor.outline': 'Plan',
     'reports.editor.sources': 'Sources',
     'reports.editor.activity': 'Activité',
     'reports.editor.suggest': 'Suggestion d\'Axial',
 
-    'reports.gap.title': 'Donnée insuffisante',
-    'reports.gap.body': 'Ce paragraphe manque de signal vérifiable. Vous pouvez fournir un chiffre interne, autoriser une recherche profonde, ou laisser la lacune visible.',
-    'reports.gap.add': 'Fournir une donnée',
-    'reports.gap.deepen': 'Recherche profonde',
-    'reports.gap.confidence': 'Confiance par section',
 
-    'reports.conflict.title': 'Sources en désaccord',
-    'reports.conflict.body': 'Deux sources crédibles donnent des chiffres incompatibles sur ce point. Axial s\'arrête et vous laisse trancher.',
-    'reports.conflict.recommendation': 'Recommandation d\'Axial',
-    'reports.conflict.use_a': 'Utiliser source A',
-    'reports.conflict.use_b': 'Utiliser source B',
-    'reports.conflict.cite_both': 'Citer les deux',
-
-    'reports.quota.title': 'Crédits insuffisants',
-    'reports.quota.body': 'Ce rapport demande plus de crédits que ce qu\'il vous reste ce mois-ci. Deux options.',
-    'reports.quota.usage': 'Consommation du mois',
-    'reports.quota.see_credits': 'Voir les crédits',
+    // onboarding — la promesse de délai de la première analyse. Elle était
+    // écrite « ~30 S » en dur : un rapport de fond demande plusieurs
+    // minutes, et la tâche tourne côté serveur avec un email à l'arrivée.
+    'onb.premiere_analyse.delai': 'QUELQUES MINUTES — VOUS RECEVREZ UN EMAIL',
 
     // agents
     'agents.title': 'Agents',
@@ -542,6 +603,7 @@ const STRINGS = {
     'reports.template_strip': 'Example questions',
     'reports.start': 'Run report',
     'reports.estimate': 'Estimate',
+    'reports.estimate_delai': 'a few minutes',
     'reports.depth': 'Depth',
     'reports.depth.scan': 'Scan',
     'reports.depth.standard': 'Standard',
@@ -558,29 +620,72 @@ const STRINGS = {
     'reports.gen.tasks.review': 'Review',
     'reports.gen.sources_found': 'sources found',
     'reports.gen.elapsed': 'Elapsed',
+    'reports.gen.navigate': 'You can navigate away: generation continues on our servers and you will get an email. This report appears under “Your reports” with its progress.',
+    'reports.gen.stop': 'Stop',
+    'reports.gen.stopping': 'Stopping…',
+    'reports.gen.progression': 'Progress',
+    'reports.gen.reprise': 'Resuming…',
+    'reports.gen.suivi_perdu': 'The live feed dropped. Generation continues: this screen polls the server every three seconds.',
+
+    'reports.etape.demarrage': 'Starting the analysis',
+    'reports.etape.recherche': 'Gathering sources…',
+    'reports.etape.recherche_n': 'Gathering sources… {n} found',
+    'reports.etape.selection': 'Selecting sources',
+    'reports.etape.selection_n': 'Selecting sources — {n} kept',
+    'reports.etape.couverture': 'Checking coverage',
+    'reports.etape.redaction': 'Writing the report',
+    'reports.etape.redaction_section': 'Writing — section {section}',
+    'reports.etape.finalisation': 'Finalizing (charts, layout)',
+
+    'reports.statut.annule': 'Generation stopped',
+    'reports.statut.annule_detail': 'No credits were charged. You can run the same question again.',
+    'reports.statut.echec': 'Generation failed',
+    'reports.statut.echec_detail': 'No credits were charged. You can run the same question again.',
+    'reports.statut.relancer': 'Run again',
+
+    'reports.sources_insuf.titre': 'Not enough sources',
+    'reports.sources_insuf.body': 'The sources we found cannot answer this question reliably. No credits were charged.',
+    'reports.sources_insuf.trouvees': 'Sources found',
+    'reports.sources_insuf.aucune': 'No usable source was found.',
+    'reports.sources_insuf.reformuler': 'Rephrase the question',
+    'reports.sources_insuf.elargir': 'Broader search',
+    'reports.sources_insuf.forcer': 'Generate anyway',
+    'reports.sources_insuf.forcer_aide': 'The report will be produced and charged, flagged “partial coverage”.',
+
+    'reports.degrade.titre': 'Incomplete report',
+    'reports.degrade.defaut': 'This report was not produced under normal conditions. Read it with care.',
+    'reports.degrade.truncated_generation': 'Writing hit the model output limit before its conclusion: the report stops mid-way. No credits were charged — run it again.',
+    'reports.degrade.llm_unavailable': 'The writing model was unavailable. No credits were charged — run it again.',
+    'reports.degrade.generation_failed': 'Writing failed mid-way. No credits were charged — run it again.',
+    'reports.degrade.empty_generation': 'The model produced nothing. No credits were charged — run it again.',
+    'reports.degrade.investors_unavailable': 'The Axial investor database was unavailable: this report relies on web search only.',
+    'reports.degrade.couverture_partielle': 'Partial coverage: the sources found only cover part of the question. Double-check every figure before using it.',
+    'reports.degrade.delai_depasse': 'Generation exceeded the maximum delay and was interrupted. No credits were charged.',
+    'reports.degrade.annule_par_utilisateur': 'Generation stopped at your request. No credits were charged.',
+
+    'reports.signalement.ouvrir': 'Report a problem',
+    'reports.signalement.titre': 'Your feedback on this report',
+    'reports.signalement.body': 'Tell us what is wrong. We re-read every reported report.',
+    'reports.signalement.motif': 'Reason',
+    'reports.signalement.motif.faux': 'Incorrect content',
+    'reports.signalement.motif.hors_sujet': 'Off topic',
+    'reports.signalement.motif.incomplet': 'Incomplete',
+    'reports.signalement.motif.autre': 'Other',
+    'reports.signalement.note': 'Rating (optional)',
+    'reports.signalement.commentaire': 'Comment',
+    'reports.signalement.commentaire_aide': 'What is wrong, what is missing, what you expected.',
+    'reports.signalement.envoyer': 'Send',
+    'reports.signalement.envoi': 'Sending…',
+    'reports.signalement.merci': 'Thank you — your feedback arrived. We are re-reading this report.',
+    'reports.signalement.echec': 'Sending failed. Try again in a moment.',
 
     'reports.editor.outline': 'Outline',
     'reports.editor.sources': 'Sources',
     'reports.editor.activity': 'Activity',
     'reports.editor.suggest': 'Axial\'s suggestion',
 
-    'reports.gap.title': 'Insufficient data',
-    'reports.gap.body': 'This passage lacks verifiable signal. Provide an internal figure, authorize a deeper search, or leave the gap visible.',
-    'reports.gap.add': 'Provide a figure',
-    'reports.gap.deepen': 'Deeper search',
-    'reports.gap.confidence': 'Section confidence',
 
-    'reports.conflict.title': 'Sources disagree',
-    'reports.conflict.body': 'Two credible sources give incompatible figures here. Axial pauses and lets you decide.',
-    'reports.conflict.recommendation': 'Axial\'s recommendation',
-    'reports.conflict.use_a': 'Use source A',
-    'reports.conflict.use_b': 'Use source B',
-    'reports.conflict.cite_both': 'Cite both',
-
-    'reports.quota.title': 'Out of credits',
-    'reports.quota.body': 'This report needs more credits than you have left this month. Two paths.',
-    'reports.quota.usage': 'This month',
-    'reports.quota.see_credits': 'See credits',
+    'onb.premiere_analyse.delai': 'A FEW MINUTES — YOU WILL GET AN EMAIL',
 
     'agents.title': 'Agents',
     'agents.subtitle': 'Persistent workers. You set the mission, they bring back findings.',
@@ -1519,6 +1624,13 @@ var { useState: useOnbState, useEffect: useOnbEffect, useMemo: useOnbMemo } = Re
 // alimentent la correspondance secteur/stade de la cartographie investisseurs.
 // Traduire la valeur casserait ce lien côté serveur.
 const LABELS_EN = {
+  // Éditeur de rapport / figures (Task 4)
+  'Export…': 'Exporting…',
+  'Page Notion créée': 'Notion page created',
+  'Déposé dans votre Drive': 'Saved to your Drive',
+  'Envoi impossible.': 'Delivery failed.',
+  'Graphique en préparation…': 'Chart loading…',
+  'Dites-nous ce que vaut ce rapport': 'Tell us what this report is worth',
   'Deeptech / IA': 'Deeptech / AI',
   'Industrie / Hardware': 'Industry / Hardware',
   'Services pro': 'Professional services',
@@ -2084,6 +2196,7 @@ function DemoCard({ q, bullets, srcs, time }) {
 
 /* ----- Step 3 — First action ----- */
 function OnbStep3({ ctx, onLaunch, onBack }) {
+  const t = window.useT();
   const [lance, setLance] = React.useState(false);
   const seedQ = useOnbMemo(() => {
     // Question construite avec le NOM + le DÉFI + le contexte — jamais générique.
@@ -2125,7 +2238,7 @@ function OnbStep3({ ctx, onLaunch, onBack }) {
         <div className="mono" style={{ display: 'flex', flexWrap: 'wrap', gap: 18, color: 'var(--fg-3)', fontSize: 11, letterSpacing: '0.06em', marginBottom: 22 }}>
           <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><Icon name="cpu" size={11} /> AGENT STRATÉGIQUE</span>
           <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><Icon name="database" size={11} /> SOURCES + CONTEXTE</span>
-          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><Icon name="zap" size={11} /> ~30 S</span>
+          <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}><Icon name="zap" size={11} /> {t('onb.premiere_analyse.delai')}</span>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <button className="btn btn-primary btn-lg" disabled={lance}
@@ -4230,18 +4343,35 @@ function TopControls() {
 /* =================================================================
    REPORTS — Empty state composer (state 1)
    ================================================================= */
-function ReportsEmpty({ onStart, onOpenReport }) {
+function ReportsEmpty({ onStart, onOpenReport, onOuvrirEnCours, promptInitial }) {
   const t = window.useT();
   const lang = window.AXIAL_LANG || 'fr';
   const [type, setType] = React.useState('market');
-  const [prompt, setPrompt] = React.useState('');
+  // `promptInitial` : « Reformuler la question » revient ici avec la question
+  // du rapport refusé déjà écrite — la retaper de mémoire était le plus sûr
+  // moyen de reposer la même question en moins bien.
+  const [prompt, setPrompt] = React.useState(promptInitial || '');
   const [saved, setSaved] = React.useState(null);
-  useEffectS(() => { axListReports().then(setSaved).catch(() => setSaved([])); }, []);
+  // `GET /reports` rend `{items, has_more}` depuis Task 3 (une liste nue
+  // renvoyait les 400 rapports d'un compte à chaque ouverture).
+  useEffectS(() => {
+    axRapports({ limit: 20 })
+      .then((page) => setSaved((page && page.items) || []))
+      .catch(() => setSaved([]));
+  }, []);
   const types = REPORT_TYPES;
   const tpl = REPORT_TEMPLATES[lang];
   const sel = types.find((x) => x.id === type);
   const credits = sel.cost;
   const fmtD = (iso) => new Date(iso).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+
+  /* Un rapport `en_cours` s'ouvre sur l'écran de suivi, pas sur l'éditeur : il
+     n'a pas encore de contenu. C'est ce qui rend vraie la promesse « vous
+     pouvez naviguer ailleurs » — la liste est le chemin de retour. */
+  const ouvrir = (r) => {
+    if (r.statut === EN_COURS && onOuvrirEnCours) { onOuvrirEnCours(r); return; }
+    if (onOpenReport) onOpenReport(r.id);
+  };
 
   const savedList = saved && saved.length > 0 && (
     <div style={{ marginTop: 34 }}>
@@ -4250,15 +4380,29 @@ function ReportsEmpty({ onStart, onOpenReport }) {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 760 }}>
         {saved.map((r) => (
-          <button key={r.id} onClick={() => onOpenReport && onOpenReport(r.id)}
+          <button key={r.id} onClick={() => ouvrir(r)}
             style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
                      background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10,
                      padding: '11px 14px', cursor: 'pointer', color: 'var(--fg)', textAlign: 'left', fontSize: 13.5 }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
-              <Icon name="file" size={13} />
+              <Icon name={r.statut === EN_COURS ? 'zap' : 'file'} size={13} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</span>
             </span>
-            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', flexShrink: 0 }}>{r.created_at ? fmtD(r.created_at) : ''}</span>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', flexShrink: 0,
+                                            display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              {r.statut === EN_COURS ? (
+                <>
+                  <span style={{ width: 54, height: 3, background: 'var(--surface-3, var(--surface))',
+                                 borderRadius: 3, overflow: 'hidden', display: 'inline-block' }}>
+                    <span style={{ display: 'block', height: '100%', width: (r.progression || 0) + '%',
+                                   background: 'var(--v-bright)' }} />
+                  </span>
+                  <span style={{ color: 'var(--v-bright)' }}>{r.progression || 0} %</span>
+                </>
+              ) : r.statut === SOURCES_INSUFFISANTES ? (
+                <span style={{ color: '#F5C16C' }}>{t('reports.sources_insuf.titre')}</span>
+              ) : r.created_at ? fmtD(r.created_at) : ''}
+            </span>
           </button>
         ))}
       </div>
@@ -4301,7 +4445,7 @@ function ReportsEmpty({ onStart, onOpenReport }) {
         <div className="rep-prompt-foot">
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
             <div className="rep-estimate">
-              {t('reports.estimate')} : <strong>{credits}</strong> {t('reports.cost')} · ~1 min
+              {t('reports.estimate')} : <strong>{credits}</strong> {t('reports.cost')} · {t('reports.estimate_delai')}
             </div>
           </div>
           <button className="btn btn-primary" onClick={() => onStart({ type, analysisType: sel.at, prompt })}>
@@ -4328,75 +4472,340 @@ function ReportsEmpty({ onStart, onOpenReport }) {
 /* =================================================================
    REPORTS — Generating (state 2)
    ================================================================= */
-function ReportsGenerating({ genMeta }) {
+function ReportsGenerating({ etat, onStop, onRelancer, onRetour, onSignaler }) {
   const t = window.useT();
   const lang = window.AXIAL_LANG || 'fr';
-  const [elapsed, setElapsed] = React.useState(0);
-  useEffectS(() => {
-    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
 
-  // Progression RÉELLE émise par le backend (flux SSE). Repli sur le temps
-  // écoulé si le flux n'est pas disponible.
-  const steps = lang === 'fr'
-    ? ['Recherche des sources (web + vos documents)', 'Analyse et rédaction', 'Finalisation']
-    : ['Gathering sources (web + your documents)', 'Analysis & writing', 'Finalizing'];
-  const pct = genMeta && typeof genMeta.progress === 'number' ? genMeta.progress : null;
-  const ETATS = lang === 'fr'
-    ? { start: 'Démarrage', retrieve: 'Recherche documentaire', generate: 'Rédaction en cours',
-        finalize: 'Finalisation', done: 'Terminé' }
-    : { start: 'Starting', retrieve: 'Gathering sources', generate: 'Writing',
-        finalize: 'Finalizing', done: 'Done' };
-  const etatCourant = (genMeta && ETATS[genMeta.step])
-    || (lang === 'fr' ? 'Génération en cours' : 'Generating');
-  const current = pct === null
-    ? (elapsed < 15 ? 0 : elapsed < 35 ? 1 : 2)
-    : (pct < 40 ? 0 : pct < 90 ? 1 : 2);
+  /* Chronomètre calculé depuis l'INSTANT DE DÉPART, et non incrémenté d'une
+     seconde par tic : un onglet en arrière-plan voit ses `setInterval`
+     ralentis par le navigateur, et le compteur « qui se fige » reproché à cet
+     écran venait de là. L'intervalle ne sert qu'à redessiner ; il n'est arrêté
+     que sur un statut terminal. */
+  const terminal = estTerminal(etat && etat.statut);
+  const depart = React.useMemo(() => {
+    // `created_at` arrive en « 2026-09-12 17:12:36+02:00 » (espace, pas « T ») :
+    // Chrome l'accepte, Safari rend NaN. Sans ce garde-fou, le chronomètre
+    // affichait « NaN:NaN » sur la moitié des navigateurs.
+    const brut = etat && etat.debut ? new Date(etat.debut).getTime() : NaN;
+    return Number.isFinite(brut) ? brut : Date.now();
+  }, [etat && etat.debut]);
+  const [, tic] = React.useReducer((x) => x + 1, 0);
+  useEffectS(() => {
+    if (terminal) return undefined;
+    const id = setInterval(() => tic(), 1000);
+    return () => clearInterval(id);
+  }, [terminal]);
+  const ecoule = Math.max(0, Math.floor((Date.now() - depart) / 1000));
+  const chrono = `${Math.floor(ecoule / 60)}:${String(ecoule % 60).padStart(2, '0')}`;
+
+  const pct = (etat && typeof etat.progression === 'number') ? etat.progression : 0;
+  const detail = (etat && etat.detail) || {};
+  const etapeCourante = (etat && etat.etape) || null;
+  const rangCourant = etapeCourante ? RAPPORT_ETAPES.indexOf(etapeCourante) : -1;
+  const question = (etat && (etat.question || etat.titre))
+    || (lang === 'fr' ? 'Votre rapport' : 'Your report');
+
+  /* Statuts terminaux qui n'ouvrent PAS l'éditeur (`annule`, `echec`) : la
+     ligne de rapport reste l'état de l'écran, on affiche ce qu'elle dit plutôt
+     que de renvoyer l'utilisateur sur un écran vide sans explication. */
+  const fin = (terminal && (etat.statut === 'annule' || etat.statut === 'echec'))
+    ? {
+        titre: etat.statut === 'annule' ? t('reports.statut.annule') : t('reports.statut.echec'),
+        detail: detail.message
+          || (etat.statut === 'annule' ? t('reports.statut.annule_detail')
+                                       : t('reports.statut.echec_detail')),
+      }
+    : null;
+
+  const CLES_ETAPES = {
+    recherche: 'reports.etape.recherche', selection: 'reports.etape.selection',
+    couverture: 'reports.etape.couverture', redaction: 'reports.etape.redaction',
+    finalisation: 'reports.etape.finalisation',
+  };
+  const metaTache = (nom) => {
+    if (nom === 'recherche' && detail.sources_trouvees != null) {
+      return `${detail.sources_trouvees} ${t('reports.gen.sources_found')}`;
+    }
+    if (nom === 'selection' && detail.sources_retenues != null) {
+      return String(detail.sources_retenues);
+    }
+    if (nom === 'redaction' && detail.section) return detail.section;
+    return null;
+  };
 
   return (
     <div className="surface" style={{ paddingBottom: 32 }}>
       <div className="surface-head">
         <div>
-          <h1>{t('reports.gen.title')}</h1>
-          <p>{lang === 'fr'
-            ? 'Vous pouvez naviguer ailleurs — le rapport s\'ouvrira ici dès qu\'il est prêt.'
-            : 'You can navigate away — the report will open here as soon as it\'s ready.'}</p>
+          <h1>{fin ? fin.titre : t('reports.gen.title')}</h1>
+          <p>{fin ? fin.detail : t('reports.gen.navigate')}</p>
         </div>
         <TopControls />
       </div>
 
       <div className="rep-gen">
         <div className="rep-gen-doc">
-          <h1 style={{ fontSize: 20 }}>{(genMeta && genMeta.prompt) || (lang === 'fr' ? 'Votre rapport' : 'Your report')}</h1>
+          <h1 style={{ fontSize: 20 }}>{question}</h1>
           <div className="doc-meta mono" style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span className="ax-thinking"><span className="dots"><i /><i /><i /></span></span>
-            <span>{etatCourant} · {Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, '0')}{pct !== null ? ` · ${pct} %` : ''}</span>
+            {!terminal && <span className="ax-thinking"><span className="dots"><i /><i /><i /></span></span>}
+            <span>{fin ? fin.titre : libelleEtape(etat, t)} · {chrono}{fin ? '' : ` · ${pct} %`}</span>
           </div>
-          {pct !== null && (
-            <div style={{ height: 3, background: 'var(--surface-2)', borderRadius: 3, overflow: 'hidden', margin: '12px 0 0' }}>
-              <div style={{ height: '100%', width: pct + '%', background: 'var(--v-bright)', transition: 'width .4s ease' }} />
-            </div>
+
+          {etat && etat.suiviAbandonne && !terminal && (
+            <p style={{ fontSize: 13, color: 'var(--fg-2)', margin: '0 0 14px' }}>
+              {t('reports.gen.suivi_perdu')}
+            </p>
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, margin: '22px 0' }}>
-            {steps.map((s, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13.5,
-                color: i < current ? 'var(--success)' : i === current ? 'var(--fg)' : 'var(--fg-3)' }}>
-                {i < current
-                  ? <Icon name="check" size={13} />
-                  : i === current
-                    ? <span style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--v-bright)', boxShadow: '0 0 8px var(--v-bright)', flexShrink: 0 }} />
-                    : <span style={{ width: 10, height: 10, borderRadius: '50%', border: '1px solid var(--border-strong)', flexShrink: 0 }} />}
-                {s}
+          {fin ? (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 18 }}>
+              {onRelancer && (
+                <button className="btn btn-primary btn-sm" onClick={onRelancer}>
+                  <Icon name="sparkle" size={14} /> {t('reports.statut.relancer')}
+                </button>
+              )}
+              {onSignaler && (
+                <button className="btn btn-secondary btn-sm" onClick={onSignaler}>
+                  <Icon name="message-square" size={14} /> {t('reports.signalement.ouvrir')}
+                </button>
+              )}
+              <button className="btn btn-ghost btn-sm" onClick={onRetour}>{t('common.back')}</button>
+            </div>
+          ) : (
+            <>
+              <div className="skeleton med"></div>
+              <div className="skeleton"></div>
+              <div className="skeleton"></div>
+              <div className="skeleton med"></div>
+            </>
+          )}
+        </div>
+
+        {/* Panneau de suivi : la colonne de 360 px que la grille `.rep-gen`
+            réservait depuis toujours et que rien ne remplissait. */}
+        <div className="rep-gen-side">
+          <div className="rep-gen-progress">
+            <div className="rep-gen-progress-label">
+              <span>{t('reports.gen.progression')}</span>
+              <span>{pct} %</span>
+            </div>
+            <div className="rep-gen-progress-track">
+              <div className="rep-gen-progress-fill" style={{ width: pct + '%' }} />
+            </div>
+            <div className="rep-gen-progress-label">
+              <span>{t('reports.gen.elapsed')}</span>
+              <span>{chrono}</span>
+            </div>
+          </div>
+
+          <div className="task-list">
+            {RAPPORT_ETAPES.map((nom, i) => {
+              const passee = terminal ? !fin : (rangCourant > i);
+              const active = !terminal && rangCourant === i;
+              const meta = metaTache(nom);
+              return (
+                <div key={nom} className={'task' + (passee ? ' done' : active ? ' active' : '')}>
+                  <span className="task-dot">
+                    {passee ? <Icon name="check" size={11} /> : null}
+                  </span>
+                  <div className="task-body">
+                    <div className="task-title">{t(CLES_ETAPES[nom])}</div>
+                    {meta && <div className="task-meta">{meta}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {!terminal && onStop && (
+            <button className="btn btn-secondary btn-sm"
+              disabled={!!(etat && etat.annulationDemandee)}
+              onClick={onStop}>
+              <Icon name="stop" size={13} />
+              {(etat && etat.annulationDemandee) ? t('reports.gen.stopping') : t('reports.gen.stop')}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =================================================================
+   REPORTS — Sources insuffisantes (spec §2)
+   ================================================================= */
+/* Le moteur s'est arrêté AVANT le modèle de rédaction : rien n'a été débité.
+   L'écran montre ce qu'il a trouvé et laisse les trois seules issues qui ont
+   un sens — reformuler, chercher plus large, ou générer en l'assumant. */
+function ReportsSourcesInsuffisantes({ etat, onReformuler, onElargir, onForcer,
+                                       onRetour, occupe }) {
+  const t = window.useT();
+  const detail = (etat && etat.detail) || {};
+  const sources = Array.isArray(detail.sources) ? detail.sources : [];
+  return (
+    <div className="surface">
+      <div className="surface-head">
+        <div>
+          <h1>{t('reports.sources_insuf.titre')}</h1>
+          <p>{t('reports.sources_insuf.body')}</p>
+        </div>
+        <TopControls />
+      </div>
+
+      <div className="gap-callout" style={{ maxWidth: 820 }}>
+        <div className="gap-callout-head">
+          <Icon name="alert" size={13} /> {(etat && etat.question) || ''}
+        </div>
+        <p>{detail.message || t('reports.sources_insuf.body')}</p>
+        <div className="gap-callout-actions" style={{ flexWrap: 'wrap' }}>
+          <button className="btn btn-primary btn-sm" disabled={!!occupe}
+            onClick={onReformuler}>
+            <Icon name="edit" size={13} /> {t('reports.sources_insuf.reformuler')}
+          </button>
+          <button className="btn btn-secondary btn-sm" disabled={!!occupe}
+            onClick={onElargir}>
+            <Icon name="search" size={13} /> {t('reports.sources_insuf.elargir')}
+          </button>
+          <button className="btn btn-secondary btn-sm" disabled={!!occupe}
+            onClick={onForcer} title={t('reports.sources_insuf.forcer_aide')}>
+            <Icon name="sparkle" size={13} /> {t('reports.sources_insuf.forcer')}
+          </button>
+          <button className="btn btn-ghost btn-sm" onClick={onRetour}>{t('common.back')}</button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 26, maxWidth: 820 }}>
+        <div className="section-label">{t('reports.sources_insuf.trouvees')}</div>
+        {sources.length === 0 ? (
+          <p style={{ fontSize: 13.5, color: 'var(--fg-2)' }}>{t('reports.sources_insuf.aucune')}</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {sources.map((src, i) => (
+              <div key={i} className="source-card" style={{ cursor: 'default' }}>
+                <span className="num">{i + 1}</span>
+                <div className="title">
+                  {src.url
+                    ? <a href={src.url} target="_blank" rel="noreferrer"
+                        style={{ color: 'var(--fg)', textDecoration: 'none' }}>
+                        {src.titre || src.url}
+                      </a>
+                    : (src.titre || '—')}
+                </div>
+                <div className="src">{src.domaine || ''}</div>
               </div>
             ))}
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
-          <div className="skeleton med"></div>
-          <div className="skeleton"></div>
-          <div className="skeleton"></div>
-          <div className="skeleton med"></div>
+/* =================================================================
+   REPORTS — Bandeau d'un rapport dégradé / partiel (spec §3)
+   ================================================================= */
+/* `statut = degrade` et `detail.raison` étaient renvoyés par le backend et lus
+   par personne : un rapport tronqué s'affichait exactement comme un rapport
+   complet. La raison est désormais en clair, en tête du document. */
+function BandeauDegrade({ etat }) {
+  const t = window.useT();
+  const texte = libelleRaison(etat, t);
+  if (!texte) return null;
+  return (
+    <div className="gap-callout" style={{ maxWidth: 820 }} role="status">
+      <div className="gap-callout-head">
+        <Icon name="alert" size={13} /> {t('reports.degrade.titre')}
+      </div>
+      <p style={{ margin: 0 }}>{texte}</p>
+    </div>
+  );
+}
+
+/* =================================================================
+   REPORTS — Signalement / avis (spec §3)
+   ================================================================= */
+/* Un seul formulaire pour « Signaler un problème » et « Votre avis » : le
+   Google Form ne transmettait ni l'identifiant du rapport ni son titre, donc
+   aucun signalement n'était exploitable — et il n'était pas traduit. */
+function ModaleSignalement({ rapportId, onFerme }) {
+  const t = window.useT();
+  const [motif, setMotif] = React.useState(MOTIFS_SIGNALEMENT[0]);
+  const [note, setNote] = React.useState(0);
+  const [commentaire, setCommentaire] = React.useState('');
+  const [envoi, setEnvoi] = React.useState(false);
+  const [resultat, setResultat] = React.useState(null);  // 'ok' | 'echec'
+
+  const envoyer = async () => {
+    setEnvoi(true);
+    setResultat(null);
+    try {
+      await axSignalerRapport(rapportId, {
+        motif, note: note || null, commentaire: commentaire.trim() || null,
+      });
+      setResultat('ok');
+    } catch (e) { setResultat('echec'); }
+    setEnvoi(false);
+  };
+
+  return (
+    <div className="wizard-modal" onClick={onFerme} role="presentation">
+      <div className="ax-modale-etroite" role="dialog" aria-modal="true"
+        aria-label={t('reports.signalement.titre')} onClick={(e) => e.stopPropagation()}>
+        <div className="ax-modale-head">
+          <div className="ax-modale-icone"><Icon name="message-square" size={18} /></div>
+          <h3>{t('reports.signalement.titre')}</h3>
+          <p>{resultat === 'ok' ? t('reports.signalement.merci') : t('reports.signalement.body')}</p>
+        </div>
+
+        {resultat !== 'ok' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '0 4px' }}>
+            <label style={{ fontSize: 12.5, color: 'var(--fg-2)' }}>
+              {t('reports.signalement.motif')}
+              <select value={motif} onChange={(e) => setMotif(e.target.value)}
+                style={{ display: 'block', width: '100%', marginTop: 5, padding: '8px 10px',
+                         background: 'var(--surface-2)', color: 'var(--fg)',
+                         border: '1px solid var(--border)', borderRadius: 8, fontSize: 13.5 }}>
+                {MOTIFS_SIGNALEMENT.map((m) => (
+                  <option key={m} value={m}>{t(`reports.signalement.motif.${m}`)}</option>
+                ))}
+              </select>
+            </label>
+
+            <div style={{ fontSize: 12.5, color: 'var(--fg-2)' }}>
+              {t('reports.signalement.note')}
+              <div style={{ display: 'flex', gap: 6, marginTop: 5 }}>
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button key={n} className={'btn btn-sm ' + (note === n ? 'btn-primary' : 'btn-secondary')}
+                    onClick={() => setNote(note === n ? 0 : n)}>{n}</button>
+                ))}
+              </div>
+            </div>
+
+            <label style={{ fontSize: 12.5, color: 'var(--fg-2)' }}>
+              {t('reports.signalement.commentaire')}
+              <textarea value={commentaire} onChange={(e) => setCommentaire(e.target.value)}
+                placeholder={t('reports.signalement.commentaire_aide')}
+                rows={4} maxLength={4000}
+                style={{ display: 'block', width: '100%', marginTop: 5, padding: '8px 10px',
+                         background: 'var(--surface-2)', color: 'var(--fg)', resize: 'vertical',
+                         border: '1px solid var(--border)', borderRadius: 8, fontSize: 13.5 }} />
+            </label>
+
+            {resultat === 'echec' && (
+              <span style={{ fontSize: 12.5, color: 'var(--error, #e5484d)' }}>
+                {t('reports.signalement.echec')}
+              </span>
+            )}
+          </div>
+        )}
+
+        <div className="ax-modale-actions">
+          {resultat !== 'ok' && (
+            <button className="btn btn-primary" disabled={envoi} onClick={envoyer}>
+              {envoi ? t('reports.signalement.envoi') : t('reports.signalement.envoyer')}
+            </button>
+          )}
+          <button className="btn btn-ghost" onClick={onFerme}>{t('common.close')}</button>
         </div>
       </div>
     </div>
@@ -4440,8 +4849,49 @@ function renderInlineNodes(nodes, kp, onCite) {
    (rapport, message relu), rendu à la volée quand le bloc arrive en flux (chat),
    tableau de repli quand le graphique n'a pas pu être tracé. Le graphique
    lui-même est toujours produit côté serveur : un seul moteur, un seul look. */
-function VizFigure({ viz, brut, ferme, live }) {
+/* L'image d'un graphique, allée chercher avec le jeton.
+   Depuis Task 3, `GET /viz/{empreinte}.svg` exige l'authentification (ou
+   `?p=<jeton de partage>` sur la page publique) : un `<img src>` n'envoie
+   aucun en-tête, il ne recevait plus qu'un 401 et laissait un cadre vide. On
+   récupère donc le SVG par `fetch` (cache borné dans le bridge) et on en fait
+   une URL d'objet, révoquée au démontage. */
+function ImageViz({ empreinte, jetonPartage, onEchec }) {
+  const [url, setUrl] = React.useState(null);
+  const [echec, setEchec] = React.useState(false);
+  React.useEffect(() => {
+    let actif = true;
+    let objet = null;
+    setEchec(false);
+    setUrl(null);
+    axVizSvg(empreinte, jetonPartage)
+      .then((svg) => {
+        if (!actif) return;
+        objet = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+        setUrl(objet);
+      })
+      .catch(() => { if (actif) setEchec(true); });
+    return () => {
+      actif = false;
+      // Sans révocation, chaque remontage de l'éditeur (changement de langue,
+      // de thème) laissait un blob de plus en mémoire jusqu'au rechargement.
+      if (objet) URL.revokeObjectURL(objet);
+    };
+  }, [empreinte, jetonPartage]);
+  React.useEffect(() => { if (echec && onEchec) onEchec(); }, [echec]);
+  if (echec) return null;                 // le repli en tableau prend la main
+  if (!url) return <div className="viz-attente">{libelle('Graphique en préparation…')}</div>;
+  return (
+    <figure className="viz">
+      <img src={url} alt="" />
+    </figure>
+  );
+}
+
+function VizFigure({ viz, brut, ferme, live, jetonPartage }) {
   const [etat, setEtat] = React.useState(viz ? { statut: viz.statut, empreinte: viz.empreinte } : null);
+  // Image refusée ou indisponible : on retombe sur le tableau du bloc plutôt
+  // que de laisser un cadre vide — les données ne se perdent pas.
+  const [imageEchouee, setImageEchouee] = React.useState(false);
   React.useEffect(() => {
     if (viz) { setEtat({ statut: viz.statut, empreinte: viz.empreinte }); return; }
     if (!ferme || live) return;                       // en flux : attendre la fermeture du bloc et la fin
@@ -4458,11 +4908,10 @@ function VizFigure({ viz, brut, ferme, live }) {
     return <div className="viz-attente">{libelle('Graphique en préparation…')}</div>;
   }
   if (!etat) return <div className="viz-attente">…</div>;
-  if (etat.statut === 'ok' && etat.empreinte) {
+  if (etat.statut === 'ok' && etat.empreinte && !imageEchouee) {
     return (
-      <figure className="viz">
-        <img src={`${AX_API}/viz/${etat.empreinte}.svg`} alt="" />
-      </figure>
+      <ImageViz empreinte={etat.empreinte} jetonPartage={jetonPartage || null}
+        onEchec={() => setImageEchouee(true)} />
     );
   }
   // Repli : les données du bloc, en tableau — rien ne se perd.
@@ -4515,7 +4964,7 @@ const REGEX_GRAPHIQUE = /^\s*\**\s*(graphique|chart)\s*:/i;
 // `>` imbriquée) en partageant le même compteur de visualisations que le
 // serveur — `vizIndexRef` est un objet mutable `{ current }` passé par
 // référence pour rester correct à travers la récursion des citations.
-function renderBlocsMarkdown(blocks, kp, onCite, vizs, live, vizIndexRef) {
+function renderBlocsMarkdown(blocks, kp, onCite, vizs, live, vizIndexRef, jetonPartage) {
   const elems = [];
   let i = 0;
   while (i < blocks.length) {
@@ -4528,7 +4977,8 @@ function renderBlocsMarkdown(blocks, kp, onCite, vizs, live, vizIndexRef) {
       const k = vizIndexRef.current++;
       const v = (vizs || [])[k];
       if (v && v.statut === 'ok') {
-        elems.push(<VizFigure key={'v' + k} viz={v} ferme={true} live={false} />);
+        elems.push(<VizFigure key={'v' + k} viz={v} ferme={true} live={false}
+                     jetonPartage={jetonPartage} />);
       } else {
         elems.push(
           <p key={'gt' + k} style={{ margin: '10px 0 4px', fontWeight: 700 }}>
@@ -4551,7 +5001,8 @@ function renderBlocsMarkdown(blocks, kp, onCite, vizs, live, vizIndexRef) {
     switch (b.type) {
       case 'viz': {
         const k = vizIndexRef.current++;
-        elems.push(<VizFigure key={'v' + k} viz={(vizs || [])[k]} brut={b.raw} ferme={b.closed} live={!!live} />);
+        elems.push(<VizFigure key={'v' + k} viz={(vizs || [])[k]} brut={b.raw}
+                     ferme={b.closed} live={!!live} jetonPartage={jetonPartage} />);
         break;
       }
       case 'heading': {
@@ -4570,7 +5021,7 @@ function renderBlocsMarkdown(blocks, kp, onCite, vizs, live, vizIndexRef) {
       case 'quote':
         elems.push(
           <blockquote key={key} style={{ margin: '10px 0', padding: '2px 14px', borderLeft: '3px solid var(--border-strong)', color: 'var(--fg-2)' }}>
-            {renderBlocsMarkdown(b.blocks, key, onCite, vizs, live, vizIndexRef)}
+            {renderBlocsMarkdown(b.blocks, key, onCite, vizs, live, vizIndexRef, jetonPartage)}
           </blockquote>,
         );
         break;
@@ -4605,18 +5056,23 @@ function renderBlocsMarkdown(blocks, kp, onCite, vizs, live, vizIndexRef) {
   return elems;
 }
 
-function MarkdownView({ text, onCite, vizs, live }) {
+function MarkdownView({ text, onCite, vizs, live, jetonPartage }) {
   const blocks = React.useMemo(() => parserMarkdown(text || ''), [text]);
   const vizIndexRef = React.useRef(0);
   vizIndexRef.current = 0;   // rang du bloc de visualisation, même comptage que le serveur
-  return <div>{renderBlocsMarkdown(blocks, 'm', onCite, vizs, live, vizIndexRef)}</div>;
+  return <div>{renderBlocsMarkdown(blocks, 'm', onCite, vizs, live, vizIndexRef, jetonPartage || null)}</div>;
 }
 
 function ReportsEditor({ data, onBack }) {
   const lang = window.AXIAL_LANG || 'fr';
   const t = window.useT();
   const [saving, setSaving] = React.useState(false);
-  const [savedId, setSavedId] = React.useState((data && data.report_id) || null);
+  /* Un rapport naît d'une ligne créée par le moteur : il a TOUJOURS un
+     identifiant. Le repli « archiver d'abord » (`POST /reports`) a disparu —
+     la route est réservée aux administrateurs depuis Task 3 (spec §5.2), elle
+     rendrait 403 à un utilisateur normal. Sans identifiant, on n'invente plus
+     un rapport : on n'affiche pas les boutons qui en ont besoin. */
+  const rapportId = (data && (data.report_id || data.id)) || null;
   const title = (data && data.title) || (lang === 'fr' ? 'Rapport' : 'Report');
   const content = (data && data.content) || '';
   const sources = (data && data.sources) || [];
@@ -4624,36 +5080,33 @@ function ReportsEditor({ data, onBack }) {
   const [envoi, setEnvoi] = React.useState('');
   const [envoiMsg, setEnvoiMsg] = React.useState(null);
   const [outils, setOutils] = React.useState({});
+  const [signalement, setSignalement] = React.useState(false);
   React.useEffect(() => { axIntegrations().then(setOutils).catch(() => {}); }, []);
 
-  // La livraison exige un rapport archivé : on le sauvegarde d'abord si besoin.
   const livrer = async (provider) => {
+    if (!rapportId) return;
     setEnvoi(provider); setEnvoiMsg(null);
     try {
-      let id = savedId;
-      if (!id) {
-        const r = await axCreateReport({ title, content, analysis_type: (data && data.analysis_type) || 'synthese_executive', sources });
-        id = r.id; setSavedId(id);
-      }
-      const res = await axDeliverReport(provider, id);
+      const res = await axDeliverReport(provider, rapportId);
       setEnvoiMsg({ ok: true, url: res.url,
-                    texte: provider === 'notion' ? 'Page Notion créée' : 'Déposé dans votre Drive' });
+                    texte: provider === 'notion' ? libelle('Page Notion créée')
+                                                 : libelle('Déposé dans votre Drive') });
     } catch (e) {
-      setEnvoiMsg({ ok: false, texte: (e && e.message) || 'Envoi impossible.' });
+      setEnvoiMsg({ ok: false, texte: (e && e.message) || libelle('Envoi impossible.') });
     }
     setEnvoi('');
   };
 
   const exportPdf = async () => {
+    if (!rapportId) return;
     setSaving(true);
+    setEnvoiMsg(null);
     try {
-      let id = savedId;
-      if (!id) {
-        const r = await axCreateReport({ title, content, analysis_type: (data && data.analysis_type) || 'synthese_executive', sources });
-        id = r.id; setSavedId(id);
-      }
-      await axDownloadReportPdf(id, title.slice(0, 60) + '.pdf');
-    } catch (e) { /* noop */ }
+      await axDownloadReportPdf(rapportId, title.slice(0, 60) + '.pdf');
+    } catch (e) {
+      // Un export raté se taisait : l'utilisateur cliquait, rien ne se passait.
+      setEnvoiMsg({ ok: false, texte: decrireErreur(e, t).detail });
+    }
     setSaving(false);
   };
 
@@ -4672,19 +5125,21 @@ function ReportsEditor({ data, onBack }) {
       <div className="editor-head">
         <button className="btn btn-ghost btn-sm" onClick={onBack}><Icon name="arrow-left" size={14} /></button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button className="btn btn-primary btn-sm" onClick={exportPdf} disabled={saving}>
-            <Icon name="download" size={14} />{saving ? (lang === 'fr' ? 'Export…' : 'Exporting…') : 'PDF'}
+          <button className="btn btn-primary btn-sm" onClick={exportPdf}
+            disabled={saving || !rapportId}>
+            <Icon name="download" size={14} />{saving ? libelle('Export…') : 'PDF'}
           </button>
-          {/* Aucun moyen de dire ce qu'on pense d'un rapport n'existait dans
-              l'app : le seul retour produit jamais reçu est arrivé par
-              WhatsApp. Le bouton se trouve à côté du rapport lui-même, au
-              moment où l'utilisateur a un avis. */}
-          <a className="btn btn-secondary btn-sm" href={FORMULAIRE_FEEDBACK}
-            target="_blank" rel="noopener noreferrer"
-            title={libelle("Dites-nous ce que vaut ce rapport")}>
-            <Icon name="message-square" size={14} />{t('reports.feedback')}
-          </a>
-          {(outils.notion && outils.notion.connecte) && (
+          {/* « Votre avis » et « Signaler un problème » ouvrent LE MÊME
+              formulaire, dans l'app : le Google Form public ne transmettait ni
+              l'identifiant du rapport ni son titre. */}
+          {rapportId && (
+            <button className="btn btn-secondary btn-sm"
+              onClick={() => setSignalement(true)}
+              title={libelle("Dites-nous ce que vaut ce rapport")}>
+              <Icon name="message-square" size={14} />{t('reports.feedback')}
+            </button>
+          )}
+          {rapportId && (outils.notion && outils.notion.connecte) && (
             <button className="btn btn-secondary btn-sm" disabled={!!envoi}
               onClick={() => livrer('notion')}>
               <Icon name="file" size={14} />{envoi === 'notion' ? '…' : 'Notion'}
@@ -4700,6 +5155,8 @@ function ReportsEditor({ data, onBack }) {
           )}
         </div>
       </div>
+
+      <BandeauDegrade etat={etatDepuisRapport(data)} />
 
       <div className="rep-doc" style={{ fontSize: 14, maxWidth: 820 }}>
         {content
@@ -4732,52 +5189,22 @@ function ReportsEditor({ data, onBack }) {
           </div>
         </div>
       )}
+
+      {signalement && rapportId && (
+        <ModaleSignalement rapportId={rapportId} onFerme={() => setSignalement(false)} />
+      )}
     </div>
   );
 }
 
-/* =================================================================
-   REPORTS — Quota Exceeded (state 6)
-   ================================================================= */
-function ReportsQuota({ needed, available, onBack, onSeeCredits }) {
-  const t = window.useT();
-  const lang = window.AXIAL_LANG || 'fr';
-  return (
-    <div className="surface">
-      <div className="surface-head">
-        <div>
-          <h1>{t('reports.quota.title')}</h1>
-          <p>{t('reports.quota.body')}</p>
-        </div>
-        <TopControls />
-      </div>
-      <div className="quota-card">
-        <div className="quota-usage">
-          <h3>{t('reports.quota.title')}</h3>
-          <p style={{ fontSize: 13.5, color: 'var(--fg-2)', lineHeight: 1.6, margin: '6px 0 0' }}>
-            {t('reports.quota.body')}
-          </p>
-          {needed != null && available != null && (
-            <p style={{ fontSize: 12.5, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)', margin: '10px 0 0' }}>
-              {lang === 'fr'
-                ? `Ce rapport coûte ${needed} crédits, vous en avez ${available}.`
-                : `This report costs ${needed} credits, you have ${available}.`}
-            </p>
-          )}
-        </div>
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
-        <button className="btn btn-ghost" onClick={onBack}>{t('common.back')}</button>
-        <button className="btn btn-secondary" onClick={onSeeCredits}>{t('reports.quota.see_credits')}</button>
-      </div>
-    </div>
-  );
-}
-
+/* `ReportsQuota` a disparu : deux écrans différents disaient « crédits
+   insuffisants » selon qu'on l'apprenait avant l'appel (garde locale) ou après
+   (402). C'est désormais la `ModaleCredits` des conversations dans les deux
+   cas — un seul écran crédits (spec §6). */
 window.ReportsEmpty = ReportsEmpty;
 window.ReportsGenerating = ReportsGenerating;
 window.ReportsEditor = ReportsEditor;
-window.ReportsQuota = ReportsQuota;
+window.ReportsSourcesInsuffisantes = ReportsSourcesInsuffisantes;
 window.TopControls = TopControls;
 
 
@@ -6790,7 +7217,7 @@ var { useState, useEffect, useMemo, useRef } = React;
    'conversations' | 'reports' | 'agents' | 'memory' | 'credits' | 'settings'
 
    Reports flow states (within reports sub-route):
-   'empty' | 'generating' | 'editor' | 'quota'
+   'empty' | 'generating' | 'editor' | 'sources' | 'erreur'
 
    Agents flow states (within agents sub-route):
    'library' | 'session'
@@ -7046,58 +7473,250 @@ function App() {
       }).catch(() => {});
     }
   }, [route]);
-  const [reportsState, setReportsState] = useState('empty'); // empty | generating | editor | quota | erreur
+  /* ------------------------------------------------------------------
+     Rapports — la LIGNE de rapport est l'état de l'écran (spec §1, §6)
+     ------------------------------------------------------------------
+     `reportsState` ne porte plus que le choix d'écran ; tout ce qui décrit
+     l'avancement (`statut`, `etape`, `progression`, `detail`) vit dans
+     `rapportEnCours`, alimenté par le flux SSE PUIS par le polling, et
+     recopié dans `localStorage` pour qu'un rechargement de page reprenne le
+     suivi au lieu de le perdre. */
+  const [reportsState, setReportsState] = useState('empty'); // empty | generating | editor | sources | erreur
   const [reportData, setReportData] = useState(null);
-  const [genMeta, setGenMeta] = useState(null); // { prompt } pendant la génération
-  const [quotaInfo, setQuotaInfo] = useState(null); // { needed, available } quand le solde ne suffit pas
+  const [rapportEnCours, setRapportEnCours] = useState(null);
+  const [questionInitiale, setQuestionInitiale] = useState('');
+  const [relanceEnCours, setRelanceEnCours] = useState(false);
+  /* Signalement ouvert depuis l'écran de SUIVI (un rapport `echec`/`annule`
+     n'entre jamais dans l'éditeur, qui porte son propre bouton). */
+  const [signalementRapport, setSignalementRapport] = useState(null);
   /* Échec de génération : { erreur, args } — `args` permet au bouton
      « Réessayer » de relancer EXACTEMENT la même demande. */
   const [erreurRapport, setErreurRapport] = useState(null);
+
+  /* Un seul point d'écriture de l'état de suivi : il met à jour React ET le
+     stockage local. Deux écritures séparées auraient fini par diverger. */
+  const rapportEnCoursRef = useRef(null);
+  /* Vrai pendant qu'un flux SSE suit ce rapport : le polling se tait alors,
+     pour ne pas interroger `GET /reports/{id}` toutes les 3 s en plus des
+     lectures que le flux fait déjà côté serveur. Dès que le flux tombe, le
+     drapeau retombe et le polling reprend sans rien à recâbler. */
+  const fluxActifRef = useRef(false);
+  const memoriserRapport = React.useCallback((etat) => {
+    rapportEnCoursRef.current = etat;
+    setRapportEnCours(etat);
+    try {
+      const brut = versStockage(etat);
+      if (brut && !estTerminal(etat.statut)) {
+        localStorage.setItem(RAPPORT_CLE_STOCKAGE, brut);
+      } else {
+        // Statut terminal : plus rien à reprendre. Laisser la clé en place
+        // rouvrirait indéfiniment un rapport déjà lu à chaque chargement.
+        localStorage.removeItem(RAPPORT_CLE_STOCKAGE);
+      }
+    } catch (e) { /* navigation privée : la reprise est un confort, pas un dû */ }
+  }, []);
+
+  /* Oublier le suivi : plus de reprise, plus de polling. */
+  const oublierRapport = React.useCallback(() => {
+    rapportEnCoursRef.current = null;
+    setRapportEnCours(null);
+    try { localStorage.removeItem(RAPPORT_CLE_STOCKAGE); } catch (e) {}
+  }, []);
+
+  /* Que faire d'un rapport arrivé à son terme. Un seul endroit : le flux, le
+     polling et la relance aboutissent tous ici, et doivent aboutir au même
+     écran pour le même statut. */
+  const rangerRapportTermine = React.useCallback((rapport) => {
+    const etat = etatDepuisRapport(rapport);
+    if (!etat) return;
+    memoriserRapport(etat);
+    if (etat.statut === SOURCES_INSUFFISANTES) { setReportsState('sources'); return; }
+    if (etat.statut === 'annule' || etat.statut === 'echec') {
+      setReportsState('generating');   // l'écran de suivi rend aussi ces fins
+      return;
+    }
+    // `termine` / `degrade` : le rapport existe, on l'ouvre. Le bandeau de
+    // l'éditeur dira ce qui s'est mal passé pour un `degrade`.
+    setReportData({ ...rapport, report_id: rapport.id });
+    setReportsState('editor');
+  }, [memoriserRapport]);
+
+  /* Le solde est rafraîchi à l'OUVERTURE de la liste des rapports, en plus du
+     payload final : un rapport lancé dans un autre onglet, ou le rapport
+     offert de l'onboarding, avaient débité sans que cet onglet le sache — la
+     pastille de crédits mentait jusqu'au rechargement. */
+  useEffect(() => {
+    if (route !== 'app' || subRoute !== 'reports') return;
+    axBalance().then((b) => setAxBal(b.available)).catch(() => {});
+  }, [route, subRoute]);
+
+  /* Reprise après rechargement de page : la clé locale donne l'identifiant,
+     le serveur donne la vérité. */
+  useEffect(() => {
+    if (route !== 'app') return;
+    let brut = null;
+    try { brut = localStorage.getItem(RAPPORT_CLE_STOCKAGE); } catch (e) {}
+    const repris = etatDepuisStockage(brut);
+    if (!repris) return;
+    rapportEnCoursRef.current = repris;
+    setRapportEnCours(repris);
+    setReportsState('generating');
+    axRapport(repris.id)
+      .then((r) => {
+        const etat = etatDepuisRapport(r);
+        if (estTerminal(etat.statut)) { rangerRapportTermine(r); return; }
+        memoriserRapport(etat);
+      })
+      .catch(() => {
+        // Rapport supprimé, ou compte changé : on oublie la reprise plutôt que
+        // de laisser un écran de suivi tourner sur un identifiant mort.
+        oublierRapport();
+        setReportsState('empty');
+      });
+  }, [route]);
+
+  /* Polling 3 s tant que le rapport est `en_cours`. C'est le filet du flux
+     SSE : il couvre le rechargement de page, la coupure du flux, et le suivi
+     ouvert depuis la liste « Vos rapports ». L'intervalle est arrêté dès que
+     le statut devient terminal. */
+  const idEnCours = rapportEnCours && rapportEnCours.id;
+  const statutEnCours = rapportEnCours && rapportEnCours.statut;
+  useEffect(() => {
+    if (!idEnCours || statutEnCours !== EN_COURS) return undefined;
+    let actif = true;
+    const id = setInterval(() => {
+      if (fluxActifRef.current) return;   // le flux SSE suit déjà ce rapport
+      axRapport(idEnCours).then((r) => {
+        if (!actif) return;
+        const etat = etatDepuisRapport(r);
+        if (estTerminal(etat.statut)) { rangerRapportTermine(r); return; }
+        memoriserRapport(etat);
+      }).catch(() => { /* un aller-retour raté n'interrompt pas le suivi */ });
+    }, 3000);
+    return () => { actif = false; clearInterval(id); };
+  }, [idEnCours, statutEnCours, rangerRapportTermine, memoriserRapport]);
+
   const startReport = async ({ type, analysisType, prompt }) => {
     // Le solde est connu côté client (axBal) et le coût aussi (REPORT_TYPES) :
-    // autant prévenir avant de lancer une génération vouée à l'échec.
+    // autant prévenir avant de lancer une génération vouée à l'échec. Un SEUL
+    // écran crédits désormais — la modale, ici comme sur un 402.
     const rt = REPORT_TYPES.find((x) => x.id === type);
     const cost = rt ? rt.cost : 0;
     if (axBal != null && axBal < cost) {
-      setQuotaInfo({ needed: cost, available: axBal });
-      setReportsState('quota');
+      setModaleCredits(true);
       return;
     }
-    setGenMeta({ prompt, progress: 5, step: 'start' });
     setErreurRapport(null);
+    setQuestionInitiale('');
+    memoriserRapport(etatAuLancement(prompt));
     setReportsState('generating');
+    fluxActifRef.current = true;
     try {
-      const r = await axStreamAnalysis(
+      const r = await axLancerRapport(
         { query: prompt, analysis_type: analysisType || 'synthese_executive' },
-        (evt) => setGenMeta((m) => ({ ...(m || { prompt }), progress: evt.progress ?? (m && m.progress), step: evt.step, message: evt.message })),
+        // Le PREMIER événement porte déjà `report_id` : le rapport est
+        // reprenable dès la première trame, pas seulement à la fin.
+        (evt) => memoriserRapport(etatDepuisEvenement(rapportEnCoursRef.current, evt)),
       );
-      setReportData(r);
-      setGenMeta(null);
-      setReportsState('editor');
+      fluxActifRef.current = false;
+      // Solde d'après le payload final (`done.data.balance`) : il est déjà
+      // débité, inutile d'aller le redemander.
+      if (r && typeof r.balance === 'number') setAxBal(r.balance);
+      rangerRapportTermine(r);
     } catch (e) {
+      fluxActifRef.current = false;
       /* Plus de message d'exception brut collé dans un faux rapport : l'échec est
          NOMMÉ par `decrireErreur` et rendu par la carte d'erreur du fil, avec
-         l'action qui va avec. Un message de bibliothèque (« Failed to fetch »)
-         affiché comme contenu de rapport n'apprenait rien et laissait l'écran
-         en mode éditeur, comme si un document avait été produit. */
+         l'action qui va avec. */
       const erreur = decrireErreur(e, t);
-      setGenMeta(null);
       if (erreur.action === 'reconnexion') { sessionExpiree(); return; }
       if (erreur.action === 'credits') {
         setModaleCredits(true);
         axBalance().then((b) => setAxBal(b.available)).catch(() => {});
       }
+      /* Le flux est tombé mais la TÂCHE tourne toujours côté serveur (elle a
+         sa propre session, dans son propre thread) : si on connaît déjà
+         l'identifiant du rapport, on reste sur l'écran de suivi et le polling
+         prend le relais. Repartir sur une carte d'erreur ferait croire à une
+         génération perdue — et ferait relancer, donc payer, une seconde fois. */
+      const encours = rapportEnCoursRef.current;
+      if (encours && encours.id && erreur.action === 'reessayer') {
+        memoriserRapport({ ...encours, suiviAbandonne: true });
+        return;
+      }
+      memoriserRapport({ ...(encours || etatAuLancement(prompt)), statut: 'echec' });
       setErreurRapport({ erreur, args: { type, analysisType, prompt } });
       setReportsState('erreur');
     }
   };
+
+  /* Ouvre un rapport de la liste. L'erreur n'est plus avalée : un rapport
+     supprimé entre-temps donnait un clic sans effet, sans message. */
   const openSavedReport = async (id) => {
     try {
-      const r = await axGetReport(id);
-      setReportData({ ...r, report_id: r.id });
-      setReportsState('editor');
-    } catch (e) { /* noop */ }
+      const r = await axRapport(id);
+      const etat = etatDepuisRapport(r);
+      if (etat && etat.statut === EN_COURS) {
+        memoriserRapport(etat);
+        setReportsState('generating');
+        return;
+      }
+      rangerRapportTermine(r);
+    } catch (e) {
+      const erreur = decrireErreur(e, t);
+      if (erreur.action === 'reconnexion') { sessionExpiree(); return; }
+      setErreurRapport({ erreur, args: null });
+      setReportsState('erreur');
+    }
   };
+
+  /* Stop. La route pose un drapeau ; la tâche range le rapport en `annule`
+     entre deux étapes — c'est donc le polling qui verra la fin. */
+  const arreterRapport = async () => {
+    const encours = rapportEnCoursRef.current;
+    if (!encours || !encours.id) return;
+    memoriserRapport({ ...encours, annulationDemandee: true });
+    try {
+      const r = await axAnnulerRapport(encours.id);
+      const etat = etatDepuisRapport(r);
+      if (estTerminal(etat.statut)) { rangerRapportTermine(r); return; }
+      memoriserRapport({ ...etat, annulationDemandee: true });
+    } catch (e) { /* 409 « plus en cours » : le polling tranchera */ }
+  };
+
+  /* « Recherche élargie » / « Générer quand même » / « Relancer » : un NOUVEAU
+     rapport, l'ancien reste en place (spec §1). Pas de flux à ouvrir — le
+     polling suit la nouvelle ligne. */
+  const relancerRapport = async (options) => {
+    const encours = rapportEnCoursRef.current;
+    if (!encours || !encours.id || relanceEnCours) return;
+    setRelanceEnCours(true);
+    try {
+      const r = await axRelancerRapport(encours.id, options || {});
+      const etat = etatDepuisRapport(r);
+      memoriserRapport(etat);
+      setReportsState('generating');
+    } catch (e) {
+      const erreur = decrireErreur(e, t);
+      if (erreur.action === 'reconnexion') { sessionExpiree(); return; }
+      if (erreur.action === 'credits') {
+        setModaleCredits(true);
+        axBalance().then((b) => setAxBal(b.available)).catch(() => {});
+      }
+      setErreurRapport({ erreur, args: null });
+      setReportsState('erreur');
+    }
+    setRelanceEnCours(false);
+  };
+
+  /* « Reformuler » : retour au composeur avec la question pré-remplie. */
+  const reformulerRapport = () => {
+    const encours = rapportEnCoursRef.current;
+    setQuestionInitiale((encours && encours.question) || '');
+    oublierRapport();
+    setReportsState('empty');
+  };
+
   const [agentsState, setAgentsState] = useState('library'); // library | session
   const [activeAgent, setActiveAgent] = useState(null);
 
@@ -8123,26 +8742,48 @@ function App() {
         )}
 
         {subRoute === 'reports' && reportsState === 'empty' && (
-          <ReportsEmpty onStart={startReport} onOpenReport={openSavedReport} />
+          <ReportsEmpty onStart={startReport} onOpenReport={openSavedReport}
+            onOuvrirEnCours={(r) => {
+              memoriserRapport(etatDepuisRapport(r));
+              setReportsState('generating');
+            }}
+            promptInitial={questionInitiale} />
         )}
         {subRoute === 'reports' && reportsState === 'generating' && (
-          <ReportsGenerating genMeta={genMeta} />
+          <ReportsGenerating
+            etat={rapportEnCours}
+            onStop={arreterRapport}
+            onRelancer={() => relancerRapport({})}
+            onRetour={() => { oublierRapport(); setReportsState('empty'); }}
+            onSignaler={rapportEnCours && rapportEnCours.id
+              ? () => setSignalementRapport(rapportEnCours.id) : null}
+          />
+        )}
+        {subRoute === 'reports' && reportsState === 'sources' && (
+          <ReportsSourcesInsuffisantes
+            etat={rapportEnCours}
+            occupe={relanceEnCours}
+            onReformuler={reformulerRapport}
+            onElargir={() => relancerRapport({ elargir: true })}
+            onForcer={() => relancerRapport({ forcer: true })}
+            onRetour={() => { oublierRapport(); setReportsState('empty'); }}
+          />
         )}
         {subRoute === 'reports' && reportsState === 'editor' && (
           <ReportsEditor
             data={reportData}
-            onBack={() => setReportsState('empty')}
+            onBack={() => { setQuestionInitiale(''); setReportsState('empty'); }}
           />
         )}
         {subRoute === 'reports' && reportsState === 'erreur' && erreurRapport && (
-          <div className="rep-gen">
+          <div className="surface" style={{ maxWidth: 820 }}>
             <div className="rep-gen-doc">
               <CarteErreur
                 erreur={erreurRapport.erreur}
                 onAction={() => {
                   const { erreur, args } = erreurRapport;
                   if (erreur.action === 'credits') { setSubRoute('credits'); return; }
-                  if (erreur.action === 'reessayer') { startReport(args); return; }
+                  if (erreur.action === 'reessayer' && args) { startReport(args); return; }
                   setReportsState('empty');
                 }}
               />
@@ -8152,14 +8793,6 @@ function App() {
               </button>
             </div>
           </div>
-        )}
-        {subRoute === 'reports' && reportsState === 'quota' && (
-          <ReportsQuota
-            needed={quotaInfo && quotaInfo.needed}
-            available={quotaInfo && quotaInfo.available}
-            onBack={() => setReportsState('empty')}
-            onSeeCredits={() => setSubRoute('credits')}
-          />
         )}
 
         {subRoute === 'agents' && agentsState === 'library' && (
@@ -8187,6 +8820,11 @@ function App() {
           onConfirmer={confirmerSuppression}
           onAnnuler={() => setConfirmation(null)}
         />
+      )}
+
+      {signalementRapport && (
+        <ModaleSignalement rapportId={signalementRapport}
+          onFerme={() => setSignalementRapport(null)} />
       )}
 
       {modaleCredits && (

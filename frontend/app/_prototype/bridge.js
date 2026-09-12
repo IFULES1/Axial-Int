@@ -572,24 +572,127 @@ export async function axUploadDocument(file, _retried = false) {
 }
 
 // --- reports ---
-export async function axRunAnalysis(body) { return axFetch("/analysis/run", { method: "POST", body }); }
-/** Streamed analysis: real progress events, then the finished report.
- * onEvent({progress, step, message}) fires as the backend advances.
- * Returns the final report payload. Falls back to the blocking route on 401
- * retry or when streaming isn't available. */
-export async function axStreamAnalysis(body, onEvent) {
+
+/** Repli bloquant du flux : `POST /analysis/run` crée la ligne, lance le même
+ * moteur et ATTEND son terme (arbitrage §0 de la spec). Depuis Task 2 il rend
+ * un `ReportDetail` — donc `id`, et non plus `report_id`. On le normalise ici
+ * pour que l'appelant n'ait qu'une forme de rapport à connaître, quelle que
+ * soit la route qui l'a produit. Non exporté : le seul chemin du front est
+ * `axLancerRapport`. */
+async function lancerBloquant(body) {
+  const r = await axFetch("/analysis/run", { method: "POST", body });
+  // `report_id` conservé en alias : le flux le porte sur chaque événement, et
+  // l'écran de génération lit la même clé dans les deux cas.
+  return r && r.id ? { ...r, report_id: r.id } : r;
+}
+
+/** Lance un rapport et suit sa génération (`POST /analysis/stream`).
+ *
+ * `onEvent` reçoit CHAQUE événement du flux tel quel : le premier porte déjà
+ * `report_id`, donc l'écran connaît l'identifiant du rapport avant toute
+ * progression et peut le mettre de côté pour reprendre après un rechargement.
+ * `signal` permet de lâcher la lecture du flux sans rien annuler côté serveur
+ * (le Stop, lui, passe par `axAnnulerRapport` : la tâche tourne dans un autre
+ * thread, fermer l'onglet ne l'arrête pas).
+ * Renvoie le `ReportDetail` final (+ `balance`), ou le rapport rendu par le
+ * repli bloquant si le flux ne s'ouvre pas du tout. */
+export async function axLancerRapport(body, onEvent, { signal, idempotencyKey } = {}) {
   try {
     return await ouvrirFluxSSE("/analysis/stream", {
-      body, onEvent, messageInterrompu: "Génération interrompue.",
+      body, onEvent, signal, idempotencyKey,
+      messageInterrompu: "Génération interrompue.",
     });
   } catch (e) {
-    if (e && e.code === "stream_unavailable") return axRunAnalysis(body);  // repli
+    if (e && e.code === "stream_unavailable") return lancerBloquant(body);  // repli
     throw e;
   }
 }
-export async function axCreateReport(body) { return axFetch("/reports", { method: "POST", body }); }
-export async function axListReports() { return axFetch("/reports"); }
-export async function axGetReport(id) { return axFetch(`/reports/${id}`); }
+
+/** Fenêtre de liste → `{ items, has_more }` (en cours d'abord, puis épinglés,
+ * puis par date). `before` = identifiant du dernier rapport déjà affiché. */
+export async function axRapports({ limit = 20, before, inclure_archives = false } = {}) {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (before) q.set("before", before);
+  if (inclure_archives) q.set("inclure_archives", "true");
+  return axFetch(`/reports?${q.toString()}`);
+}
+/** `ReportDetail` : statut, étape, progression, detail, contenu. C'est la
+ * source de vérité du suivi — le polling de l'écran de génération l'appelle
+ * toutes les 3 s tant que le statut vaut `en_cours`. */
+export async function axRapport(id) { return axFetch(`/reports/${id}`); }
+/** Stop : pose le drapeau d'annulation. La tâche range le rapport en `annule`
+ * entre deux étapes — le statut ne change donc pas dans cette réponse. */
+export async function axAnnulerRapport(id) {
+  return axFetch(`/reports/${id}/annuler`, { method: "POST", body: {} });
+}
+/** « Modifier et relancer » / « Recherche élargie » / « Générer quand même » :
+ * crée un NOUVEAU rapport, l'ancien est conservé. */
+export async function axRelancerRapport(id, { question, elargir, forcer } = {}) {
+  return axFetch(`/reports/${id}/relancer`, {
+    method: "POST",
+    body: { question: question || null, elargir: !!elargir, forcer: !!forcer },
+  });
+}
+/** « Signaler un problème » / « Votre avis » → `report_feedback` + email
+ * technique. Remplace le Google Form. */
+export async function axSignalerRapport(id, { motif, note, commentaire } = {}) {
+  return axFetch(`/reports/${id}/feedback`, {
+    method: "POST",
+    body: { motif, note: note || null, commentaire: commentaire || null },
+  });
+}
+
+/* Images des visualisations — depuis Task 3, `GET /viz/{empreinte}.svg` exige
+ * l'authentification (ou `?p=<jeton de partage>` sur la page publique). Un
+ * `<img src>` n'envoie aucun en-tête : il ne marche plus. On va donc chercher
+ * le SVG nous-mêmes, et l'appelant en fait une URL d'objet.
+ *
+ * Cache par empreinte : une page de rapport affiche plusieurs graphiques et
+ * l'éditeur se remonte à chaque changement de langue ou de thème. Le cache est
+ * BORNÉ — sans limite, une session qui parcourt cinquante rapports gardait
+ * autant de SVG en mémoire jusqu'au rechargement.
+ */
+const _CACHE_VIZ = new Map();
+const _CACHE_VIZ_MAX = 40;
+
+export async function axVizSvg(empreinte, jetonPartage) {
+  const cle = jetonPartage ? `${empreinte}?${jetonPartage}` : empreinte;
+  if (_CACHE_VIZ.has(cle)) return _CACHE_VIZ.get(cle);
+  const tok = jetonPartage ? null : axGetToken();
+  const url = `${AX_API}/viz/${empreinte}.svg`
+    + (jetonPartage ? `?p=${encodeURIComponent(jetonPartage)}` : "");
+  const res = await fetch(url, {
+    headers: tok ? { Authorization: "Bearer " + tok } : {},
+  });
+  // Un jeton d'accès expiré rend 401 : on le rafraîchit et on rejoue UNE fois,
+  // comme `axFetch`. Sans ça, tous les graphiques d'un onglet resté ouvert une
+  // heure disparaissaient d'un coup.
+  if ((res.status === 401 || res.status === 403) && !jetonPartage) {
+    const ok = await tryRefresh();
+    if (ok) {
+      const rejoue = await fetch(url, {
+        headers: { Authorization: "Bearer " + axGetToken() },
+      });
+      if (!rejoue.ok) throw await erreurDepuisReponse(rejoue, "Graphique indisponible.");
+      const svg = await rejoue.text();
+      _memoriserViz(cle, svg);
+      return svg;
+    }
+  }
+  if (!res.ok) throw await erreurDepuisReponse(res, "Graphique indisponible.");
+  const svg = await res.text();
+  _memoriserViz(cle, svg);
+  return svg;
+}
+
+function _memoriserViz(cle, svg) {
+  if (_CACHE_VIZ.size >= _CACHE_VIZ_MAX) {
+    // Le plus ancien inséré part — `Map` conserve l'ordre d'insertion.
+    const premiere = _CACHE_VIZ.keys().next();
+    if (!premiere.done) _CACHE_VIZ.delete(premiere.value);
+  }
+  _CACHE_VIZ.set(cle, svg);
+}
 
 /** Fetch a report's PDF with auth and trigger a browser download. */
 export async function axDownloadReportPdf(reportId, filename) {

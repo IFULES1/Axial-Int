@@ -2102,40 +2102,10 @@ html[data-theme="light"] .sidebar {
   text-align: right;
 }
 
-/* ============================================================
-   Quota exceeded
-   ============================================================ */
-.quota-card {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 16px;
-}
-.quota-usage {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 22px;
-}
-.quota-usage h3 { font-size: 14px; margin: 0 0 4px; }
-.quota-usage .big {
-  font-family: var(--font-mono);
-  font-size: 36px;
-  font-weight: 700;
-  color: var(--fg);
-  letter-spacing: -0.02em;
-  margin: 6px 0 4px;
-}
-.quota-usage .big small {
-  font-size: 14px;
-  color: var(--fg-3);
-  font-weight: 500;
-}
-.quota-usage .breakdown {
-  margin-top: 14px;
-  display: flex; flex-direction: column; gap: 8px;
-}
-.quota-bar { height: 4px; background: rgba(121,118,247,0.12); border-radius: 999px; overflow: hidden; }
-.quota-bar-fill { height: 100%; background: var(--v-bright); }
+/* Les règles de l'écran « crédits insuffisants » (`.quota-card`,
+   `.quota-usage` et leurs enfants, `.quota-bar*`) sont parties avec le
+   composant `ReportsQuota` : un seul écran crédits désormais, la
+   `ModaleCredits` (spec §6). */
 
 /* ============================================================
    Agents
@@ -2768,7 +2738,7 @@ html[data-theme="light"] .sidebar {
 /* mobile */
 @media (max-width: 960px) {
   .rep-types { grid-template-columns: repeat(2, 1fr); }
-  .rep-gen, .agent-session, .credits-grid, .quota-card, .memory-cats, .settings-shell { grid-template-columns: 1fr; }
+  .rep-gen, .agent-session, .credits-grid, .memory-cats, .settings-shell { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
   .rep-types { grid-template-columns: 1fr; }
@@ -3417,7 +3387,6 @@ html[data-theme="light"] .sidebar {
      ont été retirées du fichier : héritées du prototype, elles n'étaient
      rendues nulle part dans `App.jsx`. `.fact-*`, mémoire, reste à trier.) */
   .credits-summary { grid-template-columns: 1fr 1fr; }
-  .quota-usage { padding: 16px; }
 
   /* Paramètres : la colonne de contrôle figée à 280 px débordait. */
   .settings-row { grid-template-columns: 1fr; gap: 12px; padding: 16px 0; }
