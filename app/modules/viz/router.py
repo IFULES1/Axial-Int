@@ -42,9 +42,23 @@ def _autoriser(db: Session, empreinte: str, jeton: str | None,
 
     L'authentification est optionnelle mais pas facultative : un jeton présent
     et invalide a déjà levé un 401 dans la dépendance.
+
+    Un compte authentifié ne voit que SES graphiques (ses rapports, ses
+    messages) — un admin voit tout. Sans cette restriction, l'authentification
+    seule suffisait à lire l'image de n'importe quel compte : l'empreinte est
+    le sha256 du spec compilé, donc devinable pour des données standard.
     """
     if user is not None:
-        return
+        if user.is_admin or empreinte in service.empreintes_du_compte(db, user.id):
+            return
+        if jeton:
+            from app.modules.reports import service as reports
+
+            if empreinte in reports.empreintes_partagees(db, jeton):
+                return
+        # 404 et non 403 : on ne confirme pas l'existence d'une image qui
+        # n'appartient pas à ce compte.
+        raise AppError("Graphique introuvable.", 404, code="not_found")
     if jeton:
         from app.modules.reports import service as reports
 

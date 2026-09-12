@@ -1514,6 +1514,36 @@ def test_pagination_par_curseur_ne_saute_ni_ne_repete_aucun_rapport(http):
     assert tete[:2] == ["E", "P"] and tete[2] in ("R0", "R1")
 
 
+def test_curseur_sur_un_rapport_supprime_repart_du_debut(http):
+    """`before` désigne un rapport supprimé entre deux pages (l'utilisateur a
+    nettoyé sa liste pendant qu'il faisait « Charger plus » ailleurs) : la
+    liste repart du début plutôt que de rendre 404 (constat 10, correctif)."""
+    engine, uid = http
+    with Session(engine) as db:
+        disparu = str(_rapport(db, uid, title="Disparu", statut=rm.TERMINE).id)
+        _rapport(db, uid, title="Restant", statut=rm.TERMINE)
+    client = _client(engine, uid)
+    entier = client.get("/reports").json()["items"]
+
+    assert client.delete(f"/reports/{disparu}").status_code == 204
+    page = client.get(f"/reports?before={disparu}")
+    assert page.status_code == 200
+    assert [i["id"] for i in page.json()["items"]] == [i["id"] for i in entier
+                                                        if i["id"] != disparu]
+
+    # Un identifiant qui n'a jamais existé, ou qui n'est pas un UUID, se
+    # comporte pareil : on ignore le curseur, on ne fait pas tomber la route.
+    for bogus in (str(uuidlib.uuid4()), "pas-un-uuid"):
+        assert client.get(f"/reports?before={bogus}").status_code == 200
+
+    # Le rapport d'un AUTRE compte ne doit pas non plus servir de borne : ce
+    # n'est pas « introuvable » qu'on veut relâcher, c'est « pas le mien ».
+    with Session(engine) as db:
+        dautrui = str(_rapport(db, uuidlib.uuid4(), title="Autrui",
+                               statut=rm.TERMINE).id)
+    assert client.get(f"/reports?before={dautrui}").status_code == 200
+
+
 def test_liste_ecarte_les_archives_sauf_demande_explicite(http):
     engine, uid = http
     with Session(engine) as db:
@@ -1730,6 +1760,45 @@ def test_partage_rend_un_jeton_de_22_caracteres_et_une_url_lisible(http):
     assert client.post(f"/reports/{rid}/partage").json()["jeton"] != jeton
 
 
+def test_collision_de_jeton_retente_avec_un_jeton_neuf(http, monkeypatch):
+    """`secrets.token_urlsafe` rend le jeton déjà pris, puis un jeton libre :
+    le COMMIT échoue sur l'index unique, mais le partage aboutit quand même
+    au second essai (constat 3, correctif)."""
+    engine, uid = http
+    colliseur, frais = "d" * 22, "e" * 22
+    with Session(engine) as db:
+        # Jeton déjà pris par un AUTRE rapport (autre compte, sans importance).
+        _rapport(db, uuidlib.uuid4(), statut=rm.TERMINE, content="x",
+                title="Autre", jeton_partage=colliseur)
+        rid = str(_rapport(db, uid, statut=rm.TERMINE, content="corps").id)
+
+    appels = iter([colliseur, frais])
+    monkeypatch.setattr(reports_service.secrets, "token_urlsafe",
+                        lambda n: next(appels))
+
+    reponse = _client(engine, uid).post(f"/reports/{rid}/partage")
+    assert reponse.status_code == 200
+    assert reponse.json()["jeton"] == frais
+
+
+def test_collision_de_jeton_persistante_rend_503(http, monkeypatch):
+    """Les `JETON_ESSAIS` tentatives collisionnent toutes : 503
+    `jeton_indisponible`, pas une 500 opaque (constat 3)."""
+    engine, uid = http
+    colliseur = "f" * 22
+    with Session(engine) as db:
+        _rapport(db, uuidlib.uuid4(), statut=rm.TERMINE, content="x",
+                title="Autre", jeton_partage=colliseur)
+        rid = str(_rapport(db, uid, statut=rm.TERMINE, content="corps").id)
+
+    monkeypatch.setattr(reports_service.secrets, "token_urlsafe",
+                        lambda n: colliseur)
+
+    reponse = _client(engine, uid).post(f"/reports/{rid}/partage")
+    assert (reponse.status_code, reponse.json()["error"]["code"]) \
+        == (503, "jeton_indisponible")
+
+
 def test_pseudo_replie_sur_la_partie_locale_de_lemail(http):
     engine, uid = http
     with Session(engine) as db:
@@ -1769,13 +1838,57 @@ def test_la_page_publique_ne_montre_ni_couts_ni_documents_internes(http):
 
     assert set(vue) == {"title", "content", "sources", "viz", "analysis_type",
                         "created_at", "pseudo"}
-    assert [s["title"] for s in vue["sources"]] == ["INSEE"]
+    # Les sources internes sont REMPLACÉES, pas retirées : la longueur et les
+    # index sont préservés, sinon un `[2]` du corps du rapport se déplacerait
+    # pour désigner une autre source que celle voulue (constat 1).
+    assert len(vue["sources"]) == 3
+    jalon = {"title": "Source interne, non partagée", "url": None,
+            "source": "interne", "domain": None, "excerpt": None}
+    assert vue["sources"][0]["title"] == "INSEE"
+    assert vue["sources"][1] == jalon
+    assert vue["sources"][2] == jalon
     brut = json.dumps(vue, default=str)
     for interdit in ("business-plan-confidentiel", "Notes internes", "71000",
                      "credits", "marge de ACME", str(uid), rid):
         assert interdit not in brut, interdit
     # Les graphiques, eux, font partie du rapport (spec §0).
     assert vue["viz"][0]["empreinte"] == "a" * 64
+
+
+def test_page_publique_conserve_la_numerotation_des_sources(http):
+    """Un rapport [web, document, web] : la source interne est un jalon à SA
+    place, pas un trou — les index de `viz[].spec.sources` et les `[N]` cités
+    dans le texte restent valides après publication (constat 1, correctif)."""
+    engine, uid = http
+    sources = [
+        {"title": "INSEE", "url": "https://insee.fr", "source": "web"},
+        {"title": "business-plan-confidentiel.pdf", "source": "documents"},
+        {"title": "Eurostat", "url": "https://ec.europa.eu", "source": "web"},
+    ]
+    with Session(engine) as db:
+        r = _rapport(db, uid, title="Étude", statut=rm.TERMINE,
+                     content="Le marché croît [1]. La marge est confidentielle "
+                             "[2]. Eurostat confirme [3].\n\n## Sources\n",
+                     sources=sources,
+                     viz=[{"index": 0, "empreinte": "a" * 64, "vl": {"x": 1},
+                           "statut": "ok", "kind": "bar",
+                           "spec": {"sources": [3]}}])
+        rid = str(r.id)
+    client = _client(engine, uid)
+    jeton = client.post(f"/reports/{rid}/partage").json()["jeton"]
+    vue = client.get(f"/partage/{jeton}").json()
+
+    assert len(vue["sources"]) == 3
+    assert vue["sources"][0]["title"] == "INSEE"
+    assert vue["sources"][1] == {"title": "Source interne, non partagée",
+                                 "url": None, "source": "interne",
+                                 "domain": None, "excerpt": None}
+    assert vue["sources"][2]["title"] == "Eurostat"
+    # `[3]` du texte et de `viz[].spec.sources` désigne toujours Eurostat :
+    # l'index n'a pas bougé.
+    assert vue["sources"][2] == sources[2]
+    assert vue["viz"][0]["spec"]["sources"] == [3]
+    assert "[3]" in vue["content"]
 
 
 def test_partage_refuse_un_rapport_sans_contenu(http):
@@ -1866,6 +1979,49 @@ def test_image_viz_exige_une_authentification_ou_un_jeton(http, monkeypatch):
     assert anonyme.get("/viz/pas-une-empreinte.svg").status_code == 404
 
 
+def test_viz_authentifie_ne_voit_que_les_graphiques_de_son_compte(http, monkeypatch):
+    """Un compte authentifié ne doit lire que SES graphiques — les siens (un
+    rapport, un message de chat) — sauf un admin, qui voit tout (constat 6,
+    correctif)."""
+    from app.modules.intelligence.models import Conversation, Message, Project
+    from app.modules.viz import render, service as viz_service
+
+    engine, uid = http
+    autre = uuidlib.uuid4()
+    monkeypatch.setattr(render, "vers_svg", lambda vl: "<svg/>")
+    # Le cache 60 s ne doit pas mélanger deux comptes testés dans le même
+    # processus pytest.
+    viz_service._cache_empreintes.clear()
+
+    with Session(engine) as db:
+        # Le graphique de A vit dans un RAPPORT.
+        _viz_en_base(db, uid, empreinte="1" * 64)
+        # Le graphique de B vit dans un MESSAGE de conversation — l'autre
+        # moitié de la règle arbitrée (« ou messages »).
+        projet = Project(id=uuidlib.uuid4(), user_id=autre, name="Projet B")
+        conv = Conversation(id=uuidlib.uuid4(), project_id=projet.id, user_id=autre)
+        msg = Message(id=uuidlib.uuid4(), conversation_id=conv.id, role="assistant",
+                     content="corps", viz=[{"index": 0, "empreinte": "2" * 64,
+                                            "vl": {"mark": "bar"}, "statut": "ok",
+                                            "kind": "bar", "spec": {}}])
+        from app.modules.viz.models import VizRendu
+
+        db.add_all([projet, conv, msg, VizRendu(empreinte="2" * 64, vl={"mark": "bar"})])
+        db.commit()
+
+    # A (uid) ne peut pas lire le graphique de B : 404, pas 403 (on ne
+    # confirme pas son existence).
+    assert _client(engine, uid).get(f"/viz/{'2' * 64}.svg").status_code == 404
+    # A lit toujours le sien.
+    assert _client(engine, uid).get(f"/viz/{'1' * 64}.svg").status_code == 200
+    # B lit le sien, depuis son message.
+    assert _client(engine, autre).get(f"/viz/{'2' * 64}.svg").status_code == 200
+    # Un admin voit les deux, sans être le propriétaire.
+    admin = _client(engine, uuidlib.uuid4(), is_admin=True)
+    assert admin.get(f"/viz/{'1' * 64}.svg").status_code == 200
+    assert admin.get(f"/viz/{'2' * 64}.svg").status_code == 200
+
+
 def test_le_png_suit_la_meme_regle_que_le_svg(http, monkeypatch):
     from app.modules.viz import render
 
@@ -1880,6 +2036,20 @@ def test_le_png_suit_la_meme_regle_que_le_svg(http, monkeypatch):
     assert client.get(f"/viz/{'b' * 64}.png").status_code == 401
     assert client.get(
         f"/viz/{'b' * 64}.png?p=jeton-de-partage-123").status_code == 200
+
+
+def test_empreintes_partagees_ne_lit_que_la_colonne_viz(http):
+    """`empreintes_partagees` ne doit pas charger le rapport entier — seule la
+    colonne `viz` est nécessaire (constat 4, correctif). Comportement inchangé
+    : mêmes empreintes rendues, jeton inconnu rend un ensemble vide."""
+    engine, uid = http
+    with Session(engine) as db:
+        r = _viz_en_base(db, uid, empreinte="9" * 64, partage=True)
+        jeton = r.jeton_partage
+    with Session(engine) as db:
+        assert reports_service.empreintes_partagees(db, jeton) == {"9" * 64}
+        assert reports_service.empreintes_partagees(db, "jeton-inconnu") == set()
+        assert reports_service.empreintes_partagees(db, "") == set()
 
 
 def test_le_pdf_et_lemail_nobtiennent_pas_leurs_images_par_http(http):

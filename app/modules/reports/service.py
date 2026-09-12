@@ -14,6 +14,7 @@ import unicodedata
 import uuid
 
 from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.errors import AppError
@@ -35,7 +36,7 @@ RECHERCHE_MARGE = 80
 # `secrets.token_urlsafe(16)` = 22 caractères URL-safe, soit 128 bits : l'URL
 # n'est pas devinable, et c'est elle qui tient lieu d'autorisation.
 JETON_OCTETS = 16
-JETON_ESSAIS = 5
+JETON_ESSAIS = 3
 SLUG_MAX = 60
 PSEUDO_MAX = 40
 # Sources à ne JAMAIS publier : ce sont les documents privés de l'utilisateur
@@ -189,15 +190,25 @@ def list_reports(db: Session, user_id: str, *,
     if not inclure_archives:
         stmt = stmt.where(Report.archived_at.is_(None))
     if before:
-        borne = get_report(db, user_id, before)
-        rang_borne = _rang_de(borne)
-        stmt = stmt.where(or_(
-            _rang() > rang_borne,
-            and_(_rang() == rang_borne,
-                 or_(Report.created_at < borne.created_at,
-                     and_(Report.created_at == borne.created_at,
-                          Report.id < borne.id))),
-        ))
+        # Rapport borne introuvable (supprimé entre deux pages) : on repart du
+        # début plutôt que de faire échouer tout le « Charger plus » — le
+        # curseur d'une page n'a plus de sens une fois sa cible disparue, mais
+        # ce n'est pas une erreur pour l'appelant.
+        try:
+            borne = db.get(Report, uuid.UUID(before))
+        except (ValueError, AttributeError, TypeError):
+            borne = None
+        if borne is not None and str(borne.user_id) != user_id:
+            borne = None
+        if borne is not None:
+            rang_borne = _rang_de(borne)
+            stmt = stmt.where(or_(
+                _rang() > rang_borne,
+                and_(_rang() == rang_borne,
+                     or_(Report.created_at < borne.created_at,
+                         and_(Report.created_at == borne.created_at,
+                              Report.id < borne.id))),
+            ))
     # On lit un rapport de plus que demandé : sa présence EST la réponse à
     # « reste-t-il des rapports ? », sans second COUNT(*).
     fenetre = list(db.scalars(
@@ -398,8 +409,7 @@ def activer_partage(db: Session, user_id: str, report_id: str, *,
     pseudo = pseudo_de(full_name, email)
     slug = normaliser(report.title or "", SLUG_MAX)
     if not report.jeton_partage:
-        report.jeton_partage = _jeton_unique(db, report)
-        report.partage_at = _now()
+        _jeton_unique(db, report)
     # Réassignation complète : `detail` est une colonne JSON, une mutation en
     # place n'est pas détectée par SQLAlchemy et ne serait jamais écrite.
     report.detail = {**(report.detail or {}),
@@ -411,15 +421,25 @@ def activer_partage(db: Session, user_id: str, report_id: str, *,
 
 
 def _jeton_unique(db: Session, report: Report) -> str:
-    """Jeton libre. L'index unique `ux_reports_jeton_partage` est l'autorité :
-    128 bits ne collisionnent pas, mais on ne parie pas une 500 sur « ne
-    collisionnent pas »."""
+    """Assigne un jeton libre à `report` et committe l'assignation.
+
+    Un `SELECT` de pré-vérification ne tranche rien sous concurrence : entre
+    la lecture et l'écriture, une autre requête peut choisir le même jeton, et
+    seul le `COMMIT` sur l'index unique `ux_reports_jeton_partage` le
+    détecterait — en 500, pas en erreur applicative. Motif aligné sur
+    `credit_events` (spec §5.4) : `try/except IntegrityError` + `rollback` +
+    nouvel essai avec un jeton neuf.
+    """
     for _ in range(JETON_ESSAIS):
-        jeton = secrets.token_urlsafe(JETON_OCTETS)
-        existe = db.scalar(select(Report.id).where(Report.jeton_partage == jeton))
-        if not existe:
-            return jeton
-    raise AppError("Partage impossible pour le moment.", 500,
+        report.jeton_partage = secrets.token_urlsafe(JETON_OCTETS)
+        report.partage_at = _now()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            continue
+        return report.jeton_partage
+    raise AppError("Partage impossible pour le moment.", 503,
                    code="jeton_indisponible")
 
 
@@ -435,16 +455,26 @@ def revoquer_partage(db: Session, user_id: str, report_id: str) -> None:
     db.commit()
 
 
+_JALON_SOURCE_INTERNE = {"title": "Source interne, non partagée", "url": None,
+                        "source": "interne", "domain": None, "excerpt": None}
+
+
 def _sources_publiables(sources: list | None) -> list | None:
-    """Retire les sources internes : documents déposés et pages Notion.
+    """Remplace les sources internes par un jalon inerte, À LA MÊME PLACE.
 
     Un lien public transmis par erreur ne doit rien dire du coffre de
     l'utilisateur — ni le titre d'un document, ni le nom d'une page Notion.
+    Mais RETIRER ces entrées décalerait l'index des sources qui suivent : le
+    texte du rapport cite `[N]` par position (`grounding.assemble`), et
+    `viz[].spec.sources` porte les mêmes index (`app/modules/viz/schema.py`,
+    consommés par `pdf.py`). Un jalon à la même place garde les deux valides.
     """
     if not isinstance(sources, list):
         return None
-    return [s for s in sources
-            if not (isinstance(s, dict) and s.get("source") in SOURCES_INTERNES)]
+    return [dict(_JALON_SOURCE_INTERNE)
+            if isinstance(s, dict) and s.get("source") in SOURCES_INTERNES
+            else s
+            for s in sources]
 
 
 def rapport_public(db: Session, jeton: str) -> dict:
@@ -485,11 +515,13 @@ def empreintes_partagees(db: Session, jeton: str) -> set[str]:
     propre = (jeton or "").strip()
     if not propre or len(propre) > 32:
         return set()
-    report = db.scalars(
-        select(Report).where(Report.jeton_partage == propre)).first()
-    if not report or not isinstance(report.viz, list):
+    # `Report.viz` seul, pas la ligne entière : cette requête est faite par
+    # image d'une page publique et `content` seul peut peser 60 000
+    # caractères — inutile de le charger pour ne lire que `viz`.
+    viz = db.scalar(select(Report.viz).where(Report.jeton_partage == propre))
+    if not isinstance(viz, list):
         return set()
-    return {v.get("empreinte") for v in report.viz
+    return {v.get("empreinte") for v in viz
             if isinstance(v, dict) and v.get("empreinte")}
 
 
