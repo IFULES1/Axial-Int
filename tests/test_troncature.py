@@ -8,6 +8,7 @@ refuser de facturer un document qui reste tronqué.
 """
 from __future__ import annotations
 
+import json
 import types
 
 from app.modules.analysis.service import AnalysisResult, finalize
@@ -147,56 +148,79 @@ def test_luhn_epargne_les_chiffres_de_marche():
     assert any("4539" in v for v in vrai.values()), vrai
 
 
-def test_rapport_survit_a_la_fermeture_du_navigateur(monkeypatch):
+def test_rapport_survit_a_la_fermeture_du_navigateur(tmp_path, monkeypatch):
     """Un rapport doit être archivé même si le client se déconnecte.
 
     L'archivage vivait après le dernier `yield` du générateur SSE : fermer
     l'onglet pendant les minutes de rédaction faisait perdre le rapport, alors
     que la génération était allée au bout et avait été payée. Reproduit le
     25/08 avant correction.
+
+    Depuis Task 2, la propriété n'appartient plus au générateur mais au MOTEUR
+    (`_executer_rapport`, thread démon + session propre) : le flux ne fait que
+    regarder une ligne de base. C'est ce que ce test vérifie désormais — et
+    c'est aussi ce qui couvre `POST /analysis/run`, qui appelle le même moteur.
     """
     import time
-    from unittest import mock
+    import uuid as uuidlib
 
+    from sqlalchemy.orm import Session
+
+    import app.db as app_db
     from app.modules.analysis import service
+    from app.modules.billing import service as billing
+    from app.modules.reports import models as rm
+    # Le socle de test du moteur vit avec les autres tests Rapports v2 : une
+    # seule définition de la base et des bouchons, pour que les deux fichiers
+    # exercent exactement le même moteur.
+    from tests.test_rapports_v2 import _base_fichier, _brancher_moteur
 
-    archives: list[str] = []
+    ancienne_fabrique = app_db.SessionLocal
+    try:
+        engine = _base_fichier(tmp_path)
+        # Rédaction lente : couper avant le premier morceau reviendrait à
+        # tester une génération jamais démarrée.
+        _brancher_moteur(monkeypatch,
+                         chunks=["## 1. Section\n"] + ["mot "] * 40,
+                         avant_chunk=lambda _c: time.sleep(0.01))
+        monkeypatch.setattr(service, "INTERVALLE_SUIVI_SECONDES", 0.01)
+        uid = str(uuidlib.uuid4())
+        with Session(engine) as db:
+            billing.get_or_create_balance(db, uid)
+            gen = service.stream_analysis(db=db, user_id=uid, is_admin=False,
+                                          query="q",
+                                          analysis_type="analyse_risques")
+            rapport_id, coupe_en_redaction = None, False
+            for brut in gen:
+                evt = json.loads(brut.removeprefix("data: ").strip())
+                rapport_id = rapport_id or evt.get("report_id")
+                if evt.get("etape") == "redaction":
+                    coupe_en_redaction = True
+                    break
+            gen.close()  # ce que fait FastAPI quand le navigateur part
 
-    def faux_run(**kw):
-        time.sleep(2)
-        return service.AnalysisResult(analysis_type="analyse_risques",
-                                      title="T", content="contenu", degraded=False)
+        assert rapport_id, "le flux doit annoncer l'identifiant dès le départ"
+        # Sans cela, le test passerait en ayant laissé le flux aller au bout —
+        # il ne prouverait plus rien sur la déconnexion.
+        assert coupe_en_redaction, "le flux a été coupé avant la rédaction"
+        # La tâche continue sans personne pour la regarder.
+        limite = time.monotonic() + 10
+        while time.monotonic() < limite:
+            with Session(engine) as db:
+                ligne = db.get(rm.Report, uuidlib.UUID(rapport_id))
+                if ligne.statut != rm.EN_COURS:
+                    break
+            time.sleep(0.05)
 
-    def faux_finalize(db, user_id, analysis_type, result, *, is_admin):
-        archives.append(result.title)
-        return {"report_id": "r1", "charged": 25}
-
-    class _Session:
-        def __enter__(self):
-            return None
-
-        def __exit__(self, *a):
-            return False
-
-    import app.db as db_mod
-    import app.modules.memory.service as mem
-    with mock.patch.object(service, "run_analysis", faux_run), \
-         mock.patch.object(service, "finalize", faux_finalize), \
-         mock.patch.object(service, "precheck_credits", lambda *a, **k: None), \
-         mock.patch.object(service, "HEARTBEAT_SECONDS", 1), \
-         mock.patch.object(db_mod, "SessionLocal", _Session), \
-         mock.patch.object(mem, "build_context", lambda *a, **k: ""), \
-         mock.patch.object(service, "_profile_dict", lambda *a, **k: {}):
-        gen = service.stream_analysis(db=None, user_id="u", is_admin=False,
-                                      query="q", analysis_type="analyse_risques")
-        # Couper AVANT le premier battement reviendrait à tester une génération
-        # jamais démarrée. On attend d'être en pleine rédaction.
-        for evt in gen:
-            if "heartbeat" in evt:
-                break
-        gen.close()  # ce que fait FastAPI quand le navigateur part
-
-    assert archives == ["T"], "le rapport a été perdu à la déconnexion"
+        with Session(engine) as db:
+            ligne = db.get(rm.Report, uuidlib.UUID(rapport_id))
+            assert ligne.statut == rm.TERMINE, "le rapport a été perdu à la déconnexion"
+            assert "## 1. Section" in ligne.content
+            solde = billing.available_credits(
+                billing.get_or_create_balance(db, uid))
+        assert solde == billing.FREE_BETA_CREDITS - 25, "le débit n'a pas suivi"
+    finally:
+        app_db.SessionLocal = ancienne_fabrique
 
 
 def test_premier_rapport_offert_une_seule_fois():

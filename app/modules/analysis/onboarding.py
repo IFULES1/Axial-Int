@@ -78,7 +78,7 @@ def offrir(db, user_id: str) -> str | None:
     """Génère, archive et notifie. Retourne l'identifiant du rapport ou None."""
     from app.modules.analysis import service
     from app.modules.billing import service as billing
-    from app.modules.memory import service as memory
+    from app.modules.reports import models as rm
     from app.modules.reports import notification
 
     if deja_offert(db, user_id):
@@ -108,21 +108,30 @@ def offrir(db, user_id: str) -> str | None:
 
     question = question_pour(profil)
     logger.info("Premier rapport offert à %s : %s", user_id, question[:90])
-    res = service.run_analysis(
-        query=question, analysis_type=TYPE_RAPPORT, user_id=user_id,
-        title=None, company_context=memory.build_context(db, user_id),
-        profile=service._profile_dict(db, user_id), db_pour_notion=db,
+    # Le MÊME moteur suivi que les rapports payants (spec §1) : le rapport
+    # offert apparaît dans la liste avec sa progression, il est arrêtable, et
+    # il n'existe qu'une implémentation du pipeline à maintenir.
+    #
+    # `is_admin=True` : archivé sans débiter le compte. C'est le sens de
+    # « offert » — l'utilisateur garde ses 40 crédits pour la suite. Le
+    # marqueur `credit_events` posé plus haut reste la garantie d'unicité ;
+    # `is_admin` ne touche qu'au débit.
+    #
+    # `attendre=True` : `offrir` est déjà appelé depuis un thread (route
+    # `/analysis/premier-rapport`) ou depuis le worker de rattrapage — en
+    # relancer un second ne ferait qu'ajouter une session sans rien gagner.
+    rapport = service.lancer_rapport(
+        db, user_id, query=question, analysis_type=TYPE_RAPPORT, title=None,
+        is_admin=True, attendre=True,
     )
-    if res.degraded:
-        logger.warning("Premier rapport dégradé pour %s (%s)", user_id, res.status_note)
+    if rapport is None or rapport.statut != rm.TERMINE:
+        logger.warning("Premier rapport non abouti pour %s (%s)", user_id,
+                       getattr(rapport, "statut", "introuvable"))
         return None
 
-    # is_admin=True : le rapport est archivé sans débiter le compte. C'est le
-    # sens de « offert » — l'utilisateur garde ses 40 crédits pour la suite.
-    info = service.finalize(db, user_id, TYPE_RAPPORT, res, is_admin=True) or {}
-    notification.prevenir(db, user_id, titre=res.title, contenu=res.content,
-                          sources=res.sources)
-    return info.get("report_id")
+    notification.prevenir(db, user_id, titre=rapport.title,
+                          contenu=rapport.content, sources=rapport.sources)
+    return str(rapport.id)
 
 
 def rattraper(db, limite: int = 5) -> int:

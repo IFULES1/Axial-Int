@@ -31,11 +31,65 @@ def create_report(db: Session, user_id: str, *, title: str, content: str,
     return report
 
 
+def detail_dict(report: Report) -> dict:
+    """Forme unique du `ReportDetail` — l'API et le flux SSE en rendent la même.
+
+    Un seul constructeur : la route `GET /reports/{id}` et l'événement `done`
+    du flux décrivaient le même rapport avec deux jeux de clés, et le front
+    devait connaître les deux.
+    """
+    return {
+        "id": str(report.id),
+        "title": report.title,
+        "analysis_type": report.analysis_type,
+        "created_at": report.created_at,
+        "content": report.content or "",
+        "sources": report.sources if isinstance(report.sources, list) else None,
+        "viz": report.viz if isinstance(report.viz, list) else None,
+        "statut": report.statut,
+        "etape": report.etape,
+        "progression": report.progression,
+        "detail": report.detail or {},
+        "question": report.question,
+        "termine_at": report.termine_at,
+        "annulation_demandee": bool(report.annulation_demandee),
+        # Le coût est ce que l'utilisateur a payé — les crédits, pas les euros.
+        # Le prix de revient (`cout_micro_eur`, coût de recherche) reste réservé
+        # à l'administration (spec §4) et n'apparaît pas ici.
+        "credits": (report.detail or {}).get("credits"),
+        "tokens_entree": report.tokens_entree,
+        "tokens_sortie": report.tokens_sortie,
+    }
+
+
+def demander_annulation(db: Session, user_id: str, report_id: str) -> Report:
+    """Pose le drapeau de Stop. La tâche le relit et range le rapport.
+
+    La route ne tue rien elle-même : la tâche tourne dans un autre thread (et
+    potentiellement un autre processus), le seul canal fiable est la base.
+    Idempotent — cliquer deux fois ne change rien.
+    """
+    from app.modules.reports import models as rm
+
+    report = get_report(db, user_id, report_id)
+    if report.statut != rm.EN_COURS:
+        raise AppError("Ce rapport n'est plus en cours.", 409,
+                       code="rapport_non_en_cours")
+    report.annulation_demandee = True
+    db.commit()
+    db.refresh(report)
+    return report
+
+
 def list_reports(db: Session, user_id: str) -> list[Report]:
+    # Les rapports en cours remontent en tête : c'est ce que l'utilisateur
+    # attend, et il doit pouvoir rouvrir une génération lancée ailleurs.
+    from app.modules.reports.models import EN_COURS
+
     stmt = (
         select(Report)
         .where(Report.user_id == uuid.UUID(user_id))
-        .order_by(Report.created_at.desc())
+        .order_by((Report.statut != EN_COURS), Report.created_at.desc())
     )
     return list(db.scalars(stmt))
 

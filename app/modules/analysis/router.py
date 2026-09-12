@@ -14,9 +14,10 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.modules.analysis import service
-from app.modules.analysis.schemas import AnalysisRequest, AnalysisResponse, available_types
+from app.modules.analysis.schemas import AnalysisRequest, available_types
 from app.modules.auth.schemas import AuthUser
 from app.modules.auth.security import get_current_user
+from app.modules.reports.router import ReportDetail
 
 logger = logging.getLogger("axial.analysis.router")
 
@@ -28,28 +29,24 @@ def types() -> dict:
     return {"types": available_types()}
 
 
-@router.post("/run", response_model=AnalysisResponse)
+@router.post("/run", response_model=ReportDetail)
 def run(payload: AnalysisRequest, user: AuthUser = Depends(get_current_user),
-        db: Session = Depends(get_db)) -> AnalysisResponse:
-    # Check affordability before spending the API call.
-    service.precheck_credits(db, user.id, payload.analysis_type, is_admin=user.is_admin)
-    # Inject the company-profile memory context automatically.
-    from app.modules.memory import service as memory
-    company_context = memory.build_context(db, user.id)
-    result = service.run_analysis(
-        query=payload.query, analysis_type=payload.analysis_type,
-        user_id=user.id, title=payload.title, top_k=payload.top_k,
-        company_context=company_context, profile=service._profile_dict(db, user.id),
-        db_pour_notion=db,
+        db: Session = Depends(get_db)) -> ReportDetail:
+    """Chemin bloquant — repli du flux (arbitrage §0).
+
+    Ce n'est plus une seconde implémentation : la route crée la ligne de
+    rapport, appelle le MÊME moteur suivi par identifiant et attend son terme.
+    Le moteur ouvre sa propre session ; la propriété de survie est la sienne,
+    et un seul test la couvre.
+    """
+    from app.modules.reports import service as reports
+
+    rapport = service.lancer_rapport(
+        db, user.id, query=payload.query, analysis_type=payload.analysis_type,
+        title=payload.title, top_k=payload.top_k, is_admin=user.is_admin,
+        attendre=True,
     )
-    # Charge + archive + track (no-op on degraded results).
-    info = service.finalize(db, user.id, payload.analysis_type, result, is_admin=user.is_admin)
-    return AnalysisResponse(
-        analysis_type=result.analysis_type, title=result.title, content=result.content,
-        report_id=(info or {}).get("report_id"),
-        sources=result.sources, degraded=result.degraded,
-        status_note=result.status_note, metadata=result.metadata,
-    )
+    return ReportDetail(**reports.detail_dict(rapport))
 
 
 @router.post("/premier-rapport", status_code=202)
@@ -89,6 +86,7 @@ def stream(payload: AnalysisRequest, user: AuthUser = Depends(get_current_user),
     generator = service.stream_analysis(
         db=db, user_id=user.id, is_admin=user.is_admin, query=payload.query,
         analysis_type=payload.analysis_type, title=payload.title, top_k=payload.top_k,
+        elargir=payload.elargir, forcer=payload.forcer,
     )
     return StreamingResponse(
         generator,

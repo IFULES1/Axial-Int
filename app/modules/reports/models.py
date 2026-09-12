@@ -15,6 +15,27 @@ from app.db import Base
 # JSONB on PostgreSQL, plain JSON elsewhere (tests on SQLite).
 JSONType = JSON().with_variant(JSONB(), "postgresql")
 
+# --- Statuts d'un rapport (spec §1) ----------------------------------------
+# La migration 0023 n'a volontairement posé AUCUN CHECK en base : une nouvelle
+# valeur ne doit pas coûter une migration. La contrepartie est que cette
+# constante est le seul point de passage autorisé — toute écriture de `statut`
+# passe par l'une de ces valeurs, et `STATUTS` est ce que les tests vérifient.
+EN_COURS = "en_cours"
+TERMINE = "termine"
+ECHEC = "echec"
+DEGRADE = "degrade"
+ANNULE = "annule"
+SOURCES_INSUFFISANTES = "sources_insuffisantes"
+
+STATUTS: tuple[str, ...] = (EN_COURS, TERMINE, ECHEC, DEGRADE, ANNULE,
+                            SOURCES_INSUFFISANTES)
+# Statuts terminaux : la tâche ne tourne plus, le front arrête son polling.
+STATUTS_TERMINAUX: tuple[str, ...] = tuple(s for s in STATUTS if s != EN_COURS)
+
+# Étapes du moteur, dans l'ordre (spec §1).
+ETAPES: tuple[str, ...] = ("recherche", "selection", "couverture", "redaction",
+                           "finalisation")
+
 
 class Report(Base):
     __tablename__ = "reports"

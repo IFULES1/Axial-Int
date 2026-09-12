@@ -227,15 +227,17 @@ def test_offrir_perd_la_course_sans_generer_de_second_rapport(monkeypatch):
     monkeypatch.setattr(onboarding, "profil_utilisable",
                         lambda db, u: {"company_name": "Axial", "sector": "SaaS"})
 
-    def _jamais_appele(**kw):
+    def _jamais_appele(db, user_id, **kw):
         generations.append(kw.get("query", ""))
         raise AssertionError("La génération ne doit pas être lancée deux fois")
 
     with Session(engine) as db1, Session(engine) as db2:
         # Premier appel : marque l'offre, puis on coupe avant la génération.
+        # `offrir` passe désormais par le moteur suivi (`lancer_rapport`), pas
+        # par `run_analysis` : c'est le même pipeline pour tout le monde.
         import app.modules.analysis.service as service
         from app.modules.memory import service as memory
-        monkeypatch.setattr(service, "run_analysis", _jamais_appele)
+        monkeypatch.setattr(service, "lancer_rapport", _jamais_appele)
         monkeypatch.setattr(memory, "build_context", lambda db, u: "")
         monkeypatch.setattr(service, "_profile_dict", lambda db, u: {})
         with pytest.raises(AssertionError):
@@ -404,3 +406,574 @@ def test_cache_investisseurs_expire_avec_le_ttl(monkeypatch):
         assert len(chargements) == 4, "le TTL n'a pas provoqué de rechargement"
     finally:
         client.vider()
+
+
+# ===========================================================================
+# Task 2 — moteur de génération suivi par identifiant (spec §1, §2, §3, §5.1)
+# ===========================================================================
+#
+# Ces tests tournent sur une base SQLite **de fichier** et non en mémoire : le
+# moteur ouvre sa propre session (c'est toute sa raison d'être) et l'annulation
+# est relue depuis une troisième. Avec `StaticPool` en mémoire, ces sessions
+# partageraient une seule connexion — donc une seule transaction — et le test
+# vérifierait une propriété que la production n'a pas.
+
+import json  # noqa: E402
+import time  # noqa: E402
+
+from app.modules.reports import models as rm  # noqa: E402
+
+
+def _base_fichier(tmp_path):
+    """Base SQLite de fichier + `app.db.SessionLocal` pointé dessus."""
+    import app.db as app_db
+    import app.modules.viz.models  # noqa: F401 — enregistre `viz_rendus`
+    from sqlalchemy.orm import sessionmaker
+
+    engine = create_engine(f"sqlite:///{tmp_path}/rapports.db", future=True,
+                           connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine, tables=[
+        Base.metadata.tables["projects"],
+        Base.metadata.tables["reports"],
+        Base.metadata.tables["report_feedback"],
+        Base.metadata.tables["credit_balances"],
+        Base.metadata.tables["credit_events"],
+        Base.metadata.tables["viz_rendus"],
+    ])
+    fabrique = sessionmaker(bind=engine, future=True)
+    app_db.SessionLocal = fabrique  # restauré par la fixture ci-dessous
+    return engine
+
+
+@pytest.fixture
+def base(tmp_path, monkeypatch):
+    import app.db as app_db
+
+    ancienne = app_db.SessionLocal
+    engine = _base_fichier(tmp_path)
+    yield engine
+    app_db.SessionLocal = ancienne
+
+
+class _Source:
+    """Le minimum qu'`assemble` rend : une citation de rapport."""
+
+    def __init__(self, i):
+        self.i = i
+
+
+def _citations(n: int) -> list[dict]:
+    return [{"title": f"Source {i}", "url": f"https://exemple.fr/{i}",
+             "domain": "exemple.fr", "source": "web",
+             "excerpt": f"Extrait {i}"} for i in range(1, n + 1)]
+
+
+def _brancher_moteur(monkeypatch, *, citations=None, couverture="oui",
+                     chunks=None, stop_reason="end_turn", avant_chunk=None):
+    """Neutralise tout ce qui sort du process : recherche, RAG, modèle.
+
+    Ce qui reste sous test est exactement le moteur : les étapes, la détection
+    de section, l'annulation et la transaction de clôture.
+    """
+    from app.modules.analysis import service
+    from app.modules.memory import service as memory
+    from app.modules.reports import notification
+    from app.shared import grounding, llm_client
+    from app.shared import search as web_search
+
+    cits = _citations(8) if citations is None else citations
+    monkeypatch.setattr(memory, "build_context", lambda db, u: "")
+    monkeypatch.setattr(service, "_profile_dict", lambda db, u: {})
+    monkeypatch.setattr(llm_client, "generation_available", lambda: True)
+    monkeypatch.setattr(web_search, "search_multi",
+                        lambda angles, **kw: [_Source(i) for i in range(len(cits))])
+    monkeypatch.setattr(service, "_retrieve_context", lambda *a, **k: ("", []))
+    monkeypatch.setattr(grounding, "assemble",
+                        lambda *a, **k: ("contexte numéroté", list(cits)))
+    monkeypatch.setattr(service, "_evaluer_couverture", lambda q, c: couverture)
+    monkeypatch.setattr(notification, "prevenir", lambda *a, **k: True)
+
+    morceaux = chunks if chunks is not None else ["# Titre\n", "## 1. A\n", "texte "]
+
+    def _flux(*, system, prompt, tier="chat", max_tokens=4000, history=None,
+              mesure=None, **kw):
+        if mesure is not None:
+            mesure.update({"model": "modele-test", "provider": "test",
+                           "input_tokens": 100, "output_tokens": 200})
+        for m in morceaux:
+            if avant_chunk is not None:
+                avant_chunk(m)
+            yield m
+        return stop_reason
+
+    monkeypatch.setattr(llm_client, "stream_text", _flux)
+    return cits
+
+
+def _lancer(base, uid, monkeypatch, *, analysis_type="analyse_risques",
+            credits=200, **kw):
+    """Solde crédité puis rapport lancé en ATTENTE (moteur synchrone)."""
+    from app.modules.analysis import service
+    from app.modules.billing import service as billing
+
+    with Session(base) as db:
+        billing.get_or_create_balance(db, str(uid))
+        billing.grant_purchased(db, str(uid), credits)
+    with Session(base) as db:
+        return service.lancer_rapport(db, str(uid), query="ma question",
+                                      analysis_type=analysis_type,
+                                      attendre=True, **kw)
+
+
+def _relire(base, rapport_id):
+    with Session(base) as db:
+        return db.get(Report, rapport_id)
+
+
+def _solde(base, uid):
+    from app.modules.billing import service as billing
+
+    with Session(base) as db:
+        return billing.available_credits(billing.get_or_create_balance(db, str(uid)))
+
+
+# --- Step 1 : statuts et transaction unique --------------------------------
+
+def test_statuts_declares_une_seule_fois():
+    """Task 1 n'a posé aucun CHECK : la constante EST le contrat."""
+    assert rm.STATUTS == ("en_cours", "termine", "echec", "degrade", "annule",
+                          "sources_insuffisantes")
+    assert rm.EN_COURS not in rm.STATUTS_TERMINAUX
+    assert set(rm.STATUTS_TERMINAUX) | {rm.EN_COURS} == set(rm.STATUTS)
+
+
+def test_la_ligne_est_creee_en_cours_avant_toute_generation(base, monkeypatch):
+    """Le rapport existe dès le lancement, question comprise (spec §1)."""
+    from app.modules.analysis import service
+    from app.modules.billing import service as billing
+    from app.modules.memory import service as memory
+
+    uid = uuidlib.uuid4()
+    monkeypatch.setattr(memory, "build_context", lambda db, u: "")
+    monkeypatch.setattr(service, "_profile_dict", lambda db, u: {})
+    lances: list[str] = []
+    monkeypatch.setattr(service.threading, "Thread",
+                        lambda **kw: type("T", (), {
+                            "start": lambda s: lances.append(kw["args"][0])})())
+    with Session(base) as db:
+        billing.get_or_create_balance(db, str(uid))
+        rapport = service.lancer_rapport(db, str(uid), query="ma question",
+                                         analysis_type="analyse_risques")
+    assert rapport.statut == rm.EN_COURS
+    assert rapport.progression == 0
+    assert rapport.content == ""
+    assert rapport.question == "ma question"
+    assert lances == [str(rapport.id)], "la tâche doit être lancée en thread"
+
+
+def test_rapport_termine_debite_et_archive_ensemble(base, monkeypatch):
+    _brancher_moteur(monkeypatch)
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch)
+
+    assert rapport.statut == rm.TERMINE
+    assert rapport.progression == 100
+    assert "# Titre" in rapport.content
+    assert rapport.termine_at is not None
+    assert rapport.tokens_entree == 100 and rapport.tokens_sortie == 200
+    assert rapport.detail["credits"] == 25          # coût d'une analyse_risques
+    assert _solde(base, uid) == 40 + 200 - 25
+
+
+def test_echec_darchivage_ne_debite_rien(base, monkeypatch):
+    """La régression que Task 2 corrige : le débit committait EN PREMIER.
+
+    Jusqu'au 12/09, `consume_credits` clôturait sa transaction avant que
+    `create_report` n'ouvre la sienne. Une panne entre les deux laissait le
+    compte débité sans rapport. Ici l'archivage explose : rien ne doit bouger.
+    """
+    from app.modules.analysis import service
+
+    _brancher_moteur(monkeypatch)
+    uid = uuidlib.uuid4()
+
+    def _archivage_impossible(db, rapport, result, *, statut, charged):
+        if statut == rm.TERMINE:
+            raise RuntimeError("disque plein")
+        return None
+
+    monkeypatch.setattr(service, "_cloturer", _archivage_impossible)
+    rapport = _lancer(base, uid, monkeypatch)
+
+    assert rapport.statut == rm.ECHEC
+    assert rapport.detail["raison"] == "echec_generation"
+    assert _solde(base, uid) == 40 + 200, "des crédits ont été débités pour rien"
+    with Session(base) as db:
+        debits = db.scalars(select(CreditEvent).where(
+            CreditEvent.action == "analyse_risques")).all()
+    assert debits == [], "un événement de débit a survécu à l'échec"
+
+
+def test_consume_credits_sans_commit_reste_annulable(base):
+    """`commit=False` laisse le débit en attente : un rollback l'efface."""
+    from app.modules.billing import service as billing
+
+    uid = str(uuidlib.uuid4())
+    with Session(base) as db:
+        billing.get_or_create_balance(db, uid)
+        res = billing.consume_credits(db, uid, "analyse_risques", commit=False)
+        assert res["charged"] == 25
+        db.rollback()
+    assert _solde(base, uid) == 40
+
+
+# --- Step 2 : étapes réelles et section en cours ---------------------------
+
+def _etapes_observees(monkeypatch) -> list[tuple]:
+    """Enregistre chaque écriture d'étape sans en changer l'effet."""
+    from app.modules.analysis.service import Suivi
+
+    vues: list[tuple] = []
+    original = Suivi.etape
+
+    def _espion(self, nom, progression, **detail):
+        vues.append((nom, progression, detail.get("section")))
+        return original(self, nom, progression, **detail)
+
+    monkeypatch.setattr(Suivi, "etape", _espion)
+    return vues
+
+
+def test_sequence_des_etapes_et_section_en_cours(base, monkeypatch):
+    """recherche → selection → couverture → redaction → finalisation."""
+    # 3 titres `##` répartis dans 60 portions : la détection doit les voir au
+    # fil du texte, et pas seulement à la fin.
+    morceaux = ["## 1. Un\n"] + ["mot "] * 25 + ["## 2. Deux\n"] + ["mot "] * 25 \
+        + ["## 3. Trois\n"] + ["fin"]
+    _brancher_moteur(monkeypatch, chunks=morceaux)
+    vues = _etapes_observees(monkeypatch)
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch)
+
+    noms = [n for n, _, _ in vues]
+    assert noms[0] == "recherche"
+    for attendue in ("recherche", "selection", "couverture", "redaction",
+                     "finalisation"):
+        assert attendue in noms, noms
+    # L'ordre des premières apparitions suit le pipeline.
+    premieres = [noms.index(n) for n in ("recherche", "selection", "couverture",
+                                         "redaction", "finalisation")]
+    assert premieres == sorted(premieres), noms
+    # Progression monotone, jamais au-dessus de 100.
+    progressions = [p for _, p, _ in vues]
+    assert progressions == sorted(progressions), progressions
+    assert max(progressions) <= 100
+
+    sections = [s for n, _, s in vues if n == "redaction" and s]
+    assert sections, "aucune section détectée pendant la rédaction"
+    assert all("/" in s for s in sections)
+    total = int(sections[0].split("/")[1])
+    assert [int(s.split("/")[0]) for s in sections] == sorted(
+        int(s.split("/")[0]) for s in sections), sections
+    assert all(int(s.split("/")[0]) <= total for s in sections), sections
+    assert rapport.statut == rm.TERMINE
+
+
+def test_le_denominateur_de_section_vient_de_la_directive():
+    from app.modules.analysis.service import _sections_attendues
+
+    # 3 axes + synthèse + conclusion + Sources pour l'analyse de risques.
+    assert _sections_attendues("analyse_risques") == 6
+    assert _sections_attendues("synthese_executive") == 8
+    # Type inconnu : un dénominateur plancher, jamais une division par zéro.
+    assert _sections_attendues("inexistant") >= 4
+
+
+def test_evenements_sse_gardent_le_contrat_du_front(base, monkeypatch):
+    """`step` et `progress` survivent jusqu'à Task 4 ; `etape` les double."""
+    from app.modules.analysis import service
+    from app.modules.billing import service as billing
+    from app.modules.memory import service as memory
+
+    uid = uuidlib.uuid4()
+    monkeypatch.setattr(memory, "build_context", lambda db, u: "")
+    monkeypatch.setattr(service, "_profile_dict", lambda db, u: {})
+    monkeypatch.setattr(service, "INTERVALLE_SUIVI_SECONDES", 0.01)
+    monkeypatch.setattr(service, "_solde", lambda db, u: 77)
+
+    def _faux_moteur(rapport_id, **kw):
+        """Avance la ligne étape par étape, puis la termine."""
+        import app.db as app_db
+
+        with app_db.SessionLocal() as db:
+            r = db.get(Report, uuidlib.UUID(rapport_id))
+            for nom, prog in (("recherche", 20), ("selection", 35),
+                              ("redaction", 60)):
+                r.etape, r.progression = nom, prog
+                r.detail = {"message": f"étape {nom}"}
+                db.commit()
+                time.sleep(0.03)
+            r.statut, r.progression, r.content = rm.TERMINE, 100, "corps"
+            r.detail = {"credits": 25}
+            db.commit()
+
+    monkeypatch.setattr(service, "_executer_rapport", _faux_moteur)
+    with Session(base) as db:
+        billing.get_or_create_balance(db, str(uid))
+        evts = [json.loads(e.removeprefix("data: ").strip())
+                for e in service.stream_analysis(
+                    db=db, user_id=str(uid), is_admin=False, query="q",
+                    analysis_type="analyse_risques")]
+
+    assert evts[0]["step"] == "start" and evts[0]["report_id"]
+    assert all("progress" in e and "step" in e for e in evts), evts
+    assert all("etape" in e for e in evts), evts
+    etapes = [e["etape"] for e in evts if e.get("etape")]
+    assert etapes[:3] == ["recherche", "selection", "redaction"], etapes
+    # Anciens `step` conservés pour le front en production.
+    assert {e["step"] for e in evts} <= {"start", "retrieve", "generate",
+                                         "finalize", "done"}
+    fin = evts[-1]
+    assert fin["done"] is True and fin["progress"] == 100
+    assert fin["statut"] == rm.TERMINE
+    assert fin["data"]["content"] == "corps"
+    assert fin["data"]["balance"] == 77
+    assert fin["data"]["credits"] == 25
+    assert fin["report_id"] == evts[0]["report_id"]
+
+
+# --- Step 3 : annulation ---------------------------------------------------
+
+def test_stop_pendant_la_redaction_nannule_aucun_credit(base, monkeypatch):
+    """Le drapeau est posé par une AUTRE session, en pleine rédaction."""
+    uid = uuidlib.uuid4()
+    pose = {"fait": False}
+    morceaux = ["## 1. Début\n"] + ["mot " for _ in range(200)]
+
+    def _poser_le_stop(_chunk):
+        if pose["fait"]:
+            return
+        pose["fait"] = True
+        with Session(base) as autre:
+            r = autre.scalars(select(Report)).one()
+            r.annulation_demandee = True
+            autre.commit()
+
+    _brancher_moteur(monkeypatch, chunks=morceaux, avant_chunk=_poser_le_stop)
+    rapport = _lancer(base, uid, monkeypatch)
+
+    assert rapport.statut == rm.ANNULE
+    assert rapport.content == "", "un rapport annulé ne se lit pas"
+    assert rapport.detail["raison"] == "annule_par_utilisateur"
+    partiel = rapport.detail.get("contenu_partiel") or ""
+    assert partiel.startswith("## 1. Début")
+    assert len(partiel) <= 2000
+    assert _solde(base, uid) == 40 + 200, "un rapport annulé a été facturé"
+
+
+def test_annuler_pose_le_drapeau_et_refuse_un_rapport_termine(base):
+    from app.errors import AppError
+    from app.modules.reports import service as reports
+
+    uid = uuidlib.uuid4()
+    with Session(base) as db:
+        en_cours = _rapport(db, uid, statut=rm.EN_COURS, progression=10)
+        fini = _rapport(db, uid, statut=rm.TERMINE)
+        r = reports.demander_annulation(db, str(uid), str(en_cours.id))
+        assert r.annulation_demandee is True
+        # Idempotence : la tâche n'a pas encore rangé la ligne, un second clic
+        # ne doit pas lever.
+        reports.demander_annulation(db, str(uid), str(en_cours.id))
+        with pytest.raises(AppError) as exc:
+            reports.demander_annulation(db, str(uid), str(fini.id))
+        assert exc.value.status_code == 409
+
+
+# --- Step 4 : couverture, recherche élargie, génération forcée -------------
+
+def test_couverture_non_ne_debite_rien_et_expose_les_sources(base, monkeypatch):
+    _brancher_moteur(monkeypatch, couverture="non")
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch)
+
+    assert rapport.statut == rm.SOURCES_INSUFFISANTES
+    assert rapport.detail["raison"] == "sources_insuffisantes"
+    assert len(rapport.detail["sources"]) == 8
+    assert rapport.detail["sources"][0]["url"].startswith("https://")
+    assert _solde(base, uid) == 40 + 200, "une couverture nulle a été facturée"
+
+
+def test_moins_de_cinq_sources_pertinentes_suffit_a_bloquer(base, monkeypatch):
+    """Le seuil ne dépend pas du juge : 4 sources ne font pas un rapport."""
+    _brancher_moteur(monkeypatch, citations=_citations(4), couverture="oui")
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch)
+
+    assert rapport.statut == rm.SOURCES_INSUFFISANTES
+    assert _solde(base, uid) == 40 + 200
+
+
+def test_couverture_partielle_genere_et_porte_la_raison(base, monkeypatch):
+    _brancher_moteur(monkeypatch, couverture="partiel")
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch)
+
+    assert rapport.statut == rm.TERMINE
+    assert rapport.detail["raison"] == "couverture_partielle"
+    assert _solde(base, uid) == 40 + 200 - 25, "un rapport livré doit être facturé"
+
+
+def test_forcer_genere_malgre_un_verdict_negatif(base, monkeypatch):
+    """« Générer quand même » : débit normal, bandeau « couverture partielle »."""
+    juges: list[int] = []
+    _brancher_moteur(monkeypatch, citations=_citations(2), couverture="non")
+    from app.modules.analysis import service
+
+    monkeypatch.setattr(service, "_evaluer_couverture",
+                        lambda q, c: juges.append(1) or "non")
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch, forcer=True)
+
+    assert rapport.statut == rm.TERMINE
+    assert rapport.detail["raison"] == "couverture_partielle"
+    assert _solde(base, uid) == 40 + 200 - 25
+    assert juges == [], "forcer doit court-circuiter le juge, pas le payer"
+
+
+def test_elargir_ajoute_des_angles_une_seule_fois(base, monkeypatch):
+    from app.modules.analysis import service
+    from app.shared import search as web_search
+
+    _brancher_moteur(monkeypatch)
+    appels: list[list[str]] = []
+    monkeypatch.setattr(web_search, "search_multi",
+                        lambda angles, **kw: appels.append(list(angles))
+                        or [_Source(i) for i in range(8)])
+    monkeypatch.setattr(service, "_angles_elargis",
+                        lambda t, q, p: ["angle A", "angle B"])
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch, elargir=True)
+
+    assert rapport.statut == rm.TERMINE
+    assert len(appels) == 1, "une seule passe de recherche, pas deux"
+    assert "angle A" in appels[0] and "angle B" in appels[0]
+    assert len(appels[0]) > 2, "les angles standards restent"
+
+
+def test_le_juge_de_couverture_ne_bloque_jamais_un_rapport(monkeypatch):
+    """Panne, quota, réponse illisible : on génère. Le juge n'est pas juge."""
+    from app.modules.analysis import service
+    from app.shared import llm_client
+    from app.shared.llm_client.base import LLMResult
+
+    cits = _citations(8)
+
+    def _en_panne(**kw):
+        raise RuntimeError("quota dépassé")
+
+    monkeypatch.setattr(llm_client, "generate", _en_panne)
+    assert service._evaluer_couverture("q", cits) == "oui"
+
+    for texte, attendu in (("oui", "oui"), ("  Partiel.", "partiel"),
+                           ("NON", "non"), ("je ne sais pas", "oui")):
+        monkeypatch.setattr(llm_client, "generate",
+                            lambda t=texte, **kw: LLMResult(text=t, model="m",
+                                                            provider="p"))
+        assert service._evaluer_couverture("q", cits) == attendu, texte
+    # Aucune source : inutile de déranger un modèle pour le dire.
+    assert service._evaluer_couverture("q", []) == "non"
+
+
+def test_le_prompt_de_couverture_est_isole_et_ne_touche_pas_aux_directives():
+    """Arbitrage §0 : les prompts de rapport ne bougent pas de ce chantier."""
+    from app.modules.analysis import prompts
+    from app.modules.analysis.service import PROMPT_COUVERTURE
+
+    assert "{question}" in PROMPT_COUVERTURE and "{sources}" in PROMPT_COUVERTURE
+    assert "partiel" in PROMPT_COUVERTURE
+    assert PROMPT_COUVERTURE not in prompts.SYSTEM_PROMPT
+    for directive in prompts.ANALYSIS_DIRECTIVES.values():
+        assert "couverture" not in (directive.get("special_instructions") or "")
+
+
+def test_relancer_cree_un_nouveau_rapport_sans_toucher_a_lancien(base, monkeypatch):
+    from app.modules.analysis import service
+
+    _brancher_moteur(monkeypatch, couverture="non")
+    uid = uuidlib.uuid4()
+    premier = _lancer(base, uid, monkeypatch)
+    assert premier.statut == rm.SOURCES_INSUFFISANTES
+
+    _brancher_moteur(monkeypatch, couverture="oui")
+    with Session(base) as db:
+        second = service.lancer_rapport(db, str(uid), query=premier.question,
+                                        analysis_type=premier.analysis_type,
+                                        forcer=True, attendre=True)
+    assert str(second.id) != str(premier.id)
+    assert second.statut == rm.TERMINE
+    assert _relire(base, premier.id).statut == rm.SOURCES_INSUFFISANTES
+
+
+# --- Step 5 : /run et /stream, un seul moteur ------------------------------
+
+def test_run_et_stream_produisent_la_meme_ligne(base, monkeypatch):
+    """Deux routes, un moteur : les deux lignes se ressemblent trait pour trait."""
+    from app.modules.analysis import service
+
+    _brancher_moteur(monkeypatch)
+    monkeypatch.setattr(service, "INTERVALLE_SUIVI_SECONDES", 0.01)
+    uid = uuidlib.uuid4()
+
+    par_run = _lancer(base, uid, monkeypatch)
+    with Session(base) as db:
+        evts = [json.loads(e.removeprefix("data: ").strip())
+                for e in service.stream_analysis(
+                    db=db, user_id=str(uid), is_admin=False, query="ma question",
+                    analysis_type="analyse_risques")]
+    par_stream = _relire(base, uuidlib.UUID(evts[-1]["report_id"]))
+
+    assert par_run.id != par_stream.id
+    for champ in ("statut", "etape", "progression", "content", "analysis_type",
+                  "question", "tokens_entree", "tokens_sortie", "modele"):
+        assert getattr(par_run, champ) == getattr(par_stream, champ), champ
+    assert par_run.detail["credits"] == par_stream.detail["credits"] == 25
+    assert _solde(base, uid) == 40 + 200 - 50, "deux rapports, deux débits"
+
+
+def test_run_attend_le_terme_sur_sa_propre_session(base, monkeypatch):
+    """`/run` n'archive pas depuis la session de la requête (spec §0)."""
+
+    _brancher_moteur(monkeypatch)
+    sessions: list[int] = []
+    import app.db as app_db
+
+    fabrique = app_db.SessionLocal
+
+    def _tracee():
+        s = fabrique()
+        sessions.append(id(s))
+        return s
+
+    monkeypatch.setattr(app_db, "SessionLocal", _tracee)
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch)
+    assert rapport.statut == rm.TERMINE
+    assert len(sessions) == 1, "le moteur doit ouvrir UNE session propre"
+
+
+def test_routes_de_suivi_montees():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    chemins = TestClient(app).get("/openapi.json").json()["paths"]
+    for chemin in ("/analysis/run", "/analysis/stream",
+                   "/reports/{report_id}", "/reports/{report_id}/annuler",
+                   "/reports/{report_id}/relancer"):
+        assert chemin in chemins, chemin
+    detail = chemins["/reports/{report_id}"]["get"]["responses"]["200"]
+    ref = detail["content"]["application/json"]["schema"]["$ref"]
+    assert ref.endswith("ReportDetail")
+    # `/run` rend le même ReportDetail : une seule forme de rapport côté front.
+    assert chemins["/analysis/run"]["post"]["responses"]["200"]["content"][
+        "application/json"]["schema"]["$ref"] == ref

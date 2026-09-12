@@ -86,8 +86,20 @@ def check_credits(db: Session, user_id: str, action: str) -> dict:
 
 
 def consume_credits(db: Session, user_id: str, action: str,
-                    *, is_admin: bool = False) -> dict:
-    """Atomically debit the cost of `action`. Admins bypass consumption."""
+                    *, is_admin: bool = False, commit: bool = True) -> dict:
+    """Atomically debit the cost of `action`. Admins bypass consumption.
+
+    `commit=False` — débite **sans clore la transaction** : le solde et
+    l'événement restent en attente dans la session de l'appelant, qui commit
+    lui-même. C'est ce qui rend le débit d'un rapport atomique avec son
+    archivage (spec §5.1) : jusqu'au 12/09, ce commit-ci partait en premier et
+    un échec d'archivage laissait 40 crédits débités pour rien.
+
+    Le `rollback` du cas « crédits insuffisants » suit la même règle : avec
+    `commit=False`, annuler la transaction détruirait le travail en attente de
+    l'appelant (la ligne de rapport en cours, par exemple). L'appelant reçoit
+    l'`AppError` et décide.
+    """
     cost = cost_for(action)
     if is_admin:
         return {"charged": 0, "action": action, "bypass": True}
@@ -101,7 +113,8 @@ def consume_credits(db: Session, user_id: str, action: str,
     ).scalar_one()
 
     if available_credits(balance) < cost:
-        db.rollback()
+        if commit:
+            db.rollback()
         raise AppError("Crédits insuffisants.", 402, code="insufficient_credits")
 
     remaining = cost
@@ -119,8 +132,14 @@ def consume_credits(db: Session, user_id: str, action: str,
         remaining -= take
 
     _log_event(db, user_id, -cost, action)
-    db.commit()
-    db.refresh(balance)
+    if commit:
+        db.commit()
+        db.refresh(balance)
+    else:
+        # Pas de `refresh` : il rechargerait la ligne depuis la base et
+        # effacerait la décrémentation encore en attente. Les compteurs en
+        # mémoire portent déjà le solde d'après-débit.
+        db.flush()
     return {"charged": cost, "action": action, "remaining": available_credits(balance)}
 
 

@@ -13,17 +13,17 @@ class AnalysisRequest(BaseModel):
     # None = le nombre de sources est décidé par le type d'analyse (la directive
     # exige 25 à 40 sources selon le rapport ; cf. prompts.sources_for).
     top_k: int | None = Field(default=None, ge=0, le=60)
+    # Spec §2 — reprises après un verdict « sources insuffisantes ».
+    # `elargir` : angles de recherche supplémentaires, produits une fois.
+    # `forcer` : générer malgré le verdict, avec la mention « couverture
+    # partielle » sur le rapport.
+    elargir: bool = False
+    forcer: bool = False
 
 
-class AnalysisResponse(BaseModel):
-    analysis_type: str
-    title: str
-    content: str
-    report_id: str | None = None  # rapport archivé automatiquement
-    sources: list[dict]
-    degraded: bool  # True if the primary web-search engine was unavailable
-    status_note: str | None  # human-readable explanation when degraded
-    metadata: dict
+# `AnalysisResponse` a disparu avec Task 2 : `POST /analysis/run` rend le même
+# `ReportDetail` que `GET /reports/{id}`, pour que le front n'ait qu'une forme
+# de rapport à connaître, quelle que soit la route qui l'a produit.
 
 
 def available_types() -> list[dict]:
