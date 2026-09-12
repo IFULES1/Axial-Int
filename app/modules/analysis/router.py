@@ -49,7 +49,7 @@ def run(payload: AnalysisRequest, user: AuthUser = Depends(get_current_user),
         title=payload.title, top_k=payload.top_k, is_admin=user.is_admin,
         elargir=payload.elargir, forcer=payload.forcer, attendre=True,
     )
-    return ReportDetail(**reports.detail_dict(rapport))
+    return ReportDetail(**reports.detail_dict(rapport, is_admin=user.is_admin))
 
 
 @router.post("/premier-rapport", status_code=202)

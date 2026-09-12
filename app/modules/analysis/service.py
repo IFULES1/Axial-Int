@@ -1170,7 +1170,7 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
 
     from app.modules.reports import service as reports
 
-    detail = reports.detail_dict(ligne)
+    detail = reports.detail_dict(ligne, is_admin=is_admin)
     evenement = {
         "progress": 100, "step": "done", "done": True, "etape": ligne.etape,
         "report_id": rapport_id, "statut": ligne.statut,

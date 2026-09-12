@@ -82,24 +82,42 @@ def update_project(db: Session, user_id: str, project_id: str, *,
 
 
 def delete_project(db: Session, user_id: str, project_id: str) -> None:
-    """Supprime un dossier VIDE (au sens : plus aucune conversation active).
+    """Supprime un dossier VIDE (au sens : plus aucun contenu actif).
 
     Refusé tant qu'il reste des conversations non archivées : la cascade ORM
     emporterait les conversations ET leurs messages, et « supprimer le
     dossier » n'est pas une manière d'effacer trente fils par erreur.
     Les conversations archivées, elles, partent avec le dossier.
+
+    Depuis Rapports v2 (spec §4), les dossiers contiennent AUSSI des rapports
+    et le même refus s'applique : un rapport payé ne doit pas disparaître de la
+    vue parce qu'on a rangé son dossier. Techniquement il survivrait
+    (`reports.project_id` est ON DELETE SET NULL, pas CASCADE) mais il
+    retomberait « sans dossier » sans que personne ne l'ait demandé — le
+    message annonce donc les deux comptes.
     """
     from sqlalchemy import func
+
+    from app.modules.reports.models import Report
 
     proj = _own_project(db, user_id, project_id)
     actives = db.scalar(
         select(func.count()).select_from(Conversation)
         .where(Conversation.project_id == proj.id,
                Conversation.archived_at.is_(None))) or 0
-    if actives:
+    rapports = db.scalar(
+        select(func.count()).select_from(Report)
+        .where(Report.project_id == proj.id,
+               Report.archived_at.is_(None))) or 0
+    if actives or rapports:
+        parts = []
+        if actives:
+            parts.append(f"{actives} conversation(s)")
+        if rapports:
+            parts.append(f"{rapports} rapport(s)")
         raise AppError(
-            f"Ce dossier contient encore {actives} conversation(s) non "
-            "archivée(s). Déplacez-les ou archivez-les avant de supprimer "
+            f"Ce dossier contient encore {' et '.join(parts)} non "
+            "archivé(e)s. Déplacez-les ou archivez-les avant de supprimer "
             "le dossier.",
             409, code="projet_non_vide")
     db.delete(proj)

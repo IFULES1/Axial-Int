@@ -93,6 +93,24 @@ def get_current_user(
     return user_from_claims(decode_token(credentials.credentials))
 
 
+_bearer_optionnel = HTTPBearer(auto_error=False)
+
+
+def get_current_user_optionnel(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_optionnel),
+) -> AuthUser | None:
+    """L'utilisateur s'il est authentifié, `None` sinon.
+
+    Pour les routes servies AUSSI sans compte (images d'un rapport partagé) :
+    l'absence d'en-tête est un cas normal, mais un jeton présent et invalide
+    reste une erreur — le traiter comme une absence masquerait une session
+    expirée derrière un « introuvable ».
+    """
+    if credentials is None:
+        return None
+    return user_from_claims(decode_token(credentials.credentials))
+
+
 def get_current_admin(user: AuthUser = Depends(get_current_user)) -> AuthUser:
     if not user.is_admin:
         raise AppError("Accès réservé aux administrateurs.", 403, code="forbidden")

@@ -7,6 +7,7 @@ same codebase runs the API and (via worker/) the scheduled jobs.
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,13 +16,46 @@ from app.config import get_settings
 from app.errors import install_error_handlers
 from app.shared.health import providers_summary
 
+logger = logging.getLogger("axial.main")
+
 settings = get_settings()
 logging.basicConfig(level=settings.log_level)
+
+
+def balayer_rapports_orphelins() -> int:
+    """Range les rapports laissés `en_cours` par un redémarrage de l'API.
+
+    La génération tourne dans un thread démon : elle meurt avec le processus
+    sans ranger sa ligne. L'échéance globale du moteur couvre la tâche vivante,
+    la session de secours couvre la session impossible ; personne ne couvrait
+    le redémarrage. Un rapport figé à « 62 % » pour toujours est le pire des
+    états — le front y poll indéfiniment.
+
+    Ne lève jamais : une base indisponible au démarrage ne doit pas empêcher
+    l'API de monter (les routes répondront 503 d'elles-mêmes).
+    """
+    try:
+        from app.db import SessionLocal
+        from app.modules.reports import service as reports
+
+        with SessionLocal() as db:
+            return reports.balayer_orphelins(db)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Balayage des rapports orphelins impossible : %s", e)
+        return 0
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    balayer_rapports_orphelins()
+    yield
+
 
 app = FastAPI(
     title="Axial Intelligence API",
     version="1.0.0",
     description="Strategic intelligence platform — modular monolith.",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -58,6 +92,7 @@ def _mount_routers() -> None:
     from app.modules.memory.router import router as memory_router
     from app.modules.rag.router import router as rag_router
     from app.modules.reports.router import router as reports_router
+    from app.modules.reports.router import router_public as partage_router
     from app.modules.watches.router import router as watches_router
     from app.modules.investors.router import router as investors_router
     from app.modules.emailing.router import router as emailing_router
@@ -72,6 +107,9 @@ def _mount_routers() -> None:
     app.include_router(intelligence_router)
     app.include_router(billing_router)
     app.include_router(reports_router)
+    # Partage public : SANS authentification, monté à part pour que la
+    # frontière se voie (spec §0).
+    app.include_router(partage_router)
     app.include_router(memory_router)
     app.include_router(watches_router)
     app.include_router(investors_router)

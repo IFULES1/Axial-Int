@@ -48,8 +48,8 @@ def main() -> int:
               f"rapport {info['report_id'][:8]}…")
 
         # 4. Report persisted + PDF export.
-        docs = reports.list_reports(db, user_id)
-        assert len(docs) == 1
+        docs, has_more = reports.list_reports(db, user_id)
+        assert len(docs) == 1 and not has_more
         pdf = reports.export_pdf(db, user_id, str(docs[0].id))
         assert pdf[:5] == b"%PDF-"
         print(f"✓ Rapport archivé + PDF généré ({len(pdf)} octets)")

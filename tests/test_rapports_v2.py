@@ -31,6 +31,7 @@ import app.modules.reports.models  # noqa: F401 — enregistre `reports`
 from app.db import Base
 from app.modules.billing.models import (
     ACTION_PREMIER_RAPPORT_OFFERT, CreditBalance, CreditEvent)
+from app.modules.reports import service as reports_service
 from app.modules.reports.feedback import ReportFeedback
 from app.modules.reports.models import Report
 
@@ -1359,3 +1360,930 @@ def test_run_transmet_elargir_et_forcer(base, monkeypatch):
     assert reponse.id == str(ligne.id)
     # Même schéma que `/stream` : un seul contrat d'entrée pour les deux routes.
     assert {"elargir", "forcer"} <= set(AnalysisRequest.model_fields)
+
+
+# ===========================================================================
+# Task 3 — gestion, partage public, export, signalement, balayage
+# ===========================================================================
+
+def _base_http():
+    """Base SQLite PARTAGÉE entre le test et le client HTTP.
+
+    `sqlite://` seul rend une base neuve PAR connexion : le `TestClient` en
+    ouvre une autre que le test et n'y trouverait aucune table.
+    """
+    import app.modules.viz.models  # noqa: F401 — enregistre `viz_rendus`
+
+    engine = create_engine("sqlite://", future=True,
+                           connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(engine, tables=[
+        Base.metadata.tables["projects"],
+        # Les dossiers sont ceux des conversations : supprimer un dossier
+        # compte les deux contenus (spec §4).
+        Base.metadata.tables["conversations"],
+        Base.metadata.tables["messages"],
+        Base.metadata.tables["reports"],
+        Base.metadata.tables["report_feedback"],
+        Base.metadata.tables["credit_balances"],
+        Base.metadata.tables["credit_events"],
+        Base.metadata.tables["viz_rendus"],
+    ])
+    return engine
+
+
+def _client(engine, uid, *, is_admin=False, full_name=None,
+            email="fondateur@exemple.fr"):
+    """`TestClient` sur l'app réelle : le seul moyen de prouver que les ROUTES
+    (méthodes, codes, corps) tiennent, et pas seulement le service."""
+    from fastapi.testclient import TestClient
+
+    from app.db import get_db
+    from app.main import app
+    from app.modules.auth.schemas import AuthUser
+    from app.modules.auth.security import (
+        get_current_admin, get_current_user, get_current_user_optionnel)
+
+    def _db():
+        with Session(engine) as s:
+            yield s
+
+    utilisateur = AuthUser(id=str(uid), email=email, full_name=full_name,
+                           is_admin=is_admin)
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[get_current_user] = lambda: utilisateur
+    # Les images de graphiques acceptent AUSSI l'anonyme (`?p=`) : leur
+    # dépendance est distincte et doit être branchée séparément.
+    app.dependency_overrides[get_current_user_optionnel] = lambda: utilisateur
+    app.dependency_overrides[get_current_admin] = lambda: (
+        utilisateur if is_admin else _refus_admin())
+    return TestClient(app)
+
+
+def _refus_admin():
+    from app.errors import AppError
+
+    raise AppError("Accès réservé aux administrateurs.", 403, code="forbidden")
+
+
+def _anonyme() -> None:
+    """Coupe l'authentification : ce que voit un visiteur de la page publique."""
+    from app.main import app
+    from app.modules.auth.security import get_current_user_optionnel
+
+    app.dependency_overrides[get_current_user_optionnel] = lambda: None
+
+
+@pytest.fixture
+def http():
+    """Engine partagé + client authentifié, dépendances restaurées à la fin."""
+    from app.main import app
+
+    engine = _base_http()
+    uid = uuidlib.uuid4()
+    try:
+        yield engine, uid
+    finally:
+        app.dependency_overrides.clear()
+
+
+def _datee(db, uid, jours, **kw):
+    """Rapport daté : l'ordre de liste se vérifie sur des dates explicites,
+    pas sur la vitesse d'insertion."""
+    r = _rapport(db, uid, created_at=dt.datetime(2026, 9, 1, 12, 0,
+                                                 tzinfo=dt.timezone.utc)
+                 - dt.timedelta(days=jours), **kw)
+    return r
+
+
+# --- Liste, tri, pagination (§4) -------------------------------------------
+
+def test_liste_en_cours_puis_epingles_puis_date(http):
+    engine, uid = http
+    with Session(engine) as db:
+        attendus = {str(_datee(db, uid, 5, title="Vieux", statut=rm.TERMINE).id),
+                    str(_datee(db, uid, 1, title="Récent", statut=rm.TERMINE).id),
+                    str(_datee(db, uid, 9, title="Épinglé", statut=rm.TERMINE,
+                               pinned_at=dt.datetime(2026, 9, 1,
+                                                     tzinfo=dt.timezone.utc)).id),
+                    str(_datee(db, uid, 30, title="En cours", statut=rm.EN_COURS,
+                               progression=62).id)}
+    page = _client(engine, uid).get("/reports").json()
+    assert [i["title"] for i in page["items"]] == [
+        "En cours", "Épinglé", "Récent", "Vieux"]
+    assert page["has_more"] is False
+    # Un rapport en cours reste en tête MÊME s'il est le plus ancien : c'est
+    # celui que l'utilisateur cherche à rouvrir.
+    assert page["items"][0]["progression"] == 62
+    assert {i["id"] for i in page["items"]} == attendus
+
+
+def test_pagination_par_curseur_ne_saute_ni_ne_repete_aucun_rapport(http):
+    engine, uid = http
+    with Session(engine) as db:
+        # Deux rapports à la MÊME date : sans départage sur l'identifiant, le
+        # jumeau du rapport borne disparaissait de la fenêtre suivante.
+        meme = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.timezone.utc)
+        for i in range(7):
+            _rapport(db, uid, title=f"R{i}", statut=rm.TERMINE,
+                     created_at=meme - dt.timedelta(days=i // 2))
+        _rapport(db, uid, title="P", statut=rm.TERMINE, created_at=meme,
+                 pinned_at=meme)
+        _rapport(db, uid, title="E", statut=rm.EN_COURS, created_at=meme)
+    client = _client(engine, uid)
+
+    vus, before, tours = [], None, 0
+    while True:
+        tours += 1
+        assert tours < 20, "pagination qui ne termine pas"
+        url = "/reports?limit=3" + (f"&before={before}" if before else "")
+        page = client.get(url).json()
+        vus.extend(i["id"] for i in page["items"])
+        if not page["has_more"]:
+            break
+        before = page["items"][-1]["id"]
+    assert len(vus) == 9, vus
+    assert len(set(vus)) == 9, "un rapport a été rendu deux fois"
+    # L'ordre complet est celui d'une liste non paginée.
+    entier = client.get("/reports?limit=100").json()["items"]
+    assert vus == [i["id"] for i in entier]
+    # La première page traverse bien les rangs : en cours, épinglé, puis date.
+    # R0 et R1 partagent leur date — leur ordre relatif est celui des
+    # identifiants, donc indéterminé ici ; c'est le rang qui est sous test.
+    tete = [i["title"] for i in client.get("/reports?limit=3").json()["items"]]
+    assert tete[:2] == ["E", "P"] and tete[2] in ("R0", "R1")
+
+
+def test_liste_ecarte_les_archives_sauf_demande_explicite(http):
+    engine, uid = http
+    with Session(engine) as db:
+        _datee(db, uid, 1, title="Actif", statut=rm.TERMINE)
+        _datee(db, uid, 2, title="Rangé", statut=rm.TERMINE,
+               archived_at=dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc))
+    client = _client(engine, uid)
+    assert [i["title"] for i in client.get("/reports").json()["items"]] == ["Actif"]
+    page = client.get("/reports?inclure_archives=true").json()
+    assert [i["title"] for i in page["items"]] == ["Actif", "Rangé"]
+    assert page["items"][1]["archived_at"] is not None
+
+
+def test_la_liste_porte_le_cout_paye_et_le_dossier_sans_le_contenu(http):
+    """`ReportOut` doit suffire à la liste : statut, crédits, tokens, dossier.
+    Sans eux, le front rechargeait chaque rapport pour afficher une pastille."""
+    import app.modules.intelligence.service as intel
+
+    engine, uid = http
+    with Session(engine) as db:
+        projet = intel.create_project(db, str(uid), "Dossier", None)
+        _rapport(db, uid, statut=rm.TERMINE, content="x" * 5000,
+                 project_id=projet.id, tokens_entree=31000, tokens_sortie=9000,
+                 detail={"credits": 25})
+        pid = str(projet.id)
+    item = _client(engine, uid).get("/reports").json()["items"][0]
+    assert item["credits"] == 25 and item["tokens_entree"] == 31000
+    assert item["tokens_sortie"] == 9000 and item["project_id"] == pid
+    assert item["statut"] == rm.TERMINE
+    assert "content" not in item, "le contenu n'a rien à faire dans la liste"
+
+
+# --- PATCH : renommer, archiver, épingler, classer (§4) --------------------
+
+def test_patch_renomme_archive_epingle_et_deplace(http):
+    import app.modules.intelligence.service as intel
+
+    engine, uid = http
+    with Session(engine) as db:
+        r = _rapport(db, uid, statut=rm.TERMINE, content="corps")
+        projet = intel.create_project(db, str(uid), "Fusions", None)
+        rid, pid = str(r.id), str(projet.id)
+    client = _client(engine, uid)
+
+    assert client.patch(f"/reports/{rid}",
+                        json={"title": "  Marché   du   lithium  "}
+                        ).json()["title"] == "Marché du lithium"
+    # Un titre vide est refusé : « Sans titre » serait une invention du serveur.
+    vide = client.patch(f"/reports/{rid}", json={"title": "   "})
+    assert (vide.status_code, vide.json()["error"]["code"]) == (400, "titre_vide")
+
+    assert client.patch(f"/reports/{rid}", json={"pinned": True}
+                        ).json()["pinned_at"] is not None
+    # Archiver dépingle : un rapport rangé n'occupe plus la tête de liste.
+    archive = client.patch(f"/reports/{rid}", json={"archived": True}).json()
+    assert archive["archived_at"] is not None and archive["pinned_at"] is None
+    assert client.patch(f"/reports/{rid}", json={"archived": False}
+                        ).json()["archived_at"] is None
+
+    assert client.patch(f"/reports/{rid}", json={"project_id": pid}
+                        ).json()["project_id"] == pid
+    # Champ ABSENT du corps : le dossier ne bouge pas (sémantique PATCH).
+    assert client.patch(f"/reports/{rid}", json={"title": "Titre"}
+                        ).json()["project_id"] == pid
+    # Champ à `null` EXPLICITE : « Retirer du dossier ».
+    assert client.patch(f"/reports/{rid}", json={"project_id": None}
+                        ).json()["project_id"] is None
+
+
+def test_deplacer_vers_le_dossier_dun_autre_rend_404(http):
+    """404 et non 403 : on ne confirme pas l'existence d'un dossier qui n'est
+    pas le sien, et un identifiant deviné ne déplace rien."""
+    import app.modules.intelligence.service as intel
+
+    engine, uid = http
+    with Session(engine) as db:
+        r = _rapport(db, uid, statut=rm.TERMINE, content="corps")
+        autre = intel.create_project(db, str(uuidlib.uuid4()), "Privé", None)
+        rid, pid = str(r.id), str(autre.id)
+    client = _client(engine, uid)
+    res = client.patch(f"/reports/{rid}", json={"project_id": pid})
+    assert res.status_code == 404
+    res = client.patch(f"/reports/{rid}", json={"project_id": "pas-un-uuid"})
+    assert res.status_code == 404
+    with Session(engine) as db:
+        assert db.get(Report, uuidlib.UUID(rid)).project_id is None
+
+
+def test_un_rapport_actif_empeche_la_suppression_du_dossier(http):
+    """Même refus que pour les conversations (`projet_non_vide`) : la FK est
+    SET NULL, le rapport survivrait, mais il quitterait son dossier sans que
+    personne ne l'ait demandé."""
+    import app.modules.intelligence.service as intel
+
+    engine, uid = http
+    with Session(engine) as db:
+        # SQLite n'applique les clés étrangères que sur demande : sans ce
+        # PRAGMA, le SET NULL de `reports.project_id` ne serait pas exercé.
+        db.execute(text("PRAGMA foreign_keys=ON"))
+        projet = intel.create_project(db, str(uid), "Dossier", None)
+        r = _rapport(db, uid, statut=rm.TERMINE, content="c",
+                     project_id=projet.id)
+        pid, rid = str(projet.id), str(r.id)
+
+        with pytest.raises(intel.AppError) as e:
+            intel.delete_project(db, str(uid), pid)
+        assert (e.value.status_code, e.value.code) == (409, "projet_non_vide")
+        assert "1 rapport" in e.value.message
+
+        # Archivé = plus actif : la suppression passe et le rapport survit.
+        db.get(Report, uuidlib.UUID(rid)).archived_at = dt.datetime.now(
+            dt.timezone.utc)
+        db.commit()
+        intel.delete_project(db, str(uid), pid)
+        assert db.get(intel.Project, uuidlib.UUID(pid)) is None
+        db.expire_all()
+        survivant = db.get(Report, uuidlib.UUID(rid))
+        assert survivant is not None and survivant.project_id is None
+
+
+# --- Coût de revient réservé à l'administration (§4) ----------------------
+
+def test_le_prix_de_revient_nest_lisible_que_par_un_admin(http):
+    engine, uid = http
+    with Session(engine) as db:
+        r = _rapport(db, uid, statut=rm.TERMINE, content="corps",
+                     cout_micro_eur=71_000, cout_recherche_micro_eur=13_800,
+                     detail={"credits": 25})
+        rid = str(r.id)
+
+    normal = _client(engine, uid).get(f"/reports/{rid}").json()
+    assert normal["credits"] == 25, "les crédits payés restent visibles"
+    assert normal["cout_micro_eur"] is None
+    assert normal["cout_recherche_micro_eur"] is None
+
+    admin = _client(engine, uid, is_admin=True).get(f"/reports/{rid}").json()
+    assert admin["cout_micro_eur"] == 71_000
+    assert admin["cout_recherche_micro_eur"] == 13_800
+
+    # Le dict lui-même ne PORTE pas la clé pour un non-admin : un appelant qui
+    # sérialise autrement que par `ReportDetail` ne peut pas la fuiter.
+    with Session(engine) as db:
+        ligne = db.get(Report, uuidlib.UUID(rid))
+        assert "cout_micro_eur" not in reports_service.detail_dict(ligne)
+        assert "cout_micro_eur" in reports_service.detail_dict(ligne, is_admin=True)
+
+
+# --- Recherche (§4) --------------------------------------------------------
+
+def test_recherche_titre_et_contenu_avec_extrait_borne(http):
+    engine, uid = http
+    with Session(engine) as db:
+        _rapport(db, uid, title="Marché du lithium", statut=rm.TERMINE,
+                 content="Rien de pertinent ici.")
+        _rapport(db, uid, title="Autre sujet", statut=rm.TERMINE,
+                 content="A" * 300 + " lithium " + "B" * 300)
+        _rapport(db, uid, title="Rangé lithium", statut=rm.TERMINE, content="x",
+                 archived_at=dt.datetime.now(dt.timezone.utc))
+    client = _client(engine, uid)
+
+    res = client.get("/reports/search?q=lithium").json()
+    titres = {r["title"] for r in res}
+    assert titres == {"Marché du lithium", "Autre sujet"}
+    assert "Rangé lithium" not in titres, "un rapport archivé est hors périmètre"
+    trouve = next(r for r in res if r["title"] == "Autre sujet")
+    # ±80 caractères autour de la première occurrence, coupes marquées.
+    assert "lithium" in trouve["extrait"]
+    assert trouve["extrait"].startswith("…") and trouve["extrait"].endswith("…")
+    assert len(trouve["extrait"]) <= 2 * 80 + len("lithium") + 2
+
+    for court in ("", "li"):
+        res = client.get(f"/reports/search?q={court}")
+        assert (res.status_code, res.json()["error"]["code"]) \
+            == (400, "requete_trop_courte")
+
+    # `%` et `_` sont les jokers du LIKE : échappés, ils ne ramènent pas tout.
+    assert client.get("/reports/search?q=%25%25%25").json() == []
+
+
+def test_recherche_plafonnee_a_vingt_resultats(http):
+    engine, uid = http
+    with Session(engine) as db:
+        for i in range(25):
+            _rapport(db, uid, title=f"Lithium {i}", statut=rm.TERMINE, content="x")
+    assert len(_client(engine, uid).get("/reports/search?q=lithium").json()) == 20
+
+
+# --- Partage public (§0, §4) ----------------------------------------------
+
+def test_partage_rend_un_jeton_de_22_caracteres_et_une_url_lisible(http):
+    engine, uid = http
+    with Session(engine) as db:
+        r = _rapport(db, uid, title="Marché du lithium en Europe",
+                     statut=rm.TERMINE, content="# Corps\n\nTexte.")
+        rid = str(r.id)
+    client = _client(engine, uid, full_name="Miradie Buranturu")
+
+    ouvert = client.post(f"/reports/{rid}/partage").json()
+    jeton = ouvert["jeton"]
+    assert len(jeton) == 22, jeton
+    assert ouvert["url"] == f"/p/miradie-buranturu/marche-du-lithium-en-europe-{jeton}"
+    # Idempotent : un second clic ne doit pas invalider le lien déjà transmis.
+    assert client.post(f"/reports/{rid}/partage").json() == ouvert
+
+    public = client.get(f"/partage/{jeton}")
+    assert public.status_code == 200
+    assert public.json()["pseudo"] == "miradie-buranturu"
+
+    assert client.delete(f"/reports/{rid}/partage").status_code == 204
+    assert client.get(f"/partage/{jeton}").status_code == 404
+    # Révoquer deux fois est un succès : le lien ne marche pas, c'est l'objet.
+    assert client.delete(f"/reports/{rid}/partage").status_code == 204
+    # Repartager rend un jeton NEUF : l'ancien lien reste mort.
+    assert client.post(f"/reports/{rid}/partage").json()["jeton"] != jeton
+
+
+def test_pseudo_replie_sur_la_partie_locale_de_lemail(http):
+    engine, uid = http
+    with Session(engine) as db:
+        rid = str(_rapport(db, uid, title="Étude", statut=rm.TERMINE,
+                           content="corps").id)
+    # Aucun `full_name` dans les métadonnées Supabase : c'est le cas le plus
+    # courant sur les comptes créés par lien magique.
+    url = _client(engine, uid, email="Miradie.B@exemple.fr").post(
+        f"/reports/{rid}/partage").json()["url"]
+    assert url.startswith("/p/miradie-b/etude-")
+    assert reports_service.pseudo_de(None, None) == "axial"
+    # Accents et ponctuation ne survivent pas à une URL.
+    assert reports_service.pseudo_de("Élodie Ké-Ñan", None) == "elodie-ke-nan"
+
+
+def test_la_page_publique_ne_montre_ni_couts_ni_documents_internes(http):
+    """Liste blanche stricte : un lien transmis par erreur ne doit rien dire du
+    coffre de l'utilisateur, ni de ce que le rapport a coûté."""
+    engine, uid = http
+    sources = [
+        {"title": "INSEE", "url": "https://insee.fr", "source": "web"},
+        {"title": "business-plan-confidentiel.pdf", "source": "documents"},
+        {"title": "Notes internes", "source": "notion"},
+    ]
+    with Session(engine) as db:
+        r = _rapport(db, uid, title="Étude", statut=rm.DEGRADE,
+                     content="# Corps", sources=sources,
+                     viz=[{"index": 0, "empreinte": "a" * 64, "vl": {"x": 1},
+                           "statut": "ok", "kind": "bar", "spec": {}}],
+                     question="Quelle est la marge de ACME ?",
+                     cout_micro_eur=71_000, tokens_entree=31_000,
+                     detail={"credits": 25, "raison": "couverture_partielle"})
+        rid = str(r.id)
+    client = _client(engine, uid)
+    jeton = client.post(f"/reports/{rid}/partage").json()["jeton"]
+    vue = client.get(f"/partage/{jeton}").json()
+
+    assert set(vue) == {"title", "content", "sources", "viz", "analysis_type",
+                        "created_at", "pseudo"}
+    assert [s["title"] for s in vue["sources"]] == ["INSEE"]
+    brut = json.dumps(vue, default=str)
+    for interdit in ("business-plan-confidentiel", "Notes internes", "71000",
+                     "credits", "marge de ACME", str(uid), rid):
+        assert interdit not in brut, interdit
+    # Les graphiques, eux, font partie du rapport (spec §0).
+    assert vue["viz"][0]["empreinte"] == "a" * 64
+
+
+def test_partage_refuse_un_rapport_sans_contenu(http):
+    """Partager une génération en cours publierait une page vide, et le lien
+    serait transmis avant que le rapport n'existe."""
+    engine, uid = http
+    with Session(engine) as db:
+        encours = str(_rapport(db, uid, statut=rm.EN_COURS, content="",
+                               progression=40).id)
+        annule = str(_rapport(db, uid, statut=rm.ANNULE, content="").id)
+    client = _client(engine, uid)
+    for rid in (encours, annule):
+        res = client.post(f"/reports/{rid}/partage")
+        assert (res.status_code, res.json()["error"]["code"]) \
+            == (409, "rapport_non_partageable"), rid
+
+
+def test_la_route_publique_nest_pas_authentifiee(http):
+    """Le contrat tient dans le schéma : `GET /partage/{jeton}` ne porte AUCUNE
+    exigence de sécurité, contrairement à tout le reste des rapports."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    schema = TestClient(app).get("/openapi.json").json()
+    publique = schema["paths"]["/partage/{jeton}"]["get"]
+    assert not publique.get("security"), publique.get("security")
+    assert schema["paths"]["/reports/{report_id}"]["get"].get("security")
+    # Un jeton inexistant, trop long ou vide ne fait pas tomber la route.
+    engine, uid = http
+    client = _client(engine, uid)
+    for jeton in ("inconnu", "x" * 500, "%20"):
+        assert client.get(f"/partage/{jeton}").status_code == 404
+
+
+# --- Images des graphiques (§5.3) -----------------------------------------
+
+def _viz_en_base(db, uid, *, empreinte="b" * 64, partage=False):
+    from app.modules.viz.models import VizRendu
+
+    db.add(VizRendu(empreinte=empreinte, vl={"mark": "bar"}))
+    r = _rapport(db, uid, title="Étude", statut=rm.TERMINE, content="# Corps",
+                 viz=[{"index": 0, "empreinte": empreinte, "vl": {"mark": "bar"},
+                       "statut": "ok", "kind": "bar", "spec": {}}])
+    if partage:
+        r.jeton_partage = "jeton-de-partage-123"
+        r.detail = {"partage": {"pseudo": "miradie", "slug": "etude"}}
+    db.commit()
+    return r
+
+
+def test_image_viz_exige_une_authentification_ou_un_jeton(http, monkeypatch):
+    from app.modules.viz import render
+
+    engine, uid = http
+    monkeypatch.setattr(render, "vers_svg", lambda vl: "<svg/>")
+    with Session(engine) as db:
+        _viz_en_base(db, uid, partage=True)
+        # Graphique d'un AUTRE rapport, non partagé : le jeton ne doit pas
+        # l'ouvrir — un jeton autorise les images de SON rapport, pas toutes.
+        _viz_en_base(db, uuidlib.uuid4(), empreinte="c" * 64)
+    client = _client(engine, uid)
+
+    # 1. Authentifié : passe.
+    ok = client.get(f"/viz/{'b' * 64}.svg")
+    assert ok.status_code == 200
+    assert ok.headers["cache-control"] == "private, max-age=3600"
+    assert "public" not in ok.headers["cache-control"]
+
+    # 2. Jeton de partage valide, empreinte du rapport partagé : passe.
+    _anonyme()
+    anonyme = client
+
+    avec = anonyme.get(f"/viz/{'b' * 64}.svg?p=jeton-de-partage-123")
+    assert avec.status_code == 200
+    assert avec.headers["cache-control"] == "private, max-age=3600"
+
+    # 3. Jeton valide mais empreinte d'un AUTRE rapport : 404.
+    assert anonyme.get(
+        f"/viz/{'c' * 64}.svg?p=jeton-de-partage-123").status_code == 404
+    # 4. Jeton inconnu : 404.
+    assert anonyme.get(f"/viz/{'b' * 64}.svg?p=inconnu").status_code == 404
+    # 5. Ni authentification ni jeton : 401, et non une image.
+    nu = anonyme.get(f"/viz/{'b' * 64}.svg")
+    assert nu.status_code == 401
+    assert nu.json()["error"]["code"] == "not_authenticated"
+    # 6. Empreinte mal formée : 404 sans requête.
+    assert anonyme.get("/viz/pas-une-empreinte.svg").status_code == 404
+
+
+def test_le_png_suit_la_meme_regle_que_le_svg(http, monkeypatch):
+    from app.modules.viz import render
+
+    engine, uid = http
+    monkeypatch.setattr(render, "vers_png", lambda vl, scale=2.0: b"\x89PNG")
+    with Session(engine) as db:
+        _viz_en_base(db, uid, partage=True)
+    client = _client(engine, uid)
+    assert client.get(f"/viz/{'b' * 64}.png").status_code == 200
+
+    _anonyme()
+    assert client.get(f"/viz/{'b' * 64}.png").status_code == 401
+    assert client.get(
+        f"/viz/{'b' * 64}.png?p=jeton-de-partage-123").status_code == 200
+
+
+def test_le_pdf_et_lemail_nobtiennent_pas_leurs_images_par_http(http):
+    """La restriction des images ne doit rien casser ailleurs.
+
+    Le PDF appelle `render.vers_png` en direct (pas de requête HTTP, donc pas
+    d'authentification à porter) et l'email de notification est du texte sans
+    aucune balise `<img>`. Ce test tomberait le jour où quelqu'un remplacerait
+    l'un des deux par une URL `/viz/…`.
+    """
+    import inspect
+
+    from app.modules.reports import export as exp
+    from app.modules.reports import notification, pdf
+
+    for module in (pdf, exp):
+        source = inspect.getsource(module)
+        assert "vers_png" in source
+        assert "/viz/" not in source, f"{module.__name__} passe par HTTP"
+    for corps in notification.CORPS.values():
+        assert "/viz/" not in corps and "<img" not in corps
+
+    # Et le PDF sort bel et bien, avec un graphique réel, sans jeton.
+    engine, uid = http
+    with Session(engine) as db:
+        r = _rapport(db, uid, title="Étude", statut=rm.TERMINE,
+                     content="# Titre\n\n```viz\n"
+                             '{"intent":"comparaison","title":"CA","unit":"M€",'
+                             '"series":[{"label":"2025","value":3},'
+                             '{"label":"2026","value":5}]}\n```\n')
+        rid = str(r.id)
+    res = _client(engine, uid).get(f"/reports/{rid}/pdf")
+    assert res.status_code == 200 and res.content[:5] == b"%PDF-"
+
+
+# --- Export (§4) -----------------------------------------------------------
+
+_MARKDOWN = """# Étude
+
+Un paragraphe.
+
+## Constats
+
+- Premier point
+- Second point
+
+| Année | CA |
+| --- | --- |
+| 2025 | 3 |
+| 2026 | 5 |
+
+### Détail
+
+## Sources
+
+Le modèle a écrit sa propre liste, qui ferait doublon.
+"""
+
+
+def _avec_contenu(db, uid, **kw):
+    return _rapport(db, uid, title="Étude", statut=rm.TERMINE,
+                    content=_MARKDOWN,
+                    sources=[{"title": "INSEE", "url": "https://insee.fr",
+                              "domain": "insee.fr", "source": "web"},
+                             {"title": "bp.pdf", "source": "documents"}], **kw)
+
+
+def test_export_markdown_rend_le_contenu_et_une_section_sources(http):
+    engine, uid = http
+    with Session(engine) as db:
+        rid = str(_avec_contenu(db, uid).id)
+    res = _client(engine, uid).get(f"/reports/{rid}/export?format=md")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/markdown")
+    assert 'filename="etude.md"' in res.headers["content-disposition"]
+    texte = res.text
+    # Le contenu n'est pas retouché : c'est le texte exact lu à l'écran.
+    assert _MARKDOWN.strip() in texte
+    assert "## Sources" in texte
+    assert "1. INSEE — insee.fr — https://insee.fr" in texte
+    # Un export destiné au propriétaire : ses documents y restent, signalés.
+    assert "2. bp.pdf — document interne" in texte
+
+
+def test_export_docx_reprend_titres_puces_tableaux_et_sources(http):
+    engine, uid = http
+    with Session(engine) as db:
+        rid = str(_avec_contenu(db, uid).id)
+    res = _client(engine, uid).get(f"/reports/{rid}/export?format=docx")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml")
+    assert 'filename="etude.docx"' in res.headers["content-disposition"]
+    # Un `.docx` est un ZIP : la signature le prouve avant de l'ouvrir.
+    assert res.content[:2] == b"PK"
+
+    import io as _io
+
+    from docx import Document
+
+    doc = Document(_io.BytesIO(res.content))
+    textes = [p.text for p in doc.paragraphs]
+    assert "Étude" in textes
+    assert "Un paragraphe." in textes
+    assert "Constats" in textes and "Détail" in textes
+    assert "Premier point" in textes and "Second point" in textes
+    styles = {p.text: p.style.name for p in doc.paragraphs}
+    assert styles["Premier point"] == "List Bullet"
+    assert len(doc.tables) == 1
+    grille = [[c.text for c in ligne.cells] for ligne in doc.tables[0].rows]
+    assert grille == [["Année", "CA"], ["2025", "3"], ["2026", "5"]]
+    # La section « Sources » du modèle est écartée au profit de celle qu'on
+    # génère depuis les données — sinon le document en porterait deux.
+    assert "Le modèle a écrit sa propre liste, qui ferait doublon." not in textes
+    assert any("INSEE" in t for t in textes)
+
+
+def test_export_pdf_et_son_alias_rendent_le_meme_document(http):
+    engine, uid = http
+    with Session(engine) as db:
+        rid = str(_avec_contenu(db, uid).id)
+    client = _client(engine, uid)
+    par_format = client.get(f"/reports/{rid}/export?format=pdf")
+    alias = client.get(f"/reports/{rid}/pdf")
+    assert par_format.status_code == alias.status_code == 200
+    for res in (par_format, alias):
+        assert res.content[:5] == b"%PDF-"
+        assert res.headers["content-type"] == "application/pdf"
+    # Le format par défaut est le PDF : `?format=` absent ne casse rien.
+    assert client.get(f"/reports/{rid}/export").content[:5] == b"%PDF-"
+
+
+def test_format_dexport_inconnu_refuse_sans_rien_produire(http):
+    engine, uid = http
+    with Session(engine) as db:
+        rid = str(_avec_contenu(db, uid).id)
+    res = _client(engine, uid).get(f"/reports/{rid}/export?format=xlsx")
+    assert (res.status_code, res.json()["error"]["code"]) == (400, "format_inconnu")
+    assert reports_service.FORMATS_EXPORT == ("pdf", "md", "docx")
+
+
+def test_export_dun_rapport_dun_autre_compte_rend_404(http):
+    engine, uid = http
+    with Session(engine) as db:
+        rid = str(_avec_contenu(db, uuidlib.uuid4()).id)
+    client = _client(engine, uid)
+    for chemin in (f"/reports/{rid}/export?format=md", f"/reports/{rid}/pdf",
+                   f"/reports/{rid}", f"/reports/{rid}/partage"):
+        res = (client.post(chemin) if chemin.endswith("/partage")
+               else client.get(chemin))
+        assert res.status_code == 404, chemin
+
+
+# --- Signalement (§3) ------------------------------------------------------
+
+@pytest.fixture
+def notif(monkeypatch):
+    """Notifications d'erreur actives, envoi SYNCHRONE et observé.
+
+    Le cache de `get_settings` est vidé des deux côtés : le laisser chaud
+    laisserait les notifications actives pour les tests suivants.
+    """
+    from app.config import get_settings
+    from app.shared import notifier
+
+    monkeypatch.setenv("ERREURS_NOTIF_ACTIVES", "true")
+    get_settings.cache_clear()
+    notifier._reinitialiser()
+    monkeypatch.setattr(notifier, "ENVOI_SYNCHRONE", True)
+    envois: list = []
+    monkeypatch.setattr(notifier, "envoyer_brut",
+                        lambda *a, **k: envois.append(a) or (True, "id"))
+    yield envois
+    notifier._reinitialiser()
+    get_settings.cache_clear()
+
+
+def test_signalement_archive_et_envoie_lemail_technique(http, notif):
+    from app.modules.reports.feedback import ReportFeedback
+
+    envois = notif
+    engine, uid = http
+    with Session(engine) as db:
+        rid = str(_rapport(db, uid, title="Marché du lithium", statut=rm.DEGRADE,
+                           content="corps").id)
+    client = _client(engine, uid, email="fondateur@exemple.fr")
+
+    res = client.post(f"/reports/{rid}/feedback",
+                      json={"note": 2, "motif": "incomplet",
+                            "commentaire": "Il manque les volumes 2026."})
+    assert res.status_code == 201
+    assert res.json()["motif"] == "incomplet" and res.json()["note"] == 2
+
+    with Session(engine) as db:
+        lignes = db.scalars(select(ReportFeedback)).all()
+        assert len(lignes) == 1
+        assert str(lignes[0].report_id) == rid
+        assert str(lignes[0].user_id) == str(uid)
+        assert lignes[0].commentaire == "Il manque les volumes 2026."
+
+    assert len(envois) == 1, "l'email technique doit partir"
+    corps = "\n".join(str(x) for x in envois[0])
+    for attendu in (rid, "Marché du lithium", "fondateur@exemple.fr",
+                    "incomplet", "Il manque les volumes 2026.",
+                    "Signalement sur un rapport"):
+        assert attendu in corps, attendu
+    assert "Relire le rapport" in corps
+
+
+def test_deux_signalements_de_la_meme_heure_envoient_deux_emails(http, notif):
+    """Le dédoublonnage de `notifier_erreur` porte sur (route + type
+    d'exception) pendant une heure. Sans l'identifiant du signalement dans la
+    route, le second avis de la journée serait avalé en silence."""
+    envois = notif
+    engine, uid = http
+    with Session(engine) as db:
+        a = str(_rapport(db, uid, title="A", statut=rm.TERMINE, content="c").id)
+        b = str(_rapport(db, uid, title="B", statut=rm.TERMINE, content="c").id)
+    client = _client(engine, uid)
+    for rid in (a, b, a):
+        assert client.post(f"/reports/{rid}/feedback",
+                           json={"motif": "hors_sujet"}).status_code == 201
+    assert len(envois) == 3
+
+
+def test_motifs_valides_alias_et_refus(http, notif):
+    from app.modules.reports.feedback import MOTIFS, ReportFeedback
+
+    engine, uid = http
+    with Session(engine) as db:
+        rid = str(_rapport(db, uid, statut=rm.TERMINE, content="c").id)
+    client = _client(engine, uid)
+
+    for motif in MOTIFS:
+        assert client.post(f"/reports/{rid}/feedback",
+                           json={"motif": motif}).status_code == 201
+    # « faux » est le libellé du formulaire, `contenu_faux` celui de la base.
+    assert client.post(f"/reports/{rid}/feedback",
+                       json={"motif": "faux"}).json()["motif"] == "contenu_faux"
+    res = client.post(f"/reports/{rid}/feedback", json={"motif": "parce_que"})
+    assert (res.status_code, res.json()["error"]["code"]) == (400, "motif_inconnu")
+    # Note hors bornes : refusée par le schéma, rien n'est écrit.
+    assert client.post(f"/reports/{rid}/feedback",
+                       json={"motif": "autre", "note": 9}).status_code == 422
+    with Session(engine) as db:
+        assert len(db.scalars(select(ReportFeedback)).all()) == len(MOTIFS) + 1
+
+
+def test_un_email_en_panne_nempeche_pas_denregistrer_lavis(http, notif,
+                                                           monkeypatch):
+    """L'avis de l'utilisateur est la donnée ; l'email n'est qu'une alerte.
+
+    Resend indisponible ne doit pas rendre un 500 au fondateur qui vient de
+    signaler un problème — ce serait un second problème à la place du premier.
+    """
+    from app.modules.reports.feedback import ReportFeedback
+    from app.shared import notifier
+
+    engine, uid = http
+    monkeypatch.setattr(notifier, "envoyer_brut",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("HS")))
+    with Session(engine) as db:
+        rid = str(_rapport(db, uid, statut=rm.TERMINE, content="c").id)
+    assert _client(engine, uid).post(f"/reports/{rid}/feedback",
+                                    json={"motif": "autre"}).status_code == 201
+    with Session(engine) as db:
+        assert len(db.scalars(select(ReportFeedback)).all()) == 1
+
+
+def test_signalement_sur_le_rapport_dun_autre_rend_404(http, notif):
+    engine, uid = http
+    with Session(engine) as db:
+        rid = str(_rapport(db, uuidlib.uuid4(), statut=rm.TERMINE, content="c").id)
+    assert _client(engine, uid).post(f"/reports/{rid}/feedback",
+                                    json={"motif": "autre"}).status_code == 404
+
+
+# --- `POST /reports` réservé aux administrateurs (§5.2) -------------------
+
+def test_post_reports_est_reserve_aux_administrateurs(http):
+    """Depuis Task 2, chaque rapport naît d'une ligne créée par le moteur : le
+    seul appelant restant (le repli « sauvegarder avant de livrer » de
+    l'éditeur front) est devenu inutile. La route survit pour l'import manuel,
+    donc `is_admin`."""
+    engine, uid = http
+    corps = {"title": "Import manuel", "content": "# Corps",
+             "analysis_type": "synthese_executive"}
+    refus = _client(engine, uid).post("/reports", json=corps)
+    assert (refus.status_code, refus.json()["error"]["code"]) == (403, "forbidden")
+
+    accepte = _client(engine, uid, is_admin=True).post("/reports", json=corps)
+    assert accepte.status_code == 200 and accepte.json()["title"] == "Import manuel"
+
+
+# --- Balayage des orphelins au démarrage ----------------------------------
+
+def test_balayage_range_les_rapports_interrompus_par_un_redemarrage(http):
+    """Le thread de génération meurt avec le processus sans ranger sa ligne :
+    sans balayage, le rapport reste « en cours » à 62 % pour toujours et le
+    front y poll indéfiniment."""
+    from app.config import DELAI_MAX_RAPPORT_SECONDES
+
+    engine, uid = http
+    maintenant = dt.datetime.now(dt.timezone.utc)
+    with Session(engine) as db:
+        vieux = _rapport(db, uid, title="Interrompu", statut=rm.EN_COURS,
+                         progression=62, etape="redaction",
+                         detail={"section": "3/8"},
+                         created_at=maintenant - dt.timedelta(
+                             seconds=DELAI_MAX_RAPPORT_SECONDES + 60))
+        # Une génération encore dans les temps ne doit PAS être rangée : elle
+        # tourne peut-être dans un autre worker.
+        jeune = _rapport(db, uid, title="En vol", statut=rm.EN_COURS,
+                         progression=20, created_at=maintenant)
+        fini = _rapport(db, uid, title="Fini", statut=rm.TERMINE, content="c",
+                        created_at=maintenant - dt.timedelta(days=3))
+        ids = (str(vieux.id), str(jeune.id), str(fini.id))
+
+    with Session(engine) as db:
+        assert reports_service.balayer_orphelins(db) == 1
+        # Idempotent : un second démarrage ne trouve plus rien.
+        assert reports_service.balayer_orphelins(db) == 0
+
+    with Session(engine) as db:
+        range_, en_vol, termine = (db.get(Report, uuidlib.UUID(i)) for i in ids)
+        assert range_.statut == rm.ECHEC
+        assert range_.progression == 100 and range_.termine_at is not None
+        assert range_.detail["raison"] == "interrompu_par_redemarrage"
+        assert "redémarrage" in range_.detail["message"]
+        # Le contexte de l'étape survit : on veut savoir où ça s'est arrêté.
+        assert range_.detail["section"] == "3/8"
+        assert en_vol.statut == rm.EN_COURS and en_vol.progression == 20
+        assert termine.statut == rm.TERMINE
+
+
+def test_le_demarrage_de_lapi_balaie_les_orphelins(monkeypatch):
+    """Le balayage est branché sur le `lifespan` : c'est le seul moment où l'on
+    sait qu'aucun thread de génération de CE processus ne tourne encore."""
+    from fastapi.testclient import TestClient
+
+    import app.db as app_db
+    import app.main as main
+    from sqlalchemy.orm import sessionmaker
+
+    engine = _base_http()
+    uid = uuidlib.uuid4()
+    with Session(engine) as db:
+        rid = str(_rapport(
+            db, uid, statut=rm.EN_COURS, progression=62,
+            created_at=dt.datetime.now(dt.timezone.utc)
+            - dt.timedelta(days=1)).id)
+
+    ancienne = app_db.SessionLocal
+    app_db.SessionLocal = sessionmaker(bind=engine, future=True)
+    try:
+        # Le `with` déclenche le lifespan de l'app réelle.
+        with TestClient(main.app) as client:
+            assert client.get("/health").json()["status"] == "ok"
+    finally:
+        app_db.SessionLocal = ancienne
+
+    with Session(engine) as db:
+        assert db.get(Report, uuidlib.UUID(rid)).statut == rm.ECHEC
+
+
+def test_le_balayage_ne_bloque_jamais_le_demarrage(monkeypatch):
+    """Une base injoignable au démarrage ne doit pas empêcher l'API de monter :
+    les routes répondront 503 d'elles-mêmes, avec un message."""
+    import app.db as app_db
+    import app.main as main
+
+    def _explose():
+        raise RuntimeError("base injoignable")
+
+    monkeypatch.setattr(app_db, "SessionLocal", _explose)
+    assert main.balayer_rapports_orphelins() == 0
+
+
+# --- Routes publiées -------------------------------------------------------
+
+def test_routes_de_gestion_des_rapports_montees():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    chemins = TestClient(app).get("/openapi.json").json()["paths"]
+    attendus = {
+        "/reports": {"get", "post"},
+        "/reports/search": {"get"},
+        "/reports/{report_id}": {"get", "patch", "delete"},
+        "/reports/{report_id}/partage": {"post", "delete"},
+        "/reports/{report_id}/feedback": {"post"},
+        "/reports/{report_id}/export": {"get"},
+        "/reports/{report_id}/pdf": {"get"},
+        "/reports/{report_id}/annuler": {"post"},
+        "/reports/{report_id}/relancer": {"post"},
+        "/partage/{jeton}": {"get"},
+        "/viz/{empreinte}.svg": {"get"},
+        "/viz/{empreinte}.png": {"get"},
+    }
+    for chemin, methodes in attendus.items():
+        assert chemin in chemins, chemin
+        assert methodes <= set(chemins[chemin]), (chemin, chemins[chemin].keys())
+    # La liste rend un objet paginé et non un tableau : le front doit lire
+    # `items` / `has_more` (Task 4).
+    liste = chemins["/reports"]["get"]["responses"]["200"]["content"]
+    assert liste["application/json"]["schema"]["$ref"].endswith("ReportPage")

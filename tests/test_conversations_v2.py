@@ -26,12 +26,17 @@ from app.modules.intelligence import service as intel
 # --- socle de test ---------------------------------------------------------
 
 def _base():
+    # `reports` : depuis Rapports v2, supprimer un dossier compte AUSSI ses
+    # rapports non archivés (spec §4) — la requête a besoin de la table.
+    import app.modules.reports.models  # noqa: F401
+
     engine = create_engine("sqlite://", future=True)
     Base.metadata.create_all(engine, tables=[
         Base.metadata.tables["projects"],
         Base.metadata.tables["conversations"],
         Base.metadata.tables["messages"],
         Base.metadata.tables["company_profiles"],
+        Base.metadata.tables["reports"],
     ])
     return engine
 
@@ -350,6 +355,9 @@ def _base_complete(*, partagee: bool = False):
     les tests qui passent par un client HTTP — il ouvre sa propre connexion.
     """
     import app.modules.billing.models  # noqa: F401
+    # `reports` : depuis Rapports v2, supprimer un dossier compte AUSSI ses
+    # rapports non archivés (spec §4) — la requête a besoin de la table.
+    import app.modules.reports.models  # noqa: F401
 
     extra = ({"poolclass": StaticPool,
               "connect_args": {"check_same_thread": False}} if partagee else {})
@@ -361,6 +369,7 @@ def _base_complete(*, partagee: bool = False):
         Base.metadata.tables["company_profiles"],
         Base.metadata.tables["credit_balances"],
         Base.metadata.tables["credit_events"],
+        Base.metadata.tables["reports"],
     ])
     return engine
 
