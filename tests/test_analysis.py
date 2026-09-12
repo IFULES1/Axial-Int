@@ -9,14 +9,20 @@ from fastapi.testclient import TestClient
 from app.errors import AppError
 from app.main import app
 from app.modules.analysis import service
-from app.modules.analysis.prompts import ANALYSIS_PROMPTS, get_prompt_template, is_valid_type
+from app.modules.analysis.prompts import (
+    ANALYSIS_DIRECTIVES, get_prompt_template, is_valid_type,
+)
 
 client = TestClient(app)
 
 
 def test_all_types_have_context_slot():
-    for key, tmpl in ANALYSIS_PROMPTS.items():
-        assert "{context}" in tmpl, key
+    # `ANALYSIS_PROMPTS` (dictionnaire type → template pré-assemblé) a disparu :
+    # il recalculait `get_prompt_template` pour tous les types à l'import du
+    # module, alors que seuls les tests le lisaient. La propriété testée reste
+    # la même — chaque type connu produit un template avec son slot {context}.
+    for key in ANALYSIS_DIRECTIVES:
+        assert "{context}" in get_prompt_template(key), key
         assert is_valid_type(key)
     assert not is_valid_type("nope")
 
@@ -41,7 +47,7 @@ def test_degrades_when_llm_unavailable(monkeypatch):
 
 
 def test_default_template_fallback():
-    assert get_prompt_template("unknown") == ANALYSIS_PROMPTS["synthese_executive"]
+    assert get_prompt_template("unknown") == get_prompt_template("synthese_executive")
 
 
 def test_analysis_routes_mounted():

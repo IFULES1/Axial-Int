@@ -4,8 +4,9 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 
-from sqlalchemy import Integer, JSON, DateTime, String, Text
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, JSON, DateTime, String, Text
 from sqlalchemy import Uuid as SAUuid
+from sqlalchemy import false as sa_false
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -17,6 +18,13 @@ JSONType = JSON().with_variant(JSONB(), "postgresql")
 
 class Report(Base):
     __tablename__ = "reports"
+    # Index unique nommé (et non `unique=True` sur la colonne) : la migration
+    # 0023 le crée en CONCURRENTLY sous ce nom, et une contrainte inline
+    # produirait un objet de nom différent — l'autogenerate signalerait un
+    # écart permanent entre le modèle et la base.
+    __table_args__ = (
+        Index("ux_reports_jeton_partage", "jeton_partage", unique=True),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(SAUuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(SAUuid, index=True, nullable=False)
@@ -41,3 +49,47 @@ class Report(Base):
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc)
     )
+
+    # --- Génération suivie par identifiant (spec §1) -----------------------
+    # La ligne est créée AU LANCEMENT, contenu vide, et se remplit au fil des
+    # étapes. Le défaut `termine` / `progression=100` vaut pour les rapports
+    # antérieurs (ils n'ont jamais été suivis) autant que pour les imports
+    # hérités, qui ne passent par aucun moteur.
+    # Valeurs : en_cours | termine | echec | degrade | annule |
+    # sources_insuffisantes.
+    statut: Mapped[str] = mapped_column(
+        String(32), default="termine", server_default="termine", nullable=False)
+    # Étape courante du moteur : recherche | selection | redaction | finalisation.
+    etape: Mapped[str | None] = mapped_column(String(32))
+    # 0-100 réels (comptes de sources, sections détectées) — plus de battement
+    # fictif à +3 % côté front.
+    progression: Mapped[int] = mapped_column(
+        Integer, default=100, server_default="100", nullable=False)
+    # Contexte libre de l'étape : sources trouvées, section en cours, message,
+    # et `raison` pour un rapport dégradé (truncated_generation, llm_unavailable,
+    # empty_generation, investors_unavailable, couverture_partielle).
+    detail: Mapped[dict | None] = mapped_column(JSONType)
+    # La question d'origine, conservée pour « Modifier et relancer » : le titre
+    # est produit par le modèle et ne permet pas de rejouer la demande.
+    question: Mapped[str | None] = mapped_column(Text)
+    termine_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    # Drapeau de Stop, lu par la tâche entre deux étapes et pendant le flux du
+    # modèle. Un booléen en base plutôt qu'un événement en mémoire : la tâche
+    # tourne dans un thread avec sa propre session, et le bouton peut être
+    # cliqué depuis un autre onglet.
+    annulation_demandee: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=sa_false(), nullable=False)
+
+    # --- Gestion des rapports (spec §4) ------------------------------------
+    archived_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    pinned_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    # Mêmes dossiers que les conversations. ON DELETE SET NULL (et non CASCADE
+    # comme `conversations.project_id`) : supprimer un dossier ne doit pas
+    # détruire des rapports payés — ils retombent simplement « sans dossier ».
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        SAUuid, ForeignKey("projects.id", ondelete="SET NULL"), index=True)
+    # Partage public : 22 caractères aléatoires, l'URL n'est pas devinable.
+    # Nullable + unique : les rapports non partagés ne se collisionnent pas
+    # (les NULL n'entrent pas en collision dans un index unique PostgreSQL).
+    jeton_partage: Mapped[str | None] = mapped_column(String(32))
+    partage_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))

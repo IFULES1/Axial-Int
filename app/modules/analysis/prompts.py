@@ -296,8 +296,9 @@ ANALYSIS_LABELS: dict[str, str] = {
     "cartographie_investisseurs": "Cartographie des investisseurs",
 }
 
-# Alias legacy → canoniques (mêmes clés que le billing).
-_ALIASES = {
+# Alias legacy → canoniques. **Source unique** : `billing.catalog` l'importe
+# d'ici plutôt que d'en tenir une copie — les deux tables avaient divergé.
+_ALIASES: dict[str, str] = {
     "market_study": "etude_marche",
     "competition": "analyse_concurrentielle",
     "tech_watch": "veille_technologique",
@@ -428,7 +429,3 @@ def sources_for(analysis_type: str) -> int:
 
 def is_valid_type(analysis_type: str) -> bool:
     return _canonical(analysis_type) in ANALYSIS_DIRECTIVES
-
-
-# Compat : dictionnaire type → template assemblé (mêmes objets que get_prompt_template).
-ANALYSIS_PROMPTS: dict[str, str] = {k: get_prompt_template(k) for k in ANALYSIS_DIRECTIVES}

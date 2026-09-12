@@ -39,12 +39,16 @@ def _restore_legacy(db: Session, token: TokenResponse) -> None:
     """Bring back the reports this address produced on the previous platform.
 
     Runs on both register and login so a returning user gets them whichever way
-    they come back. Best-effort by construction — never blocks authentication.
+    they come back — mais **une seule fois par compte** : le marqueur
+    `credit_balances.legacy_verifie_at` évite de rejouer deux requêtes sur
+    `legacy_reports` à chaque connexion pour un import qui ne peut aboutir
+    qu'une fois. Retiré de `reset-password` : cette route passe déjà par
+    `service.login`, et un mot de passe oublié n'est pas un nouveau compte.
+    Best-effort by construction — never blocks authentication.
     """
     from app.modules.reports import legacy
 
-    legacy.restore_for(db, token.user.id, token.user.email)
-    legacy.grant_return_bonus(db, token.user.id, token.user.email)
+    legacy.verifier_une_fois(db, token.user.id, token.user.email)
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -78,9 +82,9 @@ def reset_password(payload: ResetPasswordRequest,
     from app.modules.auth.schemas import LoginRequest
 
     email = password_reset.reinitialiser(db, payload.token, payload.password)
-    token = service.login(LoginRequest(email=email, password=payload.password), db)
-    _restore_legacy(db, token)
-    return token
+    # Pas d'import hérité ici : il a déjà eu lieu à l'inscription ou à la
+    # première connexion de ce compte (voir `_restore_legacy`).
+    return service.login(LoginRequest(email=email, password=payload.password), db)
 
 
 class RefreshRequest(BaseModel):

@@ -21,6 +21,8 @@ from app.modules.billing import models as _billing_models  # noqa: E402, F401
 from app.modules.documents import models as _documents_models  # noqa: E402, F401
 from app.modules.intelligence import models as _intelligence_models  # noqa: E402, F401
 from app.modules.memory import models as _memory_models  # noqa: E402, F401
+from app.modules.reports import feedback as _reports_feedback  # noqa: E402, F401
+from app.modules.reports import legacy as _reports_legacy  # noqa: E402, F401
 from app.modules.reports import models as _reports_models  # noqa: E402, F401
 from app.modules.watches import models as _watches_models  # noqa: E402, F401
 from app.modules.viz import models as _viz_models  # noqa: E402, F401

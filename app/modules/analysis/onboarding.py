@@ -11,13 +11,17 @@ Deux protections, toutes deux côté serveur :
     le client — sinon l'endpoint offrirait un rapport arbitraire à qui le
     demande ;
   * l'offre est marquée dans `credit_events` (delta 0) et vérifiée avant
-    exécution, donc elle ne peut être servie qu'une fois par compte.
+    exécution, donc elle ne peut être servie qu'une fois par compte. Depuis la
+    migration 0023, l'unicité est garantie EN BASE par un index unique partiel
+    sur `(user_id) WHERE action = 'premier_rapport_offert'` : la vérification
+    applicative seule laissait passer deux appels concurrents.
 """
 from __future__ import annotations
 
 import logging
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger("axial.analysis.onboarding")
 
@@ -87,8 +91,20 @@ def offrir(db, user_id: str) -> str | None:
     # Marquer AVANT de générer : deux appels simultanés ne doivent pas produire
     # deux rapports offerts. Un échec laisse la trace, ce qui est le bon
     # compromis — mieux vaut ne pas offrir deux fois que d'offrir deux fois.
-    billing._log_event(db, user_id, 0, ACTION)
-    db.commit()
+    #
+    # `deja_offert` ci-dessus ne suffit pas : deux appels concurrents (deux
+    # onglets, un rejeu du front, l'API et le rattrapage du worker en même
+    # temps) lisent tous deux « pas encore offert » avant que l'un n'écrive.
+    # L'index unique partiel `ux_credit_events_premier_rapport_offert`
+    # (migration 0023) tranche en base ; le perdant repart d'ici sans rien
+    # générer. C'est la seule garantie qui survit à deux workers.
+    try:
+        billing._log_event(db, user_id, 0, ACTION)
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        logger.info("Premier rapport déjà offert à %s (course perdue)", user_id)
+        return None
 
     question = question_pour(profil)
     logger.info("Premier rapport offert à %s : %s", user_id, question[:90])

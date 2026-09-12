@@ -118,6 +118,23 @@ class Settings(BaseSettings):
     # zéro qui ferait croire à une structure gratuite.
     couts_fixes_mensuels_eur: float = 0.0
 
+    # --- Tarifs des fournisseurs de recherche web -------------------------
+    # Micro-euros PAR APPEL (1 € = 1 000 000 µ€). Un « appel » = une requête
+    # envoyée à un fournisseur ; la recherche multi-angles en fait
+    # `angles × fournisseurs` par rapport. Ici plutôt qu'en dur dans
+    # `billing/couts.py` : les grilles changent régulièrement et une correction
+    # ne doit pas demander un déploiement.
+    # ⚠️ Ordres de grandeur au 25/08/2026, **à confirmer** sur les grilles
+    # officielles. Un tarif faux ne casse rien — il fausse une marge, ce qui
+    # est pire. Vérifier avant de fonder une décision de prix dessus.
+    tarif_recherche_exa_micro_eur: int = 4_600      # ~5 $ / 1000 recherches
+    tarif_recherche_tavily_micro_eur: int = 7_400   # ~8 $ / 1000 (mode approfondi)
+    tarif_recherche_linkup_micro_eur: int = 4_600
+    tarif_recherche_serper_micro_eur: int = 920     # ~1 $ / 1000 recherches
+    # Repli pour un fournisseur non listé : sur-estimer vaut mieux que
+    # sous-estimer — un coût à zéro fait passer un poste pour gratuit.
+    tarif_recherche_defaut_micro_eur: int = 4_600
+
     # Jeton de lecture seule pour l'export vers Google Sheets. Distinct des
     # jetons de session : un script planifié ne peut pas se reconnecter, et un
     # JWT d'administration expire. Vide = endpoint fermé.

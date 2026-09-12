@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import os
 
+from app.config import get_settings
+
 # micro-euros par million de tokens (1 € = 1 000 000 µ€)
 _DEFAUTS = {
     "claude-sonnet-5":      (2_760_000, 13_800_000),   # ~3 $ / 15 $ le MTok
@@ -56,31 +58,22 @@ def en_euros(micro: int | None) -> float:
 
 
 # --- Recherche web ---------------------------------------------------------
-# Micro-euros par appel. Un « appel » = une requête envoyée à un fournisseur ;
-# la recherche multi-angles en fait `angles × fournisseurs` par rapport, ce qui
-# a multiplié ce poste par ~4 le 25/08.
-#
-# ⚠️ Ordres de grandeur, à confirmer sur les grilles officielles.
-_RECHERCHE = {
-    "exa": 4_600,       # ~5 $ / 1000 recherches
-    "tavily": 7_400,    # ~8 $ / 1000 recherches (mode approfondi)
-    "linkup": 4_600,
-    "serper": 920,      # ~1 $ / 1000 recherches
-}
-_RECHERCHE_REPLI = 4_600
+# Les tarifs vivent dans `config.py` (`TARIF_RECHERCHE_<FOURNISSEUR>_MICRO_EUR`),
+# pas ici : ce sont des valeurs de marché, pas des constantes de code, et une
+# correction de grille ne doit pas demander un déploiement.
+
+
+def _tarif_recherche(fournisseur: str) -> int:
+    """Micro-euros par appel pour ce fournisseur, depuis la configuration."""
+    s = get_settings()
+    nom = (fournisseur or "").strip().lower().replace("-", "_")
+    return getattr(s, f"tarif_recherche_{nom}_micro_eur",
+                   s.tarif_recherche_defaut_micro_eur)
 
 
 def cout_recherche_micro_eur(appels: dict[str, int] | None) -> int:
     """Coût d'un ensemble d'appels de recherche, par fournisseur."""
     if not appels:
         return 0
-    total = 0
-    for fournisseur, n in appels.items():
-        surcharge = os.getenv(f"TARIF_RECHERCHE_{fournisseur.upper()}")
-        try:
-            unitaire = int(surcharge) if surcharge else _RECHERCHE.get(
-                fournisseur.lower(), _RECHERCHE_REPLI)
-        except ValueError:
-            unitaire = _RECHERCHE.get(fournisseur.lower(), _RECHERCHE_REPLI)
-        total += unitaire * max(0, int(n or 0))
-    return total
+    return sum(_tarif_recherche(f) * max(0, int(n or 0))
+               for f, n in appels.items())

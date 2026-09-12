@@ -142,3 +142,44 @@ def restore_for(db: Session, user_id: str, email: str) -> int:
         logger.warning("Restauration des rapports hérités échouée pour %s : %s",
                        address, e)
         return 0
+
+
+def verifier_une_fois(db: Session, user_id: str, email: str) -> dict:
+    """Import hérité + bonus de retour, une seule fois par compte.
+
+    `restore_for` et `grant_return_bonus` tournaient à CHAQUE authentification
+    (inscription, connexion ET réinitialisation de mot de passe) : deux
+    requêtes sur `legacy_reports` et une lecture de 200 événements de crédit
+    par connexion, pour deux opérations qui ne peuvent aboutir qu'une fois.
+    `credit_balances.legacy_verifie_at` note que le passage a eu lieu ; les
+    connexions suivantes ne touchent plus à ces tables.
+
+    Le marqueur est posé même quand rien n'a été restauré : « cette adresse n'a
+    rien sur l'ancienne plateforme » est un résultat définitif, pas un échec à
+    retenter. Best-effort par construction — ne bloque jamais une connexion.
+    """
+    from app.modules.billing import service as billing
+
+    try:
+        balance = billing.get_or_create_balance(db, user_id)
+        if balance.legacy_verifie_at is not None:
+            return {"restaures": 0, "bonus": 0, "deja_verifie": True}
+    except Exception as e:  # noqa: BLE001 — jamais bloquant pour la connexion
+        db.rollback()
+        logger.warning("Marqueur d'import hérité illisible pour %s : %s", user_id, e)
+        return {"restaures": 0, "bonus": 0, "deja_verifie": False}
+
+    restaures = restore_for(db, user_id, email)
+    bonus = grant_return_bonus(db, user_id, email)
+
+    try:
+        # Rechargé : les deux appels ci-dessus font leur propre commit (et un
+        # rollback en cas d'échec), ce qui détache l'objet lu plus haut.
+        balance = billing.get_or_create_balance(db, user_id)
+        balance.legacy_verifie_at = dt.datetime.now(dt.timezone.utc)
+        db.commit()
+    except Exception as e:  # noqa: BLE001 — jamais bloquant pour la connexion
+        db.rollback()
+        logger.warning("Marqueur d'import hérité non posé pour %s : %s", user_id, e)
+
+    return {"restaures": restaures, "bonus": bonus, "deja_verifie": False}

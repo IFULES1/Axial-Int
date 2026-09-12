@@ -35,9 +35,31 @@ _TABLES = {
     "investisseur_zone": "investisseur_id,zone_id",
 }
 
+# Cache borné PAR CONSTRUCTION : une seule entrée, le jeu de données complet
+# (les dix tables de `_TABLES`, ~10k lignes). Ce n'est pas un cache par requête
+# — aucune clé dérivée d'un paramètre utilisateur n'y entre, donc il ne peut
+# pas croître avec le trafic. Sa taille ne varie qu'avec la base investisseurs
+# elle-même, et `_TABLES` en fixe les colonnes.
+#
+# ⚠️ MONO-WORKER : le cache vit dans le processus. Avec plusieurs workers
+# uvicorn, chacun tient sa propre copie (N × la mémoire, N × le rechargement,
+# et jusqu'à CACHE_TTL_SECONDS d'écart entre eux après un import). Le
+# déploiement actuel tourne à un worker ; passer à plusieurs demande de sortir
+# ce cache du processus (Redis) ou d'accepter ces écarts explicitement.
 _cache: dict | None = None
 _cache_at: float = 0.0
 _lock = threading.Lock()
+
+
+def vider() -> None:
+    """Purge le cache : la requête suivante rechargera depuis la base.
+
+    Utile après un import dans la base investisseurs (sans attendre le TTL) et
+    dans les tests, où un cache résiduel ferait passer un test pour vert.
+    """
+    global _cache, _cache_at
+    with _lock:
+        _cache, _cache_at = None, 0.0
 
 
 def configured() -> bool:

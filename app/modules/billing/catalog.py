@@ -6,6 +6,12 @@ Enterprise (custom). Pay-as-you-go packs live in stripe_gateway.CREDIT_PACKS.
 """
 from __future__ import annotations
 
+# Table d'alias UNIQUE, tenue dans `prompts` (c'est elle qui décide quels types
+# d'analyse existent). Elle était recopiée ici à l'identique : deux tables à
+# tenir pour une seule vérité, et un alias ajouté d'un seul côté se serait
+# facturé `DEFAULT_COST` au lieu du prix de son type canonique.
+from app.modules.analysis.prompts import _ALIASES
+
 # Canonical credit cost per action.
 CREDIT_COSTS: dict[str, int] = {
     "etude_marche": 40,
@@ -20,14 +26,6 @@ CREDIT_COSTS: dict[str, int] = {
     "cartographie_investisseurs": 30,
     "agent_message": 2,
     "run_agent_veille": 5,  # one cumulative veille run (RSS + web + LLM)
-}
-
-# Legacy / alternate keys → canonical.
-_ALIASES: dict[str, str] = {
-    "market_study": "etude_marche",
-    "competition": "analyse_concurrentielle",
-    "tech_watch": "veille_technologique",
-    "risk_analysis": "analyse_risques",
 }
 
 DEFAULT_COST = 25
