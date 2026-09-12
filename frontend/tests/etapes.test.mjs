@@ -299,7 +299,9 @@ test('15 — le front a bien basculé sur le contrat de Task 3', () => {
   // `GET /reports` rend `{items, has_more}` : plus de liste nue.
   assert.ok(!/axListReports/.test(app) && !/axListReports/.test(bridge));
   assert.match(bridge, /export\s+async\s+function\s+axRapports/);
-  assert.match(app, /axRapports\(\{\s*limit:\s*20\s*\}\)/);
+  // La fenêtre de liste est demandée avec sa borne et son drapeau d'archives
+  // (Task 5 : « Charger plus » et la section « Archivés »).
+  assert.match(app, /axRapports\(\{\s*limit:\s*20,\s*before,\s*inclure_archives:/);
   assert.match(app, /\(page && page\.items\) \|\| \[\]/);
   // `POST /analysis/run` rend un `ReportDetail` (`id`, plus `report_id`).
   assert.match(bridge, /report_id:\s*r\.id/);

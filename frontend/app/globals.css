@@ -3398,3 +3398,212 @@ html[data-theme="light"] .sidebar {
      ici : une `max-width` ne peut pas élargir un conteneur. */
   .docs-compare-col { padding: 12px; }
 }
+
+/* ============================================================
+   Rapports v2 — liste, partage, comparaison, impression (Task 5)
+   ============================================================
+   La liste réemploie l'habillage des conversations (`.conv-item`,
+   `.ax-liste`, `.ax-menu`, `.ax-dossier*`) : ce sont les mêmes gestes sur les
+   mêmes dossiers. Ne sont écrites ici que les règles qui n'existaient pas —
+   la ligne de rapport porte plus d'informations qu'une ligne de fil (type,
+   coût, date, badge, barre de progression). */
+.rep-liste { max-width: 760px; }
+.rep-liste-recherche { margin-bottom: 10px; }
+.rep-liste-compare { margin: 10px 0 12px; }
+.rep-liste-plus { margin: 8px 0 4px; }
+
+.rep-ligne { align-items: flex-start; gap: 4px; }
+.rep-ligne .rep-ligne-titre {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* Les métadonnées passent sous le titre : « Étude de marché · 40 crédits ·
+   12 sept. 2026 » sur la même ligne qu'un titre long poussait le titre à
+   disparaître entièrement derrière son ellipse. */
+.rep-ligne-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.rep-ligne-barre {
+  width: 54px;
+  height: 3px;
+  background: var(--surface-2);
+  border-radius: 3px;
+  overflow: hidden;
+  display: inline-block;
+}
+.rep-ligne-barre > span {
+  display: block;
+  height: 100%;
+  background: var(--v-bright);
+}
+.rep-ligne-pct { color: var(--v-bright); }
+/* Un rapport en échec ou arrêté : lisible, pas alarmant — la carte d'erreur
+   dit déjà ce qu'il s'est passé, le badge ne fait que le rappeler. */
+.rep-chip-echec {
+  background: rgba(248, 113, 113, 0.10);
+  border-color: rgba(248, 113, 113, 0.30);
+  color: var(--error);
+}
+
+/* Menu à libellé (Exporter, Livrer) : le panneau s'aligne à DROITE de son
+   déclencheur — ces boutons vivent en fin de barre d'actions, et un panneau
+   aligné à gauche sortait de l'écran. */
+.ax-menu-droite { left: auto; right: 0; }
+
+.rep-actions-groupe {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rep-cout {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--fg-2);
+}
+
+/* Partage public */
+.rep-partage {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: var(--r-card);
+  padding: 14px 16px;
+  margin: 0 0 16px;
+  max-width: 820px;
+}
+.rep-partage-tete {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+.rep-partage p { font-size: 13px; color: var(--fg-2); margin: 8px 0 10px; }
+.rep-partage-lien input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--r-input);
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 8px 10px;
+}
+.rep-partage-lien input:focus { outline: none; border-color: var(--border-active); }
+.rep-partage-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.rep-partage-erreur { color: var(--error); margin: 8px 0 0; }
+
+/* Comparaison : deux colonnes égales qui défilent CHACUNE dans sa boîte (la
+   synchronisation se fait par ratio côté React). `minmax(0, 1fr)` et non
+   `1fr` : un tableau large dans une colonne élargissait la piste et faisait
+   déborder la page entière. */
+.rep-compare {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.rep-compare-col {
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  padding: 18px 20px;
+  max-height: calc(100vh - 260px);
+  overflow-y: auto;
+  min-width: 0;
+}
+.rep-compare-titre { font-size: 17px; margin: 0 0 4px; color: var(--fg); }
+.rep-compare-meta {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+  margin: 0 0 14px;
+}
+.rep-compare-col .rep-doc { padding: 0; border: none; background: none; max-width: none; }
+.rep-compare-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--fg-2);
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  /* Deux colonnes de rapport sous 900 px donnent deux colonnes illisibles :
+     elles s'empilent, et le défilement synchronisé n'a plus d'objet (chaque
+     boîte garde le sien). */
+  .rep-compare { grid-template-columns: 1fr; }
+  .rep-compare-col { max-height: none; overflow-y: visible; }
+}
+
+/* ============================================================
+   Impression d'un rapport (spec §6) — parité avec le PDF
+   ============================================================
+   Ce qui sert à produire le document ne s'imprime pas : barre latérale,
+   topbar, sélecteurs de langue et de thème, barre d'actions. Reste le
+   rapport. */
+@media print {
+  html, body {
+    background: #fff !important;
+    color: #111 !important;
+    font-size: 12pt;
+  }
+  .sidebar, .topbar, .conv-list-panel, .rep-actions, .rep-liste,
+  .lang-pill, .theme-toggle, .ax-menu, .ax-menu-conteneur,
+  .rep-partage, .bg-radial, .wizard-modal {
+    display: none !important;
+  }
+  .surface, .rep-editeur {
+    max-width: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  .rep-doc {
+    max-width: none !important;
+    padding: 0 !important;
+    border: none !important;
+    background: none !important;
+    color: #111 !important;
+    font-size: 12pt;
+  }
+  .rep-doc h1, .rep-doc h2, .rep-doc h3, .surface-head h1 { color: #000 !important; }
+  /* Une section par page, comme le PDF ReportLab : un titre de niveau 2 ouvre
+     une page. Le PREMIER est excepté, sinon le document s'ouvre sur une page
+     blanche. */
+  .rep-doc h2 { page-break-before: always; break-before: page; }
+  .rep-doc h2:first-child { page-break-before: avoid; break-before: avoid; }
+  .rep-doc h1, .rep-doc h2, .rep-doc h3 {
+    page-break-after: avoid; break-after: avoid;
+  }
+  .rep-doc table, .rep-doc .md-table-wrap, .rep-doc figure, figure.viz {
+    page-break-inside: avoid; break-inside: avoid;
+  }
+  .rep-doc table { width: 100%; border-collapse: collapse; }
+  .rep-doc td, .rep-doc th { border: 1px solid #bbb; color: #111 !important; }
+  .rep-doc img, figure.viz img, figure.viz svg {
+    width: 100% !important;
+    height: auto !important;
+    max-width: 100% !important;
+    /* Le bloc mobile pose `min-width: 480px` sur ces images : à l'impression
+       il les ferait déborder de la feuille. */
+    min-width: 0 !important;
+  }
+  .rep-doc a { color: #111 !important; text-decoration: none; }
+  /* Les citations [N] renvoient à la liste des sources, imprimée à la suite. */
+  .rep-doc .cite { background: none !important; color: #111 !important; }
+  .rep-sources { page-break-before: always; break-before: page; }
+  @page { margin: 18mm 16mm; }
+}

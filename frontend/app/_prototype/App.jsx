@@ -6,11 +6,12 @@
 import React from "react";
 import {
   CLE_STOCKAGE as RAPPORT_CLE_STOCKAGE, EN_COURS, SOURCES_INSUFFISANTES,
+  TERMINE, DEGRADE, ECHEC, ANNULE,
   ETAPES as RAPPORT_ETAPES, estTerminal, etatAuLancement, etatDepuisEvenement,
   etatDepuisRapport, etatDepuisStockage, versStockage, libelleEtape,
   libelleRaison,
 } from "./rapports_etat";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axDownloadReportPdf, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument } from "./bridge";
 import { parserMarkdown } from "./markdown";
 
 
@@ -323,6 +324,61 @@ const STRINGS = {
     'reports.editor.sources': 'Sources',
     'reports.editor.activity': 'Activité',
     'reports.editor.suggest': 'Suggestion d\'Axial',
+
+    // Rapports — liste, gestion, comparaison, export, partage (spec §4).
+    // Les libellés génériques du menu ⋯ (Renommer, Épingler, Archiver,
+    // Déplacer vers…) sont ceux des conversations (`conv.menu.*`) : ce sont les
+    // MÊMES gestes sur les MÊMES dossiers, deux jeux de clés auraient divergé.
+    'reports.liste.titre': 'Vos rapports',
+    /* Sections propres aux rapports : les clés des conversations existent, mais
+       elles sont au FÉMININ (« ÉPINGLÉES », « ARCHIVÉES », « Aucune
+       conversation ici ») parce qu'elles parlent de conversations. Les
+       libellés d'ACTION du menu ⋯, eux, restent partagés — un infinitif n'a
+       pas de genre. */
+    'reports.section.epingles': 'ÉPINGLÉS',
+    'reports.section.recents': 'RÉCENTS',
+    'reports.section.archives': 'ARCHIVÉS',
+    'reports.dossier.vide': 'Aucun rapport dans ce dossier.',
+    'reports.recherche.min': 'Trois caractères minimum pour chercher dans le contenu des rapports.',
+    'reports.liste.recherche': 'Rechercher un rapport…',
+    'reports.liste.vide': 'Aucun rapport pour le moment.',
+    'reports.liste.charger_plus': 'Charger plus',
+    'reports.liste.chargement': 'Chargement…',
+    'reports.menu.aide': 'Actions sur ce rapport',
+    'reports.menu.comparer': 'Comparer avec…',
+    'reports.suppr.titre': 'Supprimer ce rapport ?',
+    'reports.suppr.detail': 'Le rapport, ses sources et ses graphiques seront définitivement supprimés. Les crédits déjà débités ne sont pas rendus. Cette action est irréversible.',
+    'reports.badge.termine': 'Terminé',
+    'reports.badge.degrade': 'Incomplet',
+    'reports.badge.echec': 'Échec',
+    'reports.badge.annule': 'Arrêté',
+    'reports.cout.pastille': 'Coût de ce rapport',
+    'reports.compare.titre': 'Comparaison',
+    'reports.compare.choisir': 'Choisissez le second rapport dans la liste.',
+    'reports.compare.annuler_choix': 'Annuler la comparaison',
+    'reports.compare.sortir': 'Quitter la comparaison',
+    'reports.compare.sync': 'Défilement synchronisé',
+    'reports.compare.chargement': 'Ouverture des deux rapports…',
+    'reports.export.menu': 'Exporter',
+    'reports.export.pdf': 'PDF',
+    'reports.export.md': 'Markdown (.md)',
+    'reports.export.docx': 'Word (.docx)',
+    'reports.export.encours': 'Export…',
+    'reports.livrer.menu': 'Livrer',
+    'reports.livrer.notion': 'Dans Notion',
+    'reports.livrer.drive': 'Dans Google Drive',
+    'reports.partage.ouvrir': 'Partager',
+    'reports.partage.titre': 'Lien de partage public',
+    'reports.partage.body': 'Toute personne ayant ce lien peut lire le rapport, sans compte Axial. Ni vos coûts, ni vos documents internes n\'y apparaissent.',
+    'reports.partage.creer': 'Créer le lien',
+    'reports.partage.creation': 'Création…',
+    'reports.partage.copier': 'Copier le lien',
+    'reports.partage.copie': 'Lien copié',
+    'reports.partage.revoquer': 'Révoquer le lien',
+    'reports.partage.revoque': 'Le lien a été révoqué.',
+    'reports.editor.modifier_relancer': 'Modifier et relancer',
+    'reports.editor.regenerer': 'Régénérer',
+    'reports.editor.regeneration': 'Relance…',
 
 
     // onboarding — la promesse de délai de la première analyse. Elle était
@@ -683,6 +739,53 @@ const STRINGS = {
     'reports.editor.sources': 'Sources',
     'reports.editor.activity': 'Activity',
     'reports.editor.suggest': 'Axial\'s suggestion',
+
+    // Reports — list, management, comparison, export, sharing (spec §4).
+    'reports.liste.titre': 'Your reports',
+    'reports.section.epingles': 'PINNED',
+    'reports.section.recents': 'RECENT',
+    'reports.section.archives': 'ARCHIVED',
+    'reports.dossier.vide': 'No report in this folder.',
+    'reports.recherche.min': 'Three characters minimum to search inside report content.',
+    'reports.liste.recherche': 'Search a report…',
+    'reports.liste.vide': 'No report yet.',
+    'reports.liste.charger_plus': 'Load more',
+    'reports.liste.chargement': 'Loading…',
+    'reports.menu.aide': 'Actions on this report',
+    'reports.menu.comparer': 'Compare with…',
+    'reports.suppr.titre': 'Delete this report?',
+    'reports.suppr.detail': 'The report, its sources and its charts will be permanently deleted. Credits already charged are not refunded. This cannot be undone.',
+    'reports.badge.termine': 'Done',
+    'reports.badge.degrade': 'Incomplete',
+    'reports.badge.echec': 'Failed',
+    'reports.badge.annule': 'Stopped',
+    'reports.cout.pastille': 'Cost of this report',
+    'reports.compare.titre': 'Comparison',
+    'reports.compare.choisir': 'Pick the second report in the list.',
+    'reports.compare.annuler_choix': 'Cancel comparison',
+    'reports.compare.sortir': 'Leave comparison',
+    'reports.compare.sync': 'Synchronised scrolling',
+    'reports.compare.chargement': 'Opening both reports…',
+    'reports.export.menu': 'Export',
+    'reports.export.pdf': 'PDF',
+    'reports.export.md': 'Markdown (.md)',
+    'reports.export.docx': 'Word (.docx)',
+    'reports.export.encours': 'Exporting…',
+    'reports.livrer.menu': 'Deliver',
+    'reports.livrer.notion': 'To Notion',
+    'reports.livrer.drive': 'To Google Drive',
+    'reports.partage.ouvrir': 'Share',
+    'reports.partage.titre': 'Public share link',
+    'reports.partage.body': 'Anyone with this link can read the report, with no Axial account. Neither your costs nor your internal documents appear on it.',
+    'reports.partage.creer': 'Create the link',
+    'reports.partage.creation': 'Creating…',
+    'reports.partage.copier': 'Copy link',
+    'reports.partage.copie': 'Link copied',
+    'reports.partage.revoquer': 'Revoke link',
+    'reports.partage.revoque': 'The link has been revoked.',
+    'reports.editor.modifier_relancer': 'Edit and run again',
+    'reports.editor.regenerer': 'Regenerate',
+    'reports.editor.regeneration': 'Running…',
 
 
     'onb.premiere_analyse.delai': 'A FEW MINUTES — YOU WILL GET AN EMAIL',
@@ -1101,6 +1204,10 @@ function Icon({ name, size = 18, stroke = 1.6, ...rest }) {
     );
     case 'link': return (
       <svg {...common}><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
+    );
+    // Deux colonnes — la comparaison de deux rapports côte à côte.
+    case 'columns': return (
+      <svg {...common}><rect x="3" y="4" width="7" height="16" rx="1" /><rect x="14" y="4" width="7" height="16" rx="1" /></svg>
     );
     case 'copy': return (
       <svg {...common}><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
@@ -3399,20 +3506,32 @@ function EmptyConvState({ onSend, suggestedPrompts, profil, onCompleterProfil, e
 /* ============================================================
    Conversation thread
    ============================================================ */
+/* Écriture dans le presse-papier, avec le repli historique. Extrait de
+   `BoutonCopier` parce que le lien de partage (spec §0) a le même besoin et
+   que `navigator.clipboard` manque exactement dans les mêmes contextes (http
+   sur une IP, vieux navigateur) : une seconde copie de ce repli aurait fini
+   par ne plus être la même. */
+async function copierDansPressePapier(texte) {
+  try {
+    await navigator.clipboard.writeText(texte || '');
+    return true;
+  } catch (e) {
+    const z = document.createElement('textarea');
+    z.value = texte || '';
+    z.style.position = 'fixed'; z.style.opacity = '0';
+    document.body.appendChild(z); z.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (_) { ok = false; }
+    z.remove();
+    return ok;
+  }
+}
+window.copierDansPressePapier = copierDansPressePapier;
+
 function BoutonCopier({ texte, libelleCourt, titreLibelle }) {
   const [copie, setCopie] = React.useState(false);
   const copier = async () => {
-    try {
-      await navigator.clipboard.writeText(texte || '');
-    } catch (e) {
-      // clipboard exige un contexte sécurisé ; repli sur la vieille méthode.
-      const z = document.createElement('textarea');
-      z.value = texte || '';
-      z.style.position = 'fixed'; z.style.opacity = '0';
-      document.body.appendChild(z); z.select();
-      try { document.execCommand('copy'); } catch (_) {}
-      z.remove();
-    }
+    await copierDansPressePapier(texte);
     setCopie(true);
     setTimeout(() => setCopie(false), 1800);
   };
@@ -4341,9 +4460,375 @@ function TopControls() {
 }
 
 /* =================================================================
+   REPORTS — Liste : dossiers, épinglés, archivés, menu ⋯, recherche
+   ================================================================= */
+/* Même modèle que la liste des conversations (`ConvListPanel`), et les MÊMES
+   composants : `MenuConversation` pour le ⋯, `DossierGroupe` pour les groupes
+   repliables, `surlignerExtrait` pour les résultats de recherche,
+   `ModaleConfirmation` pour la suppression. Les dossiers sont littéralement les
+   mêmes objets (`projects`) — un rapport et une conversation se rangent au même
+   endroit, donc se rangent de la même façon.
+
+   Les rapports circulent ici sous leur forme serveur (`ReportOut` tel quel :
+   `statut`, `project_id`, `pinned_at`, `archived_at`, `credits`…), sans
+   traduction de champ — comme `projets`. Le seul consommateur est cette liste,
+   et une seconde forme aurait fini par diverger de la première. */
+function libelleTypeRapport(at, t) {
+  const tp = REPORT_TYPES.find((x) => x.at === at);
+  if (tp) return t(`reports.types.${tp.id}`);
+  return String(at || '').replace(/_/g, ' ');
+}
+
+/* Badge de statut d'une ligne. `en_cours` n'en a pas : il porte sa barre de
+   progression, qui dit strictement plus. */
+function BadgeStatutRapport({ statut, t }) {
+  if (statut === DEGRADE) {
+    return <span className="chip chip-warning">{t('reports.badge.degrade')}</span>;
+  }
+  if (statut === SOURCES_INSUFFISANTES) {
+    return <span className="chip chip-warning">{t('reports.sources_insuf.titre')}</span>;
+  }
+  if (statut === ECHEC || statut === ANNULE) {
+    return (
+      <span className="chip rep-chip-echec">
+        {t(statut === ECHEC ? 'reports.badge.echec' : 'reports.badge.annule')}
+      </span>
+    );
+  }
+  return null;
+}
+
+function ReportsList({ rapports, projets, hasMore, chargement, archivesChargees,
+                       onOuvrir, gestion, comparaisonAttente, erreur, onFermerErreur }) {
+  const t = window.useT();
+  const lang = window.AXIAL_LANG || 'fr';
+  const [q, setQ] = React.useState('');
+  // Résultats de `GET /reports/search` : `null` = pas en mode recherche
+  // (moins de 3 caractères → filtre local sur le titre, aucun aller-retour).
+  const [recherche, setRecherche] = React.useState(null);
+  const [menuOuvert, setMenuOuvert] = React.useState(null);
+  const [renommage, setRenommage] = React.useState(null);  // { id, initial, valeur }
+  const annuleRef = useRefS(false);
+  const [archivesOuvertes, setArchivesOuvertes] = React.useState(false);
+  const [replies, setReplies] = React.useState([]);
+
+  const fmtD = (iso) => (iso
+    ? new Date(iso).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB',
+                                       { day: 'numeric', month: 'short', year: 'numeric' })
+    : '');
+
+  /* Recherche dans le contenu à partir de 3 caractères, 300 ms de débounce.
+     `annule` couvre ce que `clearTimeout` ne couvre pas : une réponse déjà
+     partie qui reviendrait APRÈS une frappe plus récente. */
+  useEffectS(() => {
+    const terme = q.trim();
+    if (terme.length < 3) { setRecherche(null); return undefined; }
+    let annule = false;
+    setRecherche((r) => ({ q: terme, items: (r && r.items) || null, chargement: true }));
+    const minuteur = setTimeout(() => {
+      axRechercherRapports(terme)
+        .then((res) => { if (!annule) setRecherche({ q: terme, items: res || [], chargement: false }); })
+        .catch(() => { if (!annule) setRecherche({ q: terme, items: [], chargement: false }); });
+    }, 300);
+    return () => { annule = true; clearTimeout(minuteur); };
+  }, [q]);
+
+  // Fermeture du menu ⋯ au clic extérieur et à Échap — même règle que la liste
+  // des conversations (le `mousedown` sur un déclencheur ⋯ est ignoré, c'est
+  // son propre `onClick` qui bascule).
+  useEffectS(() => {
+    if (!menuOuvert) return undefined;
+    const fermer = (e) => {
+      const cible = e.target;
+      if (cible && cible.closest && cible.closest('[data-ax-menu]')) return;
+      setMenuOuvert(null);
+    };
+    const surTouche = (e) => { if (e.key === 'Escape') setMenuOuvert(null); };
+    document.addEventListener('mousedown', fermer);
+    document.addEventListener('keydown', surTouche);
+    return () => {
+      document.removeEventListener('mousedown', fermer);
+      document.removeEventListener('keydown', surTouche);
+    };
+  }, [menuOuvert]);
+
+  const basculerDossier = (id) => setReplies(
+    (r) => (r.includes(id) ? r.filter((x) => x !== id) : [...r, id]));
+
+  const ouvrirRenommage = (r) => {
+    setMenuOuvert(null);
+    annuleRef.current = false;
+    setRenommage({ id: r.id, initial: r.title || '', valeur: r.title || '' });
+  };
+  const validerRenommage = () => {
+    const r = renommage;
+    if (!r) return;
+    setRenommage(null);
+    const v = (r.valeur || '').trim();
+    // Un titre vide n'est pas un renommage : le backend rend 400 `titre_vide`,
+    // et celui qui vide le champ veut annuler.
+    if (!v || v === r.initial) return;
+    gestion.renommer(r.id, v);
+  };
+  const annulerRenommage = () => { annuleRef.current = true; setRenommage(null); };
+
+  const dossiersActifs = (projets || []).filter((p) => !p.archived_at);
+  const filtre = filtreLocal(q);
+  const epingles = rapports.filter((r) => r.pinned_at && !r.archived_at);
+  const archives = rapports.filter((r) => r.archived_at);
+  const archivesVisibles = archives.filter(filtre);
+  /* Un rapport dont le dossier n'est PAS dans `projets` (liste pas encore
+     revenue) n'appartiendrait à aucun groupe et serait invisible : il est rendu
+     à plat sous « Récents », avec ceux qui n'ont pas de dossier du tout
+     (`project_id` nul). Exactement la règle des conversations. */
+  const connus = new Set((projets || []).map((p) => p.id));
+  const sansDossier = rapports.filter(
+    (r) => !r.archived_at && !r.pinned_at && !connus.has(r.project_id));
+
+  const actions = (r) => [
+    { cle: 'renommer', libelle: t('conv.menu.renommer'), icone: 'edit',
+      onClick: () => ouvrirRenommage(r) },
+    { cle: 'epingler', icone: 'pin',
+      libelle: r.pinned_at ? t('conv.menu.desepingler') : t('conv.menu.epingler'),
+      onClick: () => { setMenuOuvert(null); gestion.epingler(r.id, !r.pinned_at); } },
+    { cle: 'archiver', icone: 'archive',
+      libelle: r.archived_at ? t('conv.menu.desarchiver') : t('conv.menu.archiver'),
+      onClick: () => { setMenuOuvert(null); gestion.archiver(r.id, !r.archived_at); } },
+    { cle: 'deplacer', libelle: t('conv.menu.deplacer'), icone: 'folder',
+      videLibelle: t('conv.dossier.vide'),
+      sousMenu: dossiersActifs.filter((p) => p.id !== r.project_id).map((p) => ({
+        cle: p.id, libelle: p.name,
+        onClick: () => { setMenuOuvert(null); gestion.deplacer(r.id, p.id); },
+      })) },
+    /* « Comparer avec… » n'a de sens que sur un rapport qui a du contenu : un
+       `en_cours` n'a rien à comparer, un `annule` non plus. */
+    (r.statut === TERMINE || r.statut === DEGRADE)
+      ? { cle: 'comparer', libelle: t('reports.menu.comparer'), icone: 'columns',
+          onClick: () => { setMenuOuvert(null); gestion.comparer(r); } }
+      : null,
+    { cle: 'supprimer', libelle: t('common.delete'), icone: 'trash', danger: true,
+      onClick: () => { setMenuOuvert(null); gestion.demanderSuppression(r); } },
+  ].filter(Boolean);
+
+  const champRenommage = () => (
+    <input className="ax-renommer" autoFocus value={renommage.valeur}
+      title={t('conv.renommer.aide')} aria-label={t('conv.menu.renommer')}
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onChange={(e) => setRenommage((r) => (r ? { ...r, valeur: e.target.value } : r))}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') { e.preventDefault(); validerRenommage(); }
+        else if (e.key === 'Escape') { e.preventDefault(); annulerRenommage(); }
+      }}
+      onBlur={() => {
+        // Échap a déjà démonté le champ : ne pas enregistrer par-dessus.
+        if (annuleRef.current) { annuleRef.current = false; return; }
+        validerRenommage();
+      }} />
+  );
+
+  const ligne = (r) => {
+    const enRenommage = renommage && renommage.id === r.id;
+    const cleMenu = 'rap:' + r.id;
+    const aComparer = comparaisonAttente === r.id;
+    return (
+      <li key={r.id} className="ax-conv-ligne">
+        {/* Le champ de renommage REMPLACE le bouton : un <input> dans un
+            <button> est un imbriquement interdit par HTML. */}
+        {enRenommage ? champRenommage() : (
+          <button className={`conv-item rep-ligne${aComparer ? ' active' : ''}`}
+            onClick={() => onOuvrir(r)}>
+            <span className="conv-item-title">
+              {r.pinned_at && <Icon name="pin" size={11} className="ax-conv-epingle" />}
+              <Icon name={r.statut === EN_COURS ? 'zap' : 'file'} size={12} />
+              <span className="rep-ligne-titre">{r.title || libelle('Rapport')}</span>
+              <BadgeStatutRapport statut={r.statut} t={t} />
+            </span>
+            <span className="conv-item-meta rep-ligne-meta">
+              {r.statut === EN_COURS ? (
+                <>
+                  <span className="rep-ligne-barre">
+                    <span style={{ width: (r.progression || 0) + '%' }} />
+                  </span>
+                  <span className="rep-ligne-pct">{r.progression || 0} %</span>
+                </>
+              ) : (
+                <>
+                  <span>{libelleTypeRapport(r.analysis_type, t)}</span>
+                  {typeof r.credits === 'number' && (
+                    <span>{r.credits} {t('reports.credits')}</span>
+                  )}
+                  <span>{fmtD(r.created_at)}</span>
+                </>
+              )}
+            </span>
+          </button>
+        )}
+        <MenuConversation
+          aide={t('reports.menu.aide')}
+          ouvert={menuOuvert === cleMenu}
+          onBasculer={() => setMenuOuvert(menuOuvert === cleMenu ? null : cleMenu)}
+          actions={actions(r)}
+        />
+      </li>
+    );
+  };
+
+  return (
+    <div className="rep-liste" style={{ marginTop: 34 }}>
+      <div className="section-label">{t('reports.liste.titre')}</div>
+
+      {comparaisonAttente && (
+        <div className="gap-callout rep-liste-compare" role="status">
+          <div className="gap-callout-head">
+            <Icon name="columns" size={13} /> {t('reports.compare.titre')}
+          </div>
+          <p>{t('reports.compare.choisir')}</p>
+          <div className="gap-callout-actions">
+            <button className="btn btn-ghost btn-sm" onClick={gestion.annulerComparaison}>
+              {t('reports.compare.annuler_choix')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {erreur && (
+        <div className="ax-carte-erreur ax-erreur-liste" role="alert">
+          <div className="ax-carte-erreur-titre">
+            <Icon name="alert" size={14} /> {erreur.titre}
+          </div>
+          <p>{erreur.detail}</p>
+          <button className="btn btn-secondary btn-sm" onClick={onFermerErreur}>
+            {t('common.close')}
+          </button>
+        </div>
+      )}
+
+      <div className="conv-search rep-liste-recherche">
+        <Icon name="search" size={14} className="conv-search-icon" />
+        <input value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder={t('reports.liste.recherche')} />
+      </div>
+
+      {recherche ? (
+        /* Mode recherche : résultats du serveur avec leur extrait. Les sections
+           et les dossiers laissent la place — on cherche, on ne range pas. */
+        <div>
+          <div className="sidebar-section-label">{t('conv.section.resultats')}</div>
+          {recherche.chargement && !recherche.items && (
+            <div className="caption ax-liste-vide">{t('conv.recherche.encours')}</div>
+          )}
+          {recherche.items && recherche.items.length === 0 && !recherche.chargement && (
+            <div className="caption ax-liste-vide">{t('conv.none')}</div>
+          )}
+          <ul className="ax-liste">
+            {(recherche.items || []).map((r) => (
+              <li key={r.id} className="ax-conv-ligne">
+                <button className="conv-item rep-ligne" onClick={() => onOuvrir(r)}>
+                  <span className="conv-item-title">
+                    <Icon name="file" size={12} />
+                    <span className="rep-ligne-titre">{r.title}</span>
+                    <BadgeStatutRapport statut={r.statut} t={t} />
+                  </span>
+                  {r.extrait && (
+                    <span className="ax-resultat-extrait">
+                      {surlignerExtrait(r.extrait, recherche.q)}
+                    </span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <>
+          {q.trim().length > 0 && (
+            <div className="caption ax-recherche-indice">{t('reports.recherche.min')}</div>
+          )}
+
+          {epingles.length > 0 && (
+            <>
+              <div className="sidebar-section-label">{t('reports.section.epingles')}</div>
+              <ul className="ax-liste">{epingles.filter(filtre).map(ligne)}</ul>
+            </>
+          )}
+
+          {/* « Récents » ne coiffe QUE les rapports sans dossier d'accueil :
+              chaque dossier porte déjà son propre titre. */}
+          {sansDossier.length > 0 && (
+            <>
+              <div className="sidebar-section-label">{t('reports.section.recents')}</div>
+              <ul className="ax-liste">{sansDossier.filter(filtre).map(ligne)}</ul>
+            </>
+          )}
+
+          {dossiersActifs.map((p) => {
+            const dedans = rapports.filter(
+              (r) => r.project_id === p.id && !r.archived_at && !r.pinned_at);
+            // Un dossier qui ne contient AUCUN rapport n'est pas affiché ici :
+            // la liste des rapports n'est pas l'endroit où l'on gère les
+            // dossiers (c'est le panneau des conversations), et une colonne de
+            // groupes vides masquerait les rapports.
+            if (!dedans.length) return null;
+            const visibles = dedans.filter(filtre);
+            return (
+              <DossierGroupe key={p.id} icone="folder" compte={dedans.length}
+                replie={replies.includes(p.id)}
+                onBasculer={() => basculerDossier(p.id)}
+                nom={p.name}>
+                {visibles.length ? <ul className="ax-liste">{visibles.map(ligne)}</ul>
+                  : <div className="caption ax-liste-vide">{t('reports.dossier.vide')}</div>}
+              </DossierGroupe>
+            );
+          })}
+
+          {rapports.length === 0 && !chargement && (
+            <div className="caption ax-liste-vide">{t('reports.liste.vide')}</div>
+          )}
+
+          {hasMore && (
+            <button className="btn btn-secondary btn-sm rep-liste-plus"
+              disabled={!!chargement} onClick={gestion.chargerPlus}>
+              {chargement ? t('reports.liste.chargement') : t('reports.liste.charger_plus')}
+            </button>
+          )}
+
+          {/* « Archivés » : replié par défaut, et les rapports archivés ne sont
+              demandés au serveur qu'à la première ouverture
+              (`inclure_archives=true`). */}
+          <DossierGroupe icone="archive"
+            compte={archivesChargees ? archives.length : undefined}
+            replie={!archivesOuvertes}
+            nom={<span className="sidebar-section-label ax-dossier-section">{t('reports.section.archives')}</span>}
+            onBasculer={() => {
+              const ouvrir = !archivesOuvertes;
+              setArchivesOuvertes(ouvrir);
+              if (ouvrir && !archivesChargees) gestion.chargerArchives();
+            }}>
+            {archivesVisibles.length
+              ? <ul className="ax-liste">{archivesVisibles.map(ligne)}</ul>
+              : <div className="caption ax-liste-vide">
+                  {archivesChargees ? t('conv.none') : t('reports.liste.chargement')}
+                </div>}
+          </DossierGroupe>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* =================================================================
    REPORTS — Empty state composer (state 1)
    ================================================================= */
-function ReportsEmpty({ onStart, onOpenReport, onOuvrirEnCours, promptInitial }) {
+/* La LISTE n'est plus chargée ici : elle vit dans `App` (comme celle des
+   conversations) parce que trois écrans la modifient — le menu ⋯, la fin d'une
+   génération, et le retour de l'éditeur. Chargée dans ce composant, elle
+   gardait une ligne « en cours » fantôme et cachait le rapport tout juste
+   terminé jusqu'au rechargement de la page (revue Task 4, finding 7). */
+function ReportsEmpty({ onStart, onOuvrirRapport, promptInitial,
+                        rapports, projets, rapportsSuite, rapportsChargement,
+                        rapportsArchivesCharges, gestionRapports,
+                        comparaisonAttente, erreurListe, onFermerErreurListe }) {
   const t = window.useT();
   const lang = window.AXIAL_LANG || 'fr';
   const [type, setType] = React.useState('market');
@@ -4351,63 +4836,16 @@ function ReportsEmpty({ onStart, onOpenReport, onOuvrirEnCours, promptInitial })
   // du rapport refusé déjà écrite — la retaper de mémoire était le plus sûr
   // moyen de reposer la même question en moins bien.
   const [prompt, setPrompt] = React.useState(promptInitial || '');
-  const [saved, setSaved] = React.useState(null);
-  // `GET /reports` rend `{items, has_more}` depuis Task 3 (une liste nue
-  // renvoyait les 400 rapports d'un compte à chaque ouverture).
-  useEffectS(() => {
-    axRapports({ limit: 20 })
-      .then((page) => setSaved((page && page.items) || []))
-      .catch(() => setSaved([]));
-  }, []);
   const types = REPORT_TYPES;
   const tpl = REPORT_TEMPLATES[lang];
   const sel = types.find((x) => x.id === type);
   const credits = sel.cost;
-  const fmtD = (iso) => new Date(iso).toLocaleDateString(lang === 'fr' ? 'fr-FR' : 'en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 
-  /* Un rapport `en_cours` s'ouvre sur l'écran de suivi, pas sur l'éditeur : il
-     n'a pas encore de contenu. C'est ce qui rend vraie la promesse « vous
-     pouvez naviguer ailleurs » — la liste est le chemin de retour. */
-  const ouvrir = (r) => {
-    if (r.statut === EN_COURS && onOuvrirEnCours) { onOuvrirEnCours(r); return; }
-    if (onOpenReport) onOpenReport(r.id);
-  };
-
-  const savedList = saved && saved.length > 0 && (
-    <div style={{ marginTop: 34 }}>
-      <div className="section-label">
-        {lang === 'fr' ? 'Vos rapports' : 'Your reports'}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 760 }}>
-        {saved.map((r) => (
-          <button key={r.id} onClick={() => ouvrir(r)}
-            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12,
-                     background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 10,
-                     padding: '11px 14px', cursor: 'pointer', color: 'var(--fg)', textAlign: 'left', fontSize: 13.5 }}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
-              <Icon name={r.statut === EN_COURS ? 'zap' : 'file'} size={13} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</span>
-            </span>
-            <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)', flexShrink: 0,
-                                            display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-              {r.statut === EN_COURS ? (
-                <>
-                  <span style={{ width: 54, height: 3, background: 'var(--surface-3, var(--surface))',
-                                 borderRadius: 3, overflow: 'hidden', display: 'inline-block' }}>
-                    <span style={{ display: 'block', height: '100%', width: (r.progression || 0) + '%',
-                                   background: 'var(--v-bright)' }} />
-                  </span>
-                  <span style={{ color: 'var(--v-bright)' }}>{r.progression || 0} %</span>
-                </>
-              ) : r.statut === SOURCES_INSUFFISANTES ? (
-                <span style={{ color: '#F5C16C' }}>{t('reports.sources_insuf.titre')}</span>
-              ) : r.created_at ? fmtD(r.created_at) : ''}
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
+  /* Une SEULE voie d'ouverture, celle d'`App` : elle sait ce qu'un clic veut
+     dire selon le statut (un `en_cours` va sur l'écran de suivi, il n'a pas
+     encore de contenu) ET selon le mode de la liste (pendant une comparaison,
+     le clic choisit le second rapport). Deux chemins d'ouverture auraient
+     laissé la comparaison inopérante depuis la moitié des lignes. */
 
   return (
     <div className="surface">
@@ -4464,7 +4902,18 @@ function ReportsEmpty({ onStart, onOpenReport, onOuvrirEnCours, promptInitial })
           ))}
         </div>
       </div>
-      {savedList}
+      <ReportsList
+        rapports={rapports || []}
+        projets={projets}
+        hasMore={!!rapportsSuite}
+        chargement={!!rapportsChargement}
+        archivesChargees={!!rapportsArchivesCharges}
+        onOuvrir={onOuvrirRapport}
+        gestion={gestionRapports}
+        comparaisonAttente={comparaisonAttente}
+        erreur={erreurListe}
+        onFermerErreur={onFermerErreurListe}
+      />
     </div>
   );
 }
@@ -4495,7 +4944,22 @@ function ReportsGenerating({ etat, onStop, onRelancer, onRetour, onSignaler }) {
     const id = setInterval(() => tic(), 1000);
     return () => clearInterval(id);
   }, [terminal]);
-  const ecoule = Math.max(0, Math.floor((Date.now() - depart) / 1000));
+  /* Sur un statut terminal, le chronomètre est FIGÉ : il s'arrête à
+     `termine_at`. Calculé sur `Date.now()`, il repartait d'un cran à chaque
+     rendu incident de l'écran d'échec — un compteur qui avance sur une
+     génération arrêtée depuis dix minutes (revue Task 4, finding 4). */
+  const geleRef = useRefS(null);
+  if (!terminal) geleRef.current = null;
+  const instantFin = (() => {
+    if (!terminal) return Date.now();
+    const brut = etat && etat.fin ? new Date(etat.fin).getTime() : NaN;
+    if (Number.isFinite(brut)) return brut;
+    // Statut terminal sans date de fin (état construit localement) : on gèle
+    // au premier rendu terminal plutôt que de laisser courir l'horloge.
+    if (geleRef.current == null) geleRef.current = Date.now();
+    return geleRef.current;
+  })();
+  const ecoule = Math.max(0, Math.floor((instantFin - depart) / 1000));
   const chrono = `${Math.floor(ecoule / 60)}:${String(ecoule % 60).padStart(2, '0')}`;
 
   const pct = (etat && typeof etat.progression === 'number') ? etat.progression : 0;
@@ -4600,7 +5064,10 @@ function ReportsGenerating({ etat, onStop, onRelancer, onRetour, onSignaler }) {
 
           <div className="task-list">
             {RAPPORT_ETAPES.map((nom, i) => {
-              const passee = terminal ? !fin : (rangCourant > i);
+              /* Un `annule` / `echec` garde les coches des étapes RÉELLEMENT franchies :
+       tout décocher laissait croire que rien n'avait été fait (revue Task 4,
+       finding 8). Un `termine` coche tout. */
+    const passee = (terminal && !fin) ? true : (rangCourant > i);
               const active = !terminal && rangCourant === i;
               const meta = metaTache(nom);
               return (
@@ -4656,7 +5123,11 @@ function ReportsSourcesInsuffisantes({ etat, onReformuler, onElargir, onForcer,
         <div className="gap-callout-head">
           <Icon name="alert" size={13} /> {(etat && etat.question) || ''}
         </div>
-        <p>{detail.message || t('reports.sources_insuf.body')}</p>
+        {/* `detail.message` n'est écrit que par `_ranger_echec` /
+            `_ranger_annule` : sur `sources_insuffisantes` il est absent, et le
+            repli répétait mot pour mot la phrase de l'en-tête (revue Task 4,
+            finding 6). Pas de message du moteur = pas de paragraphe. */}
+        {detail.message ? <p>{detail.message}</p> : null}
         <div className="gap-callout-actions" style={{ flexWrap: 'wrap' }}>
           <button className="btn btn-primary btn-sm" disabled={!!occupe}
             onClick={onReformuler}>
@@ -5063,10 +5534,158 @@ function MarkdownView({ text, onCite, vizs, live, jetonPartage }) {
   return <div>{renderBlocsMarkdown(blocks, 'm', onCite, vizs, live, vizIndexRef, jetonPartage || null)}</div>;
 }
 
-function ReportsEditor({ data, onBack }) {
+/* Menu déroulant à libellé (Exporter, Livrer). `MenuConversation` ne convient
+   pas : son déclencheur est le « ⋯ » discret d'une ligne de liste. Même
+   habillage (`.ax-menu`), même règle de fermeture (clic extérieur, Échap),
+   même garde `data-ax-menu` — sans elle, le `mousedown` du document fermait le
+   menu avant que le `click` du déclencheur ne parte, et le bouton ne pouvait
+   jamais refermer son propre menu. */
+function MenuBouton({ libelleBouton, icone, actions, occupe, aide }) {
+  const [ouvert, setOuvert] = React.useState(false);
+  useEffectS(() => {
+    if (!ouvert) return undefined;
+    const fermer = (e) => {
+      const cible = e.target;
+      if (cible && cible.closest && cible.closest('[data-ax-menu]')) return;
+      setOuvert(false);
+    };
+    const surTouche = (e) => { if (e.key === 'Escape') setOuvert(false); };
+    document.addEventListener('mousedown', fermer);
+    document.addEventListener('keydown', surTouche);
+    return () => {
+      document.removeEventListener('mousedown', fermer);
+      document.removeEventListener('keydown', surTouche);
+    };
+  }, [ouvert]);
+  const utiles = (actions || []).filter(Boolean);
+  if (!utiles.length) return null;
+  return (
+    <div className="ax-menu-conteneur">
+      <button className="btn btn-secondary btn-sm" data-ax-menu="1" title={aide}
+        aria-expanded={ouvert} aria-haspopup="menu" disabled={!!occupe}
+        onClick={(e) => { e.stopPropagation(); setOuvert((o) => !o); }}>
+        {icone && <Icon name={icone} size={14} />}{libelleBouton}
+        <Icon name={ouvert ? 'chevron-up' : 'chevron-down'} size={12} />
+      </button>
+      {ouvert && (
+        <div className="ax-menu ax-menu-droite" role="menu"
+          onMouseDown={(e) => e.stopPropagation()}>
+          {utiles.map((a) => (
+            <button key={a.cle} role="menuitem" className="ax-menu-item"
+              onClick={(e) => { e.stopPropagation(); setOuvert(false); a.onClick(); }}>
+              {a.icone && <Icon name={a.icone} size={13} />} {a.libelle}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Partage public d'un rapport (spec §0) : créer le lien, le copier, le
+   révoquer. L'état vit sur le RAPPORT (`jeton_partage` de `ReportDetail`), pas
+   ici : rouvrir un rapport déjà partagé doit montrer son lien, pas proposer
+   d'en créer un second (la route est idempotente, mais l'écran mentirait). */
+function PanneauPartage({ rapportId, jeton, onChange }) {
+  const t = window.useT();
+  const [occupe, setOccupe] = React.useState('');
+  const [copie, setCopie] = React.useState(false);
+  const [erreur, setErreur] = React.useState(null);
+  const [chemin, setChemin] = React.useState(null);
+
+  /* L'URL publique est construite ici et NULLE PART ailleurs : le backend rend
+     un chemin relatif (`/p/<pseudo>/<slug>-<jeton>`) parce que l'adresse du
+     front n'est pas une donnée du serveur — localhost en développement,
+     app.axial-ia.fr en production. */
+  const urlComplete = chemin
+    ? (window.location.origin + chemin)
+    : null;
+
+  const creer = async ({ puisCopier } = {}) => {
+    setOccupe('creer'); setErreur(null);
+    try {
+      const r = await axPartagerRapport(rapportId);
+      setChemin(r.url || null);
+      onChange(r.jeton || null);
+      /* Rapport déjà partagé, rouvert dans une autre session : `ReportDetail`
+         porte le jeton mais pas l'URL (le serveur ne la stocke pas, il la
+         compose). Le bouton dit « Copier le lien » et c'est ce qu'il doit
+         faire : on demande l'URL — la route est idempotente, le jeton ne
+         change pas — puis on copie, sans second clic. */
+      if (puisCopier && r.url) {
+        await copierDansPressePapier(window.location.origin + r.url);
+        setCopie(true);
+        setTimeout(() => setCopie(false), 1800);
+      }
+    } catch (e) { setErreur(decrireErreur(e, t).detail); }
+    finally { setOccupe(''); }
+  };
+  const revoquer = async () => {
+    setOccupe('revoquer'); setErreur(null);
+    try {
+      await axRevoquerPartage(rapportId);
+      setChemin(null);
+      setCopie(false);
+      onChange(null);
+    } catch (e) { setErreur(decrireErreur(e, t).detail); }
+    finally { setOccupe(''); }
+  };
+  const copier = async () => {
+    if (!urlComplete) return;
+    await copierDansPressePapier(urlComplete);
+    setCopie(true);
+    setTimeout(() => setCopie(false), 1800);
+  };
+
+  return (
+    <div className="rep-partage" role="group" aria-label={t('reports.partage.titre')}>
+      <div className="rep-partage-tete">
+        <Icon name="link" size={13} /> {t('reports.partage.titre')}
+      </div>
+      <p>{t('reports.partage.body')}</p>
+      {/* Jeton connu mais chemin inconnu (rapport rouvert : `ReportDetail`
+          porte `jeton_partage`, pas l'URL) : un clic sur « Créer le lien »
+          rend LE MÊME jeton — la route est idempotente — et donne l'URL. */}
+      {urlComplete && (
+        <div className="rep-partage-lien">
+          <input readOnly value={urlComplete} aria-label={t('reports.partage.titre')}
+            onFocus={(e) => e.target.select()} />
+        </div>
+      )}
+      <div className="rep-partage-actions">
+        {!jeton || !urlComplete ? (
+          <button className="btn btn-primary btn-sm" disabled={!!occupe}
+            onClick={() => creer({ puisCopier: !!jeton })}>
+            <Icon name={copie ? 'check' : 'link'} size={13} />
+            {occupe === 'creer' ? t('reports.partage.creation')
+              : (copie ? t('reports.partage.copie')
+                       : (jeton ? t('reports.partage.copier') : t('reports.partage.creer')))}
+          </button>
+        ) : (
+          <button className="btn btn-secondary btn-sm" onClick={copier}>
+            <Icon name={copie ? 'check' : 'copy'} size={13} />
+            {copie ? t('reports.partage.copie') : t('reports.partage.copier')}
+          </button>
+        )}
+        {jeton && (
+          <button className="btn btn-ghost btn-sm" disabled={!!occupe} onClick={revoquer}>
+            <Icon name="x" size={13} /> {t('reports.partage.revoquer')}
+          </button>
+        )}
+      </div>
+      {erreur && <p className="rep-partage-erreur">{erreur}</p>}
+    </div>
+  );
+}
+
+/* L'éditeur d'un rapport terminé. Les actions vivent dans `.rep-actions`, la
+   seule zone que `@media print` masque : imprimer un rapport doit rendre le
+   rapport, pas la barre d'outils qui a servi à l'imprimer (spec §6). */
+function ReportsEditor({ data, onBack, estAdmin, onModifierRelancer, onRegenerer,
+                         relanceEnCours }) {
   const lang = window.AXIAL_LANG || 'fr';
   const t = window.useT();
-  const [saving, setSaving] = React.useState(false);
+  const [exportEnCours, setExportEnCours] = React.useState('');
   /* Un rapport naît d'une ligne créée par le moteur : il a TOUJOURS un
      identifiant. Le repli « archiver d'abord » (`POST /reports`) a disparu —
      la route est réservée aux administrateurs depuis Task 3 (spec §5.2), elle
@@ -5081,6 +5700,12 @@ function ReportsEditor({ data, onBack }) {
   const [envoiMsg, setEnvoiMsg] = React.useState(null);
   const [outils, setOutils] = React.useState({});
   const [signalement, setSignalement] = React.useState(false);
+  const [partageOuvert, setPartageOuvert] = React.useState(false);
+  // Jeton de partage : la valeur du rapport ouvert, puis ce que le panneau en
+  // fait (créer / révoquer) sans recharger le rapport entier.
+  const [jeton, setJeton] = React.useState((data && data.jeton_partage) || null);
+  React.useEffect(() => { setJeton((data && data.jeton_partage) || null); },
+                  [data && data.jeton_partage]);
   React.useEffect(() => { axIntegrations().then(setOutils).catch(() => {}); }, []);
 
   const livrer = async (provider) => {
@@ -5097,21 +5722,35 @@ function ReportsEditor({ data, onBack }) {
     setEnvoi('');
   };
 
-  const exportPdf = async () => {
+  /* Export : un seul chemin pour les trois formats (`?format=`), le serveur
+     partant du même markdown archivé. Un export raté se taisait : l'utilisateur
+     cliquait et rien ne se passait. */
+  const exporter = async (format) => {
     if (!rapportId) return;
-    setSaving(true);
+    setExportEnCours(format);
     setEnvoiMsg(null);
     try {
-      await axDownloadReportPdf(rapportId, title.slice(0, 60) + '.pdf');
+      const ext = format === 'md' ? 'md' : (format === 'docx' ? 'docx' : 'pdf');
+      await axExporterRapport(rapportId, format, `${title.slice(0, 60)}.${ext}`);
     } catch (e) {
-      // Un export raté se taisait : l'utilisateur cliquait, rien ne se passait.
       setEnvoiMsg({ ok: false, texte: decrireErreur(e, t).detail });
     }
-    setSaving(false);
+    setExportEnCours('');
   };
 
+  /* Pastille de coût — la même fonction que les conversations (`texteCout`) :
+     « 25 crédits · 41 k tokens », plus le prix de revient pour un admin. Elle
+     n'apparaît que si le rapport a été mesuré : les rapports antérieurs au
+     25/08 ne l'ont pas été, et un « 0 crédit » les ferait passer pour gratuits. */
+  const cout = (data && typeof data.credits === 'number') ? texteCout({
+    credits: data.credits,
+    tokens: (data.tokens_entree || 0) + (data.tokens_sortie || 0),
+    coutMicroEur: data.cout_micro_eur,
+    admin: !!estAdmin,
+  }) : null;
+
   return (
-    <div className="surface" style={{ paddingTop: 16, paddingBottom: 16, maxWidth: 1000 }}>
+    <div className="surface rep-editeur" style={{ paddingTop: 16, paddingBottom: 16, maxWidth: 1000 }}>
       <div className="surface-head" style={{ marginBottom: 14 }}>
         <div>
           <h1>{title}</h1>
@@ -5122,13 +5761,61 @@ function ReportsEditor({ data, onBack }) {
         <TopControls />
       </div>
 
-      <div className="editor-head">
+      <div className="editor-head rep-actions">
         <button className="btn btn-ghost btn-sm" onClick={onBack}><Icon name="arrow-left" size={14} /></button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <button className="btn btn-primary btn-sm" onClick={exportPdf}
-            disabled={saving || !rapportId}>
-            <Icon name="download" size={14} />{saving ? libelle('Export…') : 'PDF'}
-          </button>
+        <div className="rep-actions-groupe">
+          {cout && (
+            <span className="chip rep-cout mono" title={t('reports.cout.pastille')}>
+              <Icon name="zap" size={11} /> {cout}
+            </span>
+          )}
+          {rapportId && (
+            <MenuBouton icone="download" occupe={!!exportEnCours}
+              libelleBouton={exportEnCours ? t('reports.export.encours') : t('reports.export.menu')}
+              aide={t('reports.export.menu')}
+              actions={[
+                { cle: 'pdf', libelle: t('reports.export.pdf'), icone: 'file',
+                  onClick: () => exporter('pdf') },
+                { cle: 'md', libelle: t('reports.export.md'), icone: 'document',
+                  onClick: () => exporter('md') },
+                { cle: 'docx', libelle: t('reports.export.docx'), icone: 'document',
+                  onClick: () => exporter('docx') },
+              ]} />
+          )}
+          {/* « Livrer » : une entrée par fournisseur CONNECTÉ. Un bouton vers un
+              outil non connecté n'aurait rendu qu'un 400 `not_connected`. */}
+          {rapportId && (
+            <MenuBouton icone="send" occupe={!!envoi}
+              libelleBouton={envoi ? '…' : t('reports.livrer.menu')}
+              aide={t('reports.livrer.menu')}
+              actions={[
+                (outils.notion && outils.notion.connecte)
+                  ? { cle: 'notion', libelle: t('reports.livrer.notion'), icone: 'file',
+                      onClick: () => livrer('notion') } : null,
+                (outils.google && outils.google.connecte)
+                  ? { cle: 'google', libelle: t('reports.livrer.drive'), icone: 'folder',
+                      onClick: () => livrer('google') } : null,
+              ]} />
+          )}
+          {rapportId && (
+            <button className={`btn btn-sm ${partageOuvert ? 'btn-primary' : 'btn-secondary'}`}
+              aria-expanded={partageOuvert}
+              onClick={() => setPartageOuvert((o) => !o)}>
+              <Icon name="link" size={14} />{t('reports.partage.ouvrir')}
+            </button>
+          )}
+          {rapportId && onRegenerer && (
+            <button className="btn btn-secondary btn-sm" disabled={!!relanceEnCours}
+              onClick={onRegenerer}>
+              <Icon name="refresh" size={14} />
+              {relanceEnCours ? t('reports.editor.regeneration') : t('reports.editor.regenerer')}
+            </button>
+          )}
+          {onModifierRelancer && (
+            <button className="btn btn-secondary btn-sm" onClick={onModifierRelancer}>
+              <Icon name="edit" size={14} />{t('reports.editor.modifier_relancer')}
+            </button>
+          )}
           {/* « Votre avis » et « Signaler un problème » ouvrent LE MÊME
               formulaire, dans l'app : le Google Form public ne transmettait ni
               l'identifiant du rapport ni son titre. */}
@@ -5137,12 +5824,6 @@ function ReportsEditor({ data, onBack }) {
               onClick={() => setSignalement(true)}
               title={libelle("Dites-nous ce que vaut ce rapport")}>
               <Icon name="message-square" size={14} />{t('reports.feedback')}
-            </button>
-          )}
-          {rapportId && (outils.notion && outils.notion.connecte) && (
-            <button className="btn btn-secondary btn-sm" disabled={!!envoi}
-              onClick={() => livrer('notion')}>
-              <Icon name="file" size={14} />{envoi === 'notion' ? '…' : 'Notion'}
             </button>
           )}
           {envoiMsg && (
@@ -5155,6 +5836,10 @@ function ReportsEditor({ data, onBack }) {
           )}
         </div>
       </div>
+
+      {partageOuvert && rapportId && (
+        <PanneauPartage rapportId={rapportId} jeton={jeton} onChange={setJeton} />
+      )}
 
       <BandeauDegrade etat={etatDepuisRapport(data)} />
 
@@ -5172,7 +5857,7 @@ function ReportsEditor({ data, onBack }) {
       </div>
 
       {sources.length > 0 && (
-        <div style={{ marginTop: 28 }}>
+        <div className="rep-sources" style={{ marginTop: 28 }}>
           <div className="section-label">
             Sources
           </div>
@@ -5197,6 +5882,82 @@ function ReportsEditor({ data, onBack }) {
   );
 }
 
+/* =================================================================
+   REPORTS — Comparaison de deux rapports (spec §0)
+   ================================================================= */
+/* Deux colonnes, aucun LLM, aucune fusion : deux rapports rendus par le MÊME
+   `MarkdownView` que l'éditeur, côte à côte. Le défilement est synchronisé par
+   RATIO et non par pixel : deux rapports n'ont jamais la même hauteur, et
+   recopier `scrollTop` faisait buter la colonne courte en bas dès le premier
+   tiers de la longue. */
+function ReportsComparaison({ a, b, onSortir }) {
+  const t = window.useT();
+  const refA = useRefS(null);
+  const refB = useRefS(null);
+  const [sync, setSync] = React.useState(true);
+  // Garde anti-boucle : le défilement programmé de la colonne B déclenche son
+  // propre `onScroll`, qui reprogrammerait A, qui reprogrammerait B…
+  const enCoursRef = useRefS(false);
+
+  const suivre = (source, cible) => {
+    if (!sync || enCoursRef.current) return;
+    const src = source.current;
+    const dst = cible.current;
+    if (!src || !dst) return;
+    const courseSrc = src.scrollHeight - src.clientHeight;
+    const courseDst = dst.scrollHeight - dst.clientHeight;
+    if (courseSrc <= 0 || courseDst <= 0) return;
+    enCoursRef.current = true;
+    dst.scrollTop = (src.scrollTop / courseSrc) * courseDst;
+    // Rendu à la frame suivante : `scrollTop` émet son événement de façon
+    // asynchrone, le relâcher tout de suite laisserait la boucle se refermer.
+    window.requestAnimationFrame(() => { enCoursRef.current = false; });
+  };
+
+  const colonne = (rapport, ref, autre) => (
+    <div className="rep-compare-col" ref={ref}
+      onScroll={() => suivre(ref, autre)}>
+      <h2 className="rep-compare-titre">{rapport.title}</h2>
+      <p className="rep-compare-meta mono">
+        {libelleTypeRapport(rapport.analysis_type, t)}
+        {typeof rapport.credits === 'number'
+          ? ` · ${rapport.credits} ${t('reports.credits')}` : ''}
+      </p>
+      <div className="rep-doc">
+        {rapport.content
+          ? <MarkdownView text={rapport.content} vizs={rapport.viz || null} />
+          : <p>{t('reports.liste.vide')}</p>}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="surface" style={{ maxWidth: 1400 }}>
+      <div className="surface-head" style={{ marginBottom: 12 }}>
+        <div>
+          <h1>{t('reports.compare.titre')}</h1>
+          <p>{a.title} · {b.title}</p>
+        </div>
+        <TopControls />
+      </div>
+      <div className="editor-head rep-actions">
+        <button className="btn btn-ghost btn-sm" onClick={onSortir}>
+          <Icon name="arrow-left" size={14} /> {t('reports.compare.sortir')}
+        </button>
+        <label className="rep-compare-sync">
+          <input type="checkbox" checked={sync}
+            onChange={(e) => setSync(e.target.checked)} />
+          {t('reports.compare.sync')}
+        </label>
+      </div>
+      <div className="rep-compare">
+        {colonne(a, refA, refB)}
+        {colonne(b, refB, refA)}
+      </div>
+    </div>
+  );
+}
+
 /* `ReportsQuota` a disparu : deux écrans différents disaient « crédits
    insuffisants » selon qu'on l'apprenait avant l'appel (garde locale) ou après
    (402). C'est désormais la `ModaleCredits` des conversations dans les deux
@@ -5205,6 +5966,8 @@ window.ReportsEmpty = ReportsEmpty;
 window.ReportsGenerating = ReportsGenerating;
 window.ReportsEditor = ReportsEditor;
 window.ReportsSourcesInsuffisantes = ReportsSourcesInsuffisantes;
+window.ReportsList = ReportsList;
+window.ReportsComparaison = ReportsComparaison;
 window.TopControls = TopControls;
 
 
@@ -6316,12 +7079,19 @@ function IntegrationsSettings({ lang, t }) {
       quoi: lang === 'fr'
         ? "Axial consulte votre espace pendant la rédaction d'un rapport, et peut y publier le résultat."
         : 'Axial reads your workspace while writing a report, and can publish results there.' },
-    // Google Drive : le backend est prêt (OAuth + dépôt du PDF), mais l'outil
-    // reste masqué tant que Miradie n'ouvre pas cette intégration.
-    // { id: 'google_drive', nom: 'Google Drive', icone: 'file', logo: '/logos/google-drive.svg',
-    //   quoi: lang === 'fr'
-    //     ? "Axial peut déposer vos rapports directement dans votre Drive."
-    //     : 'Axial can drop your reports straight into your Drive.' },
+    /* Google Drive. L'identifiant est `google` — celui du backend
+       (`/integrations/google/authorize`, `/integrations/google/deliver`,
+       `service.etat()`) : la tuile commentée disait `google_drive`, qui
+       n'existe nulle part côté serveur et aurait rendu 404 au premier clic.
+       `masquerSiNonConfigure` : tant que les identifiants OAuth ne sont pas
+       posés dans Google Cloud (arbitrage §0), le backend rend
+       `configure: false` et la tuile n'apparaît pas du tout — proposer une
+       connexion impossible est pire que ne rien proposer. */
+    { id: 'google', nom: 'Google Drive', icone: 'folder', logo: '/logos/google-drive.svg',
+      masquerSiNonConfigure: true,
+      quoi: lang === 'fr'
+        ? 'Axial peut déposer vos rapports directement dans votre Drive.'
+        : 'Axial can drop your reports straight into your Drive.' },
   ];
 
   const connecter = async (id) => {
@@ -6345,6 +7115,7 @@ function IntegrationsSettings({ lang, t }) {
 
       {OUTILS.map((o) => {
         const s = (etat && etat[o.id]) || {};
+        if (o.masquerSiNonConfigure && !s.configure) return null;
         return (
           <div key={o.id} className="settings-row">
             <div>
@@ -7493,6 +8264,25 @@ function App() {
      « Réessayer » de relancer EXACTEMENT la même demande. */
   const [erreurRapport, setErreurRapport] = useState(null);
 
+  /* ---- Liste des rapports (spec §4) --------------------------------------
+     Même dessin que la liste des conversations : l'état vit ICI et non dans
+     l'écran, parce que trois choses la modifient — le menu ⋯, la fin d'une
+     génération, et le retour de l'éditeur. Les rapports gardent leur forme
+     serveur (`ReportOut`), aucune traduction de champ. */
+  const [rapports, setRapports] = useState([]);
+  const [rapportsSuite, setRapportsSuite] = useState(false);     // `has_more`
+  const [rapportsChargement, setRapportsChargement] = useState(false);
+  const [rapportsArchivesCharges, setRapportsArchivesCharges] = useState(false);
+  // Un appel de liste en vol : un `ref`, pas un state — la garde doit valoir
+  // AVANT le rendu suivant (double clic sur « Charger plus »).
+  const rapportsEnVol = useRef(false);
+  const [erreurRapportsListe, setErreurRapportsListe] = useState(null);
+  /* Comparaison : `comparaisonAttente` porte l'identifiant du PREMIER rapport
+     pendant qu'on choisit le second dans la liste ; `comparaison` porte les
+     deux rapports complets une fois les deux lus. */
+  const [comparaisonAttente, setComparaisonAttente] = useState(null);
+  const [comparaison, setComparaison] = useState(null);
+
   /* Un seul point d'écriture de l'état de suivi : il met à jour React ET le
      stockage local. Deux écritures séparées auraient fini par diverger. */
   const rapportEnCoursRef = useRef(null);
@@ -7501,6 +8291,10 @@ function App() {
      lectures que le flux fait déjà côté serveur. Dès que le flux tombe, le
      drapeau retombe et le polling reprend sans rien à recâbler. */
   const fluxActifRef = useRef(false);
+  /* `AbortController` du lancement en cours : un `ref`, pas un state —
+     l'abandon ne doit pas dépendre d'un rendu (même règle que
+     `controleursFlux` du chat). */
+  const controleurRapportRef = useRef(null);
   const memoriserRapport = React.useCallback((etat) => {
     rapportEnCoursRef.current = etat;
     setRapportEnCours(etat);
@@ -7553,27 +8347,49 @@ function App() {
   /* Reprise après rechargement de page : la clé locale donne l'identifiant,
      le serveur donne la vérité. */
   useEffect(() => {
-    if (route !== 'app') return;
+    if (route !== 'app') return undefined;
     let brut = null;
     try { brut = localStorage.getItem(RAPPORT_CLE_STOCKAGE); } catch (e) {}
     const repris = etatDepuisStockage(brut);
-    if (!repris) return;
+    if (!repris) return undefined;
     rapportEnCoursRef.current = repris;
     setRapportEnCours(repris);
     setReportsState('generating');
+    /* Garde d'obsolescence, comme celle du polling : cet effet se rejoue à
+       chaque retour sur `route === 'app'`, et une réponse tardive écrasait un
+       état SSE plus avancé — jusqu'à réécrire le stockage par-dessus
+       (revue Task 4, finding 1). */
+    let actif = true;
     axRapport(repris.id)
       .then((r) => {
+        if (!actif) return;
         const etat = etatDepuisRapport(r);
         if (estTerminal(etat.statut)) { rangerRapportTermine(r); return; }
         memoriserRapport(etat);
       })
       .catch(() => {
+        if (!actif) return;
         // Rapport supprimé, ou compte changé : on oublie la reprise plutôt que
         // de laisser un écran de suivi tourner sur un identifiant mort.
         oublierRapport();
         setReportsState('empty');
       });
+    return () => { actif = false; };
   }, [route]);
+
+  /* Quitter l'app (déconnexion, expiration, démontage) lâche la lecture du
+     flux de rapport. La génération continue côté serveur — la liste et la
+     reprise la retrouvent — mais personne ne lit plus la réponse. */
+  useEffect(() => {
+    if (route === 'app') return undefined;
+    const c = controleurRapportRef.current;
+    if (c) { try { c.abort(); } catch (e) {} controleurRapportRef.current = null; }
+    return undefined;
+  }, [route]);
+  useEffect(() => () => {
+    const c = controleurRapportRef.current;
+    if (c) { try { c.abort(); } catch (e) {} }
+  }, []);
 
   /* Polling 3 s tant que le rapport est `en_cours`. C'est le filet du flux
      SSE : il couvre le rechargement de page, la coupure du flux, et le suivi
@@ -7596,7 +8412,7 @@ function App() {
     return () => { actif = false; clearInterval(id); };
   }, [idEnCours, statutEnCours, rangerRapportTermine, memoriserRapport]);
 
-  const startReport = async ({ type, analysisType, prompt }) => {
+  const startReport = async ({ type, analysisType, prompt, cleIdempotence }) => {
     // Le solde est connu côté client (axBal) et le coût aussi (REPORT_TYPES) :
     // autant prévenir avant de lancer une génération vouée à l'échec. Un SEUL
     // écran crédits désormais — la modale, ici comme sur un 402.
@@ -7611,12 +8427,23 @@ function App() {
     memoriserRapport(etatAuLancement(prompt));
     setReportsState('generating');
     fluxActifRef.current = true;
+    /* Clé d'idempotence, REPRISE telle quelle par « Réessayer » (elle voyage
+       dans `args`) : une panne réseau survenue APRÈS l'acceptation serveur
+       faisait relancer — donc payer — une seconde fois. Le backend rend alors
+       le rapport déjà lancé (`X-Idempotency-Key`, dix minutes). */
+    const cle = cleIdempotence || nouvelleCleIdempotence();
+    /* Un `AbortController` par lancement : quitter l'app (déconnexion,
+       changement de compte) doit lâcher la LECTURE du flux. La tâche, elle,
+       continue côté serveur — c'est `axAnnulerRapport` qui l'arrête. */
+    const controleur = new AbortController();
+    controleurRapportRef.current = controleur;
     try {
       const r = await axLancerRapport(
         { query: prompt, analysis_type: analysisType || 'synthese_executive' },
         // Le PREMIER événement porte déjà `report_id` : le rapport est
         // reprenable dès la première trame, pas seulement à la fin.
         (evt) => memoriserRapport(etatDepuisEvenement(rapportEnCoursRef.current, evt)),
+        { signal: controleur.signal, idempotencyKey: cle },
       );
       fluxActifRef.current = false;
       // Solde d'après le payload final (`done.data.balance`) : il est déjà
@@ -7645,8 +8472,12 @@ function App() {
         return;
       }
       memoriserRapport({ ...(encours || etatAuLancement(prompt)), statut: 'echec' });
-      setErreurRapport({ erreur, args: { type, analysisType, prompt } });
+      setErreurRapport({ erreur, args: { type, analysisType, prompt, cleIdempotence: cle } });
       setReportsState('erreur');
+    } finally {
+      // Ne libérer QUE son propre contrôleur : un second lancement a déjà
+      // remplacé la référence, l'écraser laisserait son flux sans abandon.
+      if (controleurRapportRef.current === controleur) controleurRapportRef.current = null;
     }
   };
 
@@ -7687,12 +8518,11 @@ function App() {
   /* « Recherche élargie » / « Générer quand même » / « Relancer » : un NOUVEAU
      rapport, l'ancien reste en place (spec §1). Pas de flux à ouvrir — le
      polling suit la nouvelle ligne. */
-  const relancerRapport = async (options) => {
-    const encours = rapportEnCoursRef.current;
-    if (!encours || !encours.id || relanceEnCours) return;
+  const relancerDepuisId = async (id, options) => {
+    if (!id || relanceEnCours) return;
     setRelanceEnCours(true);
     try {
-      const r = await axRelancerRapport(encours.id, options || {});
+      const r = await axRelancerRapport(id, options || {});
       const etat = etatDepuisRapport(r);
       memoriserRapport(etat);
       setReportsState('generating');
@@ -7705,8 +8535,211 @@ function App() {
       }
       setErreurRapport({ erreur, args: null });
       setReportsState('erreur');
+    } finally {
+      /* Dans un `finally` : la sortie sur `reconnexion` laissait le drapeau à
+         `true`, donc les trois boutons de l'écran « sources insuffisantes »
+         désactivés à vie (revue Task 4, finding 2). */
+      setRelanceEnCours(false);
     }
-    setRelanceEnCours(false);
+  };
+
+  const relancerRapport = (options) => {
+    const encours = rapportEnCoursRef.current;
+    return relancerDepuisId(encours && encours.id, options);
+  };
+
+  /* « Régénérer » depuis l'éditeur : un NOUVEAU rapport sur la même question,
+     l'ancien reste en place et reste lisible (spec §4). */
+  const regenererRapport = () => relancerDepuisId(
+    reportData && (reportData.report_id || reportData.id), {});
+
+  /* « Modifier et relancer » : retour au composeur avec la question du rapport
+     ouvert déjà écrite. Même geste que « Reformuler », depuis l'éditeur au lieu
+     de l'écran « sources insuffisantes ». */
+  const modifierEtRelancerRapport = () => {
+    setQuestionInitiale((reportData && reportData.question) || '');
+    oublierRapport();
+    setReportsState('empty');
+  };
+
+
+  /* ---- Liste des rapports : chargement, pagination, archives -------------
+     Un seul chemin de lecture. `before` = identifiant du dernier rapport déjà
+     affiché (curseur de `GET /reports`), et sa présence est ce qui distingue
+     « Charger plus » (on ajoute) d'un rafraîchissement (on remplace) : deux
+     fonctions auraient fini par ne plus trier pareil. */
+  const chargerRapports = async ({ before, inclureArchives } = {}) => {
+    if (rapportsEnVol.current) return;
+    rapportsEnVol.current = true;
+    setRapportsChargement(true);
+    const archives = inclureArchives === undefined
+      ? rapportsArchivesCharges : !!inclureArchives;
+    try {
+      const page = await axRapports({ limit: 20, before, inclure_archives: archives });
+      const items = (page && page.items) || [];
+      setRapportsSuite(!!(page && page.has_more));
+      setRapports((anciens) => {
+        if (!before) return items;
+        // Dédoublonnage par identifiant : un rapport créé PENDANT la
+        // pagination peut décaler la fenêtre et faire revenir une ligne déjà
+        // affichée. Le curseur du serveur ne répète rien, la course, si.
+        const vus = new Set(anciens.map((r) => r.id));
+        return [...anciens, ...items.filter((r) => !vus.has(r.id))];
+      });
+      if (archives) setRapportsArchivesCharges(true);
+      setErreurRapportsListe(null);
+    } catch (e) {
+      const erreur = decrireErreur(e, t);
+      if (erreur.action === 'reconnexion') { sessionExpiree(); return; }
+      setErreurRapportsListe(erreur);
+    } finally {
+      rapportsEnVol.current = false;
+      setRapportsChargement(false);
+    }
+  };
+
+  /* La liste est relue à chaque retour sur le composeur : c'est le seul moyen
+     que le rapport qui vient de se terminer y apparaisse avec son statut
+     final, et que la ligne « en cours » d'il y a deux minutes en disparaisse
+     (revue Task 4, finding 7). Une lecture de 20 lignes sans contenu. */
+  useEffect(() => {
+    if (route !== 'app' || subRoute !== 'reports' || reportsState !== 'empty') return;
+    chargerRapports({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route, subRoute, reportsState]);
+
+  /* Erreur d'une action de gestion : carte EN TÊTE DE LISTE, là où le geste a
+     eu lieu — et une session expirée reconnecte au lieu de s'afficher. */
+  const poserErreurRapports = (e) => {
+    const erreur = decrireErreur(e, t);
+    if (erreur.action === 'reconnexion') { sessionExpiree(); return; }
+    setErreurRapportsListe(erreur);
+  };
+
+  /* Mutation optimiste d'un rapport, avec retour en arrière sur échec.
+     L'instantané est pris DANS la mise à jour fonctionnelle et non dans la
+     closure de rendu : deux clics dans le même tick auraient sinon restauré
+     la valeur d'AVANT la première mutation. Même dessin que
+     `muterConversation`. */
+  const muterRapport = async (id, patch, appel) => {
+    const cles = Object.keys(patch);
+    let retour = null;
+    setErreurRapportsListe(null);
+    setRapports((rs) => {
+      const avant = rs.find((r) => r.id === id);
+      if (!avant) return rs;
+      retour = {};
+      cles.forEach((k) => { retour[k] = avant[k]; });
+      return rs.map((r) => (r.id === id ? { ...r, ...patch } : r));
+    });
+    if (!retour) return;
+    try { await appel(); } catch (e) {
+      setRapports((rs) => rs.map((r) => (r.id === id ? { ...r, ...retour } : r)));
+      poserErreurRapports(e);
+    }
+  };
+
+  const renommerRapportListe = (id, titre) => muterRapport(
+    id, { title: titre }, () => axRenommerRapport(id, titre));
+  const epinglerRapportListe = (id, epingle) => muterRapport(
+    id, { pinned_at: epingle ? maintenantISO() : null },
+    () => axEpinglerRapport(id, epingle));
+  /* Archiver DÉPINGLE, comme côté serveur (un rapport rangé n'occupe plus la
+     tête de liste) : sans le refléter ici, la ligne restait dans « Épinglés »
+     jusqu'au rechargement. */
+  const archiverRapportListe = (id, archive) => muterRapport(
+    id, { archived_at: archive ? maintenantISO() : null,
+          pinned_at: archive ? null : (rapports.find((r) => r.id === id) || {}).pinned_at },
+    () => axArchiverRapport(id, archive));
+  const deplacerRapportListe = (id, projectId) => muterRapport(
+    id, { project_id: projectId }, () => axDeplacerRapport(id, projectId));
+
+  /* Suppression : la ligne est retirée et RÉINSÉRÉE À SA PLACE si l'API
+     refuse. On ne restaure pas le tableau d'avant, qui serait périmé. */
+  const supprimerRapport = async (id) => {
+    const idx = rapports.findIndex((r) => r.id === id);
+    if (idx < 0) return;
+    const item = rapports[idx];
+    setErreurRapportsListe(null);
+    setRapports((rs) => rs.filter((r) => r.id !== id));
+    try {
+      await axSupprimerRapport(id);
+      // Le rapport supprimé était peut-être celui qu'on suivait : sans cet
+      // oubli, la reprise au prochain chargement partirait sur un identifiant
+      // mort et le polling interrogerait un 404 toutes les trois secondes.
+      const suivi = rapportEnCoursRef.current;
+      if (suivi && suivi.id === id) oublierRapport();
+    } catch (e) {
+      setRapports((rs) => {
+        if (rs.some((r) => r.id === id)) return rs;
+        const suivant = [...rs];
+        suivant.splice(Math.min(idx, suivant.length), 0, item);
+        return suivant;
+      });
+      poserErreurRapports(e);
+    }
+  };
+
+  /* ---- Comparaison (spec §0) --------------------------------------------
+     Premier clic depuis le menu ⋯ (« Comparer avec… ») : on retient
+     l'identifiant et la liste passe en mode sélection. Second clic sur une
+     ligne : on lit les DEUX rapports complets (`GET /reports/{id}` — la liste
+     ne porte pas le contenu) et on ouvre la vue à deux colonnes. */
+  const demanderComparaison = (r) => {
+    setComparaisonAttente(r.id);
+    setErreurRapportsListe(null);
+  };
+  const annulerComparaison = () => setComparaisonAttente(null);
+
+  const ouvrirComparaison = async (idA, idB) => {
+    setComparaisonAttente(null);
+    setComparaison({ chargement: true });
+    setReportsState('comparaison');
+    try {
+      const [a, b] = await Promise.all([axRapport(idA), axRapport(idB)]);
+      setComparaison({ a, b });
+    } catch (e) {
+      setComparaison(null);
+      const erreur = decrireErreur(e, t);
+      if (erreur.action === 'reconnexion') { sessionExpiree(); return; }
+      setErreurRapport({ erreur, args: null });
+      setReportsState('erreur');
+    }
+  };
+
+  /* Ouverture d'une ligne de liste. En mode comparaison, le clic choisit le
+     second rapport au lieu d'ouvrir le premier — cliquer le MÊME rapport
+     revient à annuler (comparer un rapport avec lui-même n'a aucun sens). */
+  const ouvrirRapportDeLaListe = (r) => {
+    if (comparaisonAttente) {
+      if (r.id === comparaisonAttente) { setComparaisonAttente(null); return; }
+      ouvrirComparaison(comparaisonAttente, r.id);
+      return;
+    }
+    if (r.statut === EN_COURS) {
+      memoriserRapport(etatDepuisRapport(r));
+      setReportsState('generating');
+      return;
+    }
+    openSavedReport(r.id);
+  };
+
+  const gestionRapports = {
+    renommer: renommerRapportListe,
+    epingler: epinglerRapportListe,
+    archiver: archiverRapportListe,
+    deplacer: deplacerRapportListe,
+    demanderSuppression: (r) => setConfirmation({
+      kind: 'rapport', id: r.id,
+      titre: t('reports.suppr.titre'), detail: t('reports.suppr.detail'),
+    }),
+    comparer: demanderComparaison,
+    annulerComparaison,
+    chargerPlus: () => {
+      const dernier = rapports[rapports.length - 1];
+      if (dernier) chargerRapports({ before: dernier.id });
+    },
+    chargerArchives: () => chargerRapports({ inclureArchives: true }),
   };
 
   /* « Reformuler » : retour au composeur avec la question pré-remplie. */
@@ -7972,6 +9005,7 @@ function App() {
     setConfirmation(null);
     if (!c) return;
     if (c.kind === 'conv') supprimerConversation(c.id);
+    else if (c.kind === 'rapport') supprimerRapport(c.id);
     else supprimerDossier(c.id);
   };
 
@@ -8742,12 +9776,19 @@ function App() {
         )}
 
         {subRoute === 'reports' && reportsState === 'empty' && (
-          <ReportsEmpty onStart={startReport} onOpenReport={openSavedReport}
-            onOuvrirEnCours={(r) => {
-              memoriserRapport(etatDepuisRapport(r));
-              setReportsState('generating');
-            }}
-            promptInitial={questionInitiale} />
+          <ReportsEmpty onStart={startReport}
+            onOuvrirRapport={ouvrirRapportDeLaListe}
+            promptInitial={questionInitiale}
+            rapports={rapports}
+            projets={projets}
+            rapportsSuite={rapportsSuite}
+            rapportsChargement={rapportsChargement}
+            rapportsArchivesCharges={rapportsArchivesCharges}
+            gestionRapports={gestionRapports}
+            comparaisonAttente={comparaisonAttente}
+            erreurListe={erreurRapportsListe}
+            onFermerErreurListe={() => setErreurRapportsListe(null)}
+          />
         )}
         {subRoute === 'reports' && reportsState === 'generating' && (
           <ReportsGenerating
@@ -8772,8 +9813,24 @@ function App() {
         {subRoute === 'reports' && reportsState === 'editor' && (
           <ReportsEditor
             data={reportData}
+            estAdmin={!!(axUser && axUser.is_admin)}
+            relanceEnCours={relanceEnCours}
+            onModifierRelancer={modifierEtRelancerRapport}
+            onRegenerer={regenererRapport}
             onBack={() => { setQuestionInitiale(''); setReportsState('empty'); }}
           />
+        )}
+        {subRoute === 'reports' && reportsState === 'comparaison' && (
+          comparaison && comparaison.a && comparaison.b ? (
+            <ReportsComparaison
+              a={comparaison.a} b={comparaison.b}
+              onSortir={() => { setComparaison(null); setReportsState('empty'); }}
+            />
+          ) : (
+            <div className="surface" style={{ maxWidth: 820 }}>
+              <p className="caption">{t('reports.compare.chargement')}</p>
+            </div>
+          )
         )}
         {subRoute === 'reports' && reportsState === 'erreur' && erreurRapport && (
           <div className="surface" style={{ maxWidth: 820 }}>

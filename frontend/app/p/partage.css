@@ -1,0 +1,156 @@
+/* Page publique d'un rapport partagé — `/p/<pseudo>/<slug>-<jeton>`.
+   
+   Feuille AUTONOME : elle ne dépend d'aucune classe de l'application (la page
+   est rendue par le serveur, sans React, sans le prototype). Les valeurs sont
+   celles des jetons de `globals.css` — recopiées et non héritées, parce que
+   `globals.css` bascule en clair sur `html[data-theme="light"]`, un attribut
+   posé par un script de l'app qui ne tourne pas ici. Le visiteur d'un lien
+   partagé n'a aucun réglage chez nous : c'est donc `prefers-color-scheme` qui
+   décide, et rien d'autre.
+   
+   Elle n'est importée que par cette route : Next ne la sert pas ailleurs. */
+.rp-racine {
+  --rp-bg: #07050f;
+  --rp-surface: #110d1e;
+  --rp-border: rgba(121, 118, 247, 0.15);
+  --rp-fg: #f0f0f5;
+  --rp-fg-2: #8a8a9a;
+  --rp-fg-3: #6a6a7a;
+  --rp-accent: #7976f7;
+
+  min-height: 100vh;
+  background: var(--rp-bg);
+  color: var(--rp-fg);
+  font-family: 'Raleway', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+@media (prefers-color-scheme: light) {
+  .rp-racine {
+    --rp-bg: #f7f5f2;
+    --rp-surface: #ffffff;
+    --rp-border: rgba(51, 14, 125, 0.10);
+    --rp-fg: #1a1525;
+    --rp-fg-2: #5a5366;
+    --rp-fg-3: #8e8898;
+    --rp-accent: #6e5be6;
+  }
+}
+
+/* `globals.css` peint `html, body` avec son propre `--bg` (sombre) : sans ces
+   deux lignes, le dépassement élastique d'un défilement montrait du noir
+   derrière une page claire. La règle ne s'applique qu'à cette route. */
+body { background: #07050f; }
+@media (prefers-color-scheme: light) { body { background: #f7f5f2; } }
+
+.rp-corps { max-width: 780px; margin: 0 auto; padding: 40px 22px 80px; }
+
+.rp-entete {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--rp-fg-3);
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--rp-border);
+}
+.rp-entete a { color: var(--rp-accent); text-decoration: none; }
+
+.rp-titre { font-size: 30px; line-height: 1.2; letter-spacing: -0.02em; margin: 28px 0 6px; }
+.rp-meta {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--rp-fg-3);
+  margin: 0 0 30px;
+}
+
+.rp-doc h1 { font-size: 24px; margin: 34px 0 10px; }
+.rp-doc h2 { font-size: 19px; margin: 32px 0 8px; }
+.rp-doc h3 { font-size: 16px; margin: 24px 0 6px; }
+.rp-doc p { margin: 10px 0; color: var(--rp-fg); }
+.rp-doc ul, .rp-doc ol { margin: 10px 0 10px 22px; }
+.rp-doc li { margin: 4px 0; }
+.rp-doc blockquote {
+  margin: 14px 0;
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid var(--rp-border);
+  color: var(--rp-fg-2);
+}
+.rp-doc code {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.88em;
+  background: var(--rp-surface);
+  border: 1px solid var(--rp-border);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.rp-doc pre {
+  background: var(--rp-surface);
+  border: 1px solid var(--rp-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+.rp-doc pre code { background: none; border: none; padding: 0; }
+.rp-doc a { color: var(--rp-accent); }
+.rp-doc hr { border: none; border-top: 1px solid var(--rp-border); margin: 28px 0; }
+
+/* Un tableau large défile DANS sa boîte : sans ce conteneur, c'est la page
+   entière qui défilait horizontalement sur un téléphone. */
+.rp-table-wrap { overflow-x: auto; margin: 14px 0; }
+.rp-doc table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.rp-doc th, .rp-doc td {
+  border: 1px solid var(--rp-border);
+  padding: 7px 10px;
+  text-align: left;
+}
+.rp-doc th { color: var(--rp-fg); font-weight: 700; background: var(--rp-surface); }
+.rp-doc td { color: var(--rp-fg-2); }
+
+.rp-viz { margin: 18px 0; }
+.rp-viz img { max-width: 100%; height: auto; display: block; border-radius: 10px; }
+
+/* Citation [N] : un simple renvoi visuel vers la liste des sources. La page
+   publique ne fait rien au clic — aucun état, aucun script. */
+.rp-cite {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.82em;
+  color: var(--rp-accent);
+  vertical-align: super;
+}
+
+.rp-sources { margin-top: 42px; padding-top: 20px; border-top: 1px solid var(--rp-border); }
+.rp-sources-titre {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--rp-fg-3);
+  margin-bottom: 12px;
+}
+.rp-source { display: flex; gap: 10px; align-items: baseline; font-size: 13.5px; margin: 6px 0; }
+.rp-source .rp-num { font-family: 'JetBrains Mono', ui-monospace, monospace; color: var(--rp-accent); }
+.rp-source a { color: var(--rp-fg); text-decoration: none; }
+.rp-source a:hover { text-decoration: underline; }
+.rp-source .rp-domaine { color: var(--rp-fg-3); }
+
+.rp-pied {
+  margin-top: 48px;
+  padding-top: 18px;
+  border-top: 1px solid var(--rp-border);
+  font-size: 13px;
+  color: var(--rp-fg-3);
+}
+.rp-pied a { color: var(--rp-accent); text-decoration: none; }
+
+@media (max-width: 640px) {
+  .rp-corps { padding: 28px 16px 60px; }
+  .rp-titre { font-size: 24px; }
+}

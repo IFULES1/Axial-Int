@@ -761,7 +761,8 @@ def finalize(db, user_id: str, analysis_type: str, result: AnalysisResult,
 
 
 def _nouvelle_ligne(db, user_id: str, *, analysis_type: str, title: str | None,
-                    question: str | None, statut: str):
+                    question: str | None, statut: str,
+                    cle_idempotence: str | None = None):
     """La ligne `reports` créée AU LANCEMENT (spec §1) — contenu vide."""
     import uuid as _uuid
 
@@ -771,6 +772,10 @@ def _nouvelle_ligne(db, user_id: str, *, analysis_type: str, title: str | None,
         id=_uuid.uuid4(), user_id=_uuid.UUID(user_id), analysis_type=analysis_type,
         title=title or _titre_provisoire(analysis_type), content="",
         statut=statut, progression=0, etape=None, question=question,
+        # La clé vit dans `detail` : aucune colonne, donc aucune migration, et
+        # `detail` est déjà le sac de contexte de la ligne. Elle est écrite
+        # AVANT tout débit — c'est le seul ordre qui rend le rejeu utile.
+        detail=({"idempotence": cle_idempotence} if cle_idempotence else None),
     )
     db.add(rapport)
     db.commit()
@@ -850,10 +855,49 @@ def _cloturer(db, rapport, result: AnalysisResult, *, statut: str,
 
 # --- Moteur suivi par identifiant (spec §1) --------------------------------
 
+DELAI_IDEMPOTENCE_SECONDES = 600
+
+
+def rapport_par_idempotence(db, user_id: str, cle: str | None):
+    """Le rapport déjà lancé sous cette clé, s'il est récent. Sinon `None`.
+
+    Le front renvoie le même `X-Idempotency-Key` quand il réessaie après une
+    panne réseau — et une panne survenue APRÈS l'acceptation serveur est
+    précisément le cas où « Réessayer » débitait deux fois. Dix minutes : au-delà,
+    un même clic ne se rejoue plus, c'est une nouvelle demande.
+    """
+    import datetime as _dt
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from app.modules.reports.models import Report
+
+    if not cle:
+        return None
+    try:
+        uid = _uuid.UUID(user_id)
+    except (ValueError, AttributeError, TypeError):
+        return None
+    limite = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(
+        seconds=DELAI_IDEMPOTENCE_SECONDES)
+    # `as_string()` : `->>` sous PostgreSQL, `json_extract` sous SQLite — la
+    # même expression sur les deux moteurs, aucun SQL écrit à la main.
+    return db.scalars(
+        select(Report)
+        .where(Report.user_id == uid,
+               Report.detail["idempotence"].as_string() == cle,
+               Report.created_at >= limite)
+        .order_by(Report.created_at.desc())
+        .limit(1)
+    ).first()
+
+
 def lancer_rapport(db, user_id: str, *, query: str, analysis_type: str,
                    title: str | None = None, top_k: int | None = None,
                    is_admin: bool = False, elargir: bool = False,
-                   forcer: bool = False, attendre: bool = False):
+                   forcer: bool = False, attendre: bool = False,
+                   cle_idempotence: str | None = None):
     """Crée la ligne `en_cours` et lance le moteur. Retourne le `Report`.
 
     `attendre=False` (flux) : la tâche part dans un thread démon et survit à la
@@ -865,6 +909,11 @@ def lancer_rapport(db, user_id: str, *, query: str, analysis_type: str,
     """
     from app.modules.reports import models as rm
 
+    # Rejeu : la même clé d'idempotence dans les dix minutes rend le rapport
+    # déjà lancé, sans nouvelle ligne et sans nouveau débit.
+    deja = rapport_par_idempotence(db, user_id, cle_idempotence)
+    if deja is not None:
+        return deja
     # Type et solde vérifiés AVANT de créer la ligne : une question mal formée
     # doit rendre un 400, pas un rapport en échec dans la liste.
     if not is_valid_type(analysis_type):
@@ -872,7 +921,8 @@ def lancer_rapport(db, user_id: str, *, query: str, analysis_type: str,
                        code="unknown_analysis_type")
     precheck_credits(db, user_id, analysis_type, is_admin=is_admin)
     rapport = _nouvelle_ligne(db, user_id, analysis_type=analysis_type,
-                              title=title, question=query, statut=rm.EN_COURS)
+                              title=title, question=query, statut=rm.EN_COURS,
+                              cle_idempotence=cle_idempotence)
     # Le contexte d'entreprise et le profil sont lus ICI, sur la session de la
     # requête : la tâche ne doit dépendre d'aucun objet de cette session.
     from app.modules.memory import service as memory
@@ -1095,7 +1145,7 @@ def _sse(event: dict) -> str:
 def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
                     analysis_type: str, title: str | None = None,
                     top_k: int | None = None, elargir: bool = False,
-                    forcer: bool = False):
+                    forcer: bool = False, cle_idempotence: str | None = None):
     """Générateur SSE : suit la ligne de rapport, puis émet `done`.
 
     Le flux ne produit plus rien lui-même — il REGARDE. La tâche tourne dans
@@ -1115,7 +1165,8 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
         rapport = lancer_rapport(db, user_id, query=query,
                                  analysis_type=analysis_type, title=title,
                                  top_k=top_k, is_admin=is_admin,
-                                 elargir=elargir, forcer=forcer)
+                                 elargir=elargir, forcer=forcer,
+                                 cle_idempotence=cle_idempotence)
     except AppError as e:
         yield _sse({"step": "error", "done": True, "detail": {},
                     "error": e.message, "code": e.code})

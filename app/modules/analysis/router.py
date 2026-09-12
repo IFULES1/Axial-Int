@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -31,7 +31,8 @@ def types() -> dict:
 
 @router.post("/run", response_model=ReportDetail)
 def run(payload: AnalysisRequest, user: AuthUser = Depends(get_current_user),
-        db: Session = Depends(get_db)) -> ReportDetail:
+        db: Session = Depends(get_db),
+        x_idempotency_key: str | None = Header(default=None)) -> ReportDetail:
     """Chemin bloquant — repli du flux (arbitrage §0).
 
     Ce n'est plus une seconde implémentation : la route crée la ligne de
@@ -48,6 +49,7 @@ def run(payload: AnalysisRequest, user: AuthUser = Depends(get_current_user),
         db, user.id, query=payload.query, analysis_type=payload.analysis_type,
         title=payload.title, top_k=payload.top_k, is_admin=user.is_admin,
         elargir=payload.elargir, forcer=payload.forcer, attendre=True,
+        cle_idempotence=x_idempotency_key,
     )
     return ReportDetail(**reports.detail_dict(rapport, is_admin=user.is_admin))
 
@@ -85,11 +87,17 @@ def premier_rapport(user: AuthUser = Depends(get_current_user),
 
 @router.post("/stream")
 def stream(payload: AnalysisRequest, user: AuthUser = Depends(get_current_user),
-           db: Session = Depends(get_db)) -> StreamingResponse:
+           db: Session = Depends(get_db),
+           x_idempotency_key: str | None = Header(default=None)) -> StreamingResponse:
+    """Flux SSE. `X-Idempotency-Key` (facultatif) : la même clé dans les dix
+    minutes SUIT le rapport déjà lancé au lieu d'en lancer — donc de débiter —
+    un second. C'est le « Réessayer » après une panne réseau survenue APRÈS
+    l'acceptation serveur, le seul cas de double débit qui restait."""
     generator = service.stream_analysis(
         db=db, user_id=user.id, is_admin=user.is_admin, query=payload.query,
         analysis_type=payload.analysis_type, title=payload.title, top_k=payload.top_k,
         elargir=payload.elargir, forcer=payload.forcer,
+        cle_idempotence=x_idempotency_key,
     )
     return StreamingResponse(
         generator,

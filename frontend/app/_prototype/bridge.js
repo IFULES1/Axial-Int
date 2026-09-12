@@ -694,20 +694,89 @@ function _memoriserViz(cle, svg) {
   _CACHE_VIZ.set(cle, svg);
 }
 
-/** Fetch a report's PDF with auth and trigger a browser download. */
-export async function axDownloadReportPdf(reportId, filename) {
+/* --- Gestion des rapports (spec §4) -------------------------------------
+ *
+ * Un seul endpoint côté serveur (`PATCH /reports/{id}`, sémantique PATCH
+ * stricte) : quatre fonctions nommées ici plutôt qu'un `axPatchRapport`
+ * générique, pour que l'appelant ne compose jamais le corps lui-même — un
+ * `{archived: undefined}` parti par erreur ne veut RIEN dire côté serveur,
+ * alors qu'un `{archived: null}` veut dire quelque chose.
+ */
+async function patcherRapport(id, patch) {
+  return axFetch(`/reports/${id}`, { method: "PATCH", body: patch });
+}
+export async function axRenommerRapport(id, titre) {
+  return patcherRapport(id, { title: titre });
+}
+export async function axEpinglerRapport(id, epingle = true) {
+  return patcherRapport(id, { pinned: !!epingle });
+}
+export async function axArchiverRapport(id, archive = true) {
+  return patcherRapport(id, { archived: !!archive });
+}
+/** `projectId === null` retire du dossier (le serveur distingue absent de
+ * `null` via `model_fields_set`) : « Retirer du dossier » serait inexprimable
+ * autrement. */
+export async function axDeplacerRapport(id, projectId) {
+  return patcherRapport(id, { project_id: projectId || null });
+}
+export async function axSupprimerRapport(id) {
+  return axFetch(`/reports/${id}`, { method: "DELETE" });
+}
+/** Recherche titre + contenu, avec extrait. Le serveur refuse (400
+ * `requete_trop_courte`) sous 3 caractères : c'est l'appelant qui garde le
+ * seuil, aucun aller-retour pour deux lettres. */
+export async function axRechercherRapports(q) {
+  return axFetch(`/reports/search?q=${encodeURIComponent(q)}`);
+}
+
+/* --- Partage public (spec §0) -------------------------------------------- */
+
+/** Crée (ou retrouve — la route est idempotente) le lien public.
+ * Rend `{ jeton, url }`, `url` étant un chemin RELATIF : l'adresse publique du
+ * front n'est pas une donnée du backend, c'est la vue qui préfixe avec
+ * `window.location.origin`. */
+export async function axPartagerRapport(id) {
+  return axFetch(`/reports/${id}/partage`, { method: "POST", body: {} });
+}
+/** Révoque le lien. Idempotent ; un nouveau partage rendra un jeton NEUF,
+ * l'ancien lien reste mort. */
+export async function axRevoquerPartage(id) {
+  return axFetch(`/reports/${id}/partage`, { method: "DELETE" });
+}
+
+/* --- Export (spec §4) ---------------------------------------------------- */
+
+/** `GET /reports/{id}/export?format=pdf|md|docx` → téléchargement.
+ *
+ * Remplace `axDownloadReportPdf` : les trois formats partent du même markdown
+ * archivé côté serveur, il n'y a aucune raison d'avoir un chemin front par
+ * format. `axFetch` ne convient pas — on télécharge des octets, pas du JSON.
+ */
+const EXTENSIONS_EXPORT = { pdf: "pdf", md: "md", docx: "docx" };
+
+export async function axExporterRapport(reportId, format, nomFichier, _retried = false) {
+  const fmt = EXTENSIONS_EXPORT[format] ? format : "pdf";
   const tok = axGetToken();
-  const res = await fetch(`${AX_API}/reports/${reportId}/pdf`, {
+  const res = await fetch(`${AX_API}/reports/${reportId}/export?format=${fmt}`, {
     headers: tok ? { Authorization: "Bearer " + tok } : {},
   });
-  if (!res.ok) throw new Error("PDF export failed");
+  // Un 401 sur un onglet resté ouvert une heure : même rejeu UNIQUE que
+  // `axFetch` (le drapeau compte — un serveur qui rend 401 malgré un
+  // rafraîchissement réussi ferait boucler la fonction sur elle-même).
+  if ((res.status === 401 || res.status === 403) && !_retried && (await tryRefresh())) {
+    return axExporterRapport(reportId, fmt, nomFichier, true);
+  }
+  if (!res.ok) throw await erreurDepuisReponse(res, "Export impossible.");
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename || "rapport-axial.pdf";
+  a.download = nomFichier || `rapport-axial.${EXTENSIONS_EXPORT[fmt]}`;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  // Sans révocation, chaque export garde son blob en mémoire jusqu'au
+  // rechargement de la page.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

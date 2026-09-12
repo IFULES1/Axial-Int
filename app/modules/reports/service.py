@@ -75,6 +75,19 @@ def create_report(db: Session, user_id: str, *, title: str, content: str,
     return report
 
 
+def _iso(valeur):
+    """Date en ISO 8601 **avec** le « T » séparateur, ou `None`.
+
+    Les dates de ce dict sortent par deux chemins : Pydantic (routes HTTP, qui
+    sérialise correctement) et `json.dumps(default=str)` (événement `done` du
+    flux SSE), lequel rendait « 2026-09-12 17:12:36+02:00 » — un format que
+    `new Date(...)` refuse dans Safari, donc un chronomètre à « NaN » côté
+    front. Un `isoformat()` explicite ici supprime la divergence à la source ;
+    Pydantic reparse la chaîne sans broncher.
+    """
+    return valeur.isoformat() if valeur is not None else None
+
+
 def resume_dict(report: Report) -> dict:
     """Forme unique du `ReportOut` — ce que la LISTE affiche, sans le contenu.
 
@@ -85,7 +98,7 @@ def resume_dict(report: Report) -> dict:
         "id": str(report.id),
         "title": report.title,
         "analysis_type": report.analysis_type,
-        "created_at": report.created_at,
+        "created_at": _iso(report.created_at),
         "statut": report.statut,
         "etape": report.etape,
         "progression": report.progression,
@@ -93,8 +106,8 @@ def resume_dict(report: Report) -> dict:
         "tokens_entree": report.tokens_entree,
         "tokens_sortie": report.tokens_sortie,
         "project_id": str(report.project_id) if report.project_id else None,
-        "pinned_at": report.pinned_at,
-        "archived_at": report.archived_at,
+        "pinned_at": _iso(report.pinned_at),
+        "archived_at": _iso(report.archived_at),
     }
 
 
@@ -115,10 +128,10 @@ def detail_dict(report: Report, *, is_admin: bool = False) -> dict:
         "viz": report.viz if isinstance(report.viz, list) else None,
         "detail": report.detail or {},
         "question": report.question,
-        "termine_at": report.termine_at,
+        "termine_at": _iso(report.termine_at),
         "annulation_demandee": bool(report.annulation_demandee),
         "jeton_partage": report.jeton_partage,
-        "partage_at": report.partage_at,
+        "partage_at": _iso(report.partage_at),
     })
     # Le coût exposé à l'utilisateur est ce qu'il a payé — les crédits, pas les
     # euros. Le prix de revient reste réservé à l'administration (spec §4) : un

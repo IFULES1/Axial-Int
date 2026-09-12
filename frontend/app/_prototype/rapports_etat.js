@@ -63,6 +63,10 @@ export function etatDepuisRapport(rapport) {
     // lui, un rechargement de page remettait le compteur à zéro et annonçait
     // « 0:03 » sur un rapport lancé depuis six minutes.
     debut: rapport.created_at || null,
+    // Instant de FIN, quand il y en a un : c'est ce qui fige le chronomètre
+    // d'un rapport terminé. Sans lui, l'écran d'échec voyait son compteur
+    // repartir d'un cran à chaque rendu incident (revue Task 4, finding 4).
+    fin: rapport.termine_at || null,
   };
 }
 
@@ -72,7 +76,7 @@ export function etatAuLancement(question) {
   return {
     id: null, statut: EN_COURS, etape: null, progression: 0,
     detail: {}, question: question || null, titre: null,
-    annulationDemandee: false, debut: new Date().toISOString(),
+    annulationDemandee: false, debut: new Date().toISOString(), fin: null,
   };
 }
 
@@ -119,6 +123,9 @@ export function etatDepuisEvenement(etat, evt) {
     }
     suivant.statut = ECHEC;
     suivant.progression = 100;
+    // Le flux ne rend pas de `termine_at` sur une erreur : l'instant où il la
+    // rapporte est la meilleure approximation, et il fige le chronomètre.
+    suivant.fin = suivant.fin || new Date().toISOString();
     suivant.detail = Object.assign({}, suivant.detail, {
       raison: evt.code || 'echec_generation',
       message: evt.error,
@@ -136,6 +143,7 @@ export function etatDepuisEvenement(etat, evt) {
   }
   suivant.statut = evt.statut || TERMINE;
   suivant.progression = 100;
+  suivant.fin = suivant.fin || new Date().toISOString();
   return suivant;
 }
 
@@ -157,6 +165,7 @@ export function etatDepuisStockage(brut) {
     titre: objet.titre || null,
     annulationDemandee: !!objet.annulationDemandee,
     debut: objet.debut || null,
+    fin: objet.fin || null,
   };
 }
 
@@ -171,6 +180,7 @@ export function versStockage(etat) {
     progression: etat.progression, detail: etat.detail,
     question: etat.question, titre: etat.titre,
     annulationDemandee: etat.annulationDemandee, debut: etat.debut || null,
+    fin: etat.fin || null,
   });
 }
 

@@ -2475,3 +2475,135 @@ def test_les_sources_internes_reelles_sont_masquees_sur_la_page_publique():
                                                "Source interne, non partagée",
                                                "Source interne, non partagée", "B"]
     assert all(s.get("url") is None for s in publiques[1:4])
+
+
+# --- Clé d'idempotence au lancement (revue Task 4, finding 3) --------------
+
+def test_meme_cle_didempotence_ne_lance_pas_un_second_rapport(http):
+    """Le « Réessayer » d'une panne réseau survenue APRÈS l'acceptation
+    serveur ne doit pas relancer — donc ne pas débiter — une seconde fois."""
+    from app.modules.analysis import service as analyse
+
+    import app.modules.memory.models  # noqa: F401 — enregistre `company_profiles`
+
+    engine, uid = http
+    appels = []
+    # Le moteur lit le contexte d'entreprise sur la session de la requête : la
+    # table doit exister, même vide.
+    Base.metadata.tables["company_profiles"].create(engine, checkfirst=True)
+
+    with Session(engine) as db:
+        db.add(CreditBalance(user_id=uid, free_credits=500))
+        db.commit()
+
+    def _faux_thread(*a, **kw):
+        appels.append(kw.get("kwargs"))
+
+        class _T:
+            def start(self_inner):
+                pass
+        return _T()
+
+    import threading as _threading
+    vrai = _threading.Thread
+    _threading.Thread = _faux_thread
+    try:
+        with Session(engine) as db:
+            premier = analyse.lancer_rapport(
+                db, str(uid), query="Le marché du lithium",
+                analysis_type="synthese_executive", cle_idempotence="cle-abc")
+            second = analyse.lancer_rapport(
+                db, str(uid), query="Le marché du lithium",
+                analysis_type="synthese_executive", cle_idempotence="cle-abc")
+            autre = analyse.lancer_rapport(
+                db, str(uid), query="Le marché du lithium",
+                analysis_type="synthese_executive", cle_idempotence="cle-xyz")
+            # Le rejeu rend LE MÊME rapport, sans nouvelle ligne…
+            assert str(second.id) == str(premier.id)
+            # … et une autre clé en crée bien un nouveau.
+            assert str(autre.id) != str(premier.id)
+            assert (premier.detail or {}).get("idempotence") == "cle-abc"
+            lignes = db.scalars(select(Report).where(Report.user_id == uid)).all()
+            assert len(lignes) == 2
+            # Deux lancements réels, pas trois : le rejeu n'a pas démarré de tâche.
+            assert len(appels) == 2
+    finally:
+        _threading.Thread = vrai
+
+
+def test_une_cle_didempotence_perimee_relance_un_rapport(http):
+    """Passé le délai, la même clé est une NOUVELLE demande : sans cette borne,
+    un onglet laissé ouvert une semaine ne pourrait plus rien relancer."""
+    from app.modules.analysis import service as analyse
+
+    engine, uid = http
+    with Session(engine) as db:
+        vieux = _rapport(
+            db, uid, statut=rm.TERMINE, detail={"idempotence": "cle-vieille"},
+            created_at=dt.datetime.now(dt.timezone.utc)
+            - dt.timedelta(seconds=analyse.DELAI_IDEMPOTENCE_SECONDES + 60))
+        recent = _rapport(
+            db, uid, statut=rm.TERMINE, detail={"idempotence": "cle-fraiche"},
+            created_at=dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=5))
+        assert analyse.rapport_par_idempotence(db, str(uid), "cle-vieille") is None
+        assert str(analyse.rapport_par_idempotence(
+            db, str(uid), "cle-fraiche").id) == str(recent.id)
+        # Clé absente ou vide : aucun rejeu (sinon TOUS les rapports sans clé
+        # se rejoueraient entre eux).
+        assert analyse.rapport_par_idempotence(db, str(uid), None) is None
+        assert analyse.rapport_par_idempotence(db, str(uid), "") is None
+        assert vieux is not None
+
+
+def test_une_cle_didempotence_ne_traverse_pas_les_comptes(http):
+    """La clé est choisie par le client : celle d'un autre compte ne doit
+    jamais ouvrir son rapport."""
+    from app.modules.analysis import service as analyse
+
+    engine, uid = http
+    autre = uuidlib.uuid4()
+    with Session(engine) as db:
+        _rapport(db, autre, statut=rm.TERMINE, detail={"idempotence": "partagee"},
+                 created_at=dt.datetime.now(dt.timezone.utc))
+        assert analyse.rapport_par_idempotence(db, str(uid), "partagee") is None
+        assert analyse.rapport_par_idempotence(db, str(autre), "partagee") is not None
+
+
+def test_les_routes_de_lancement_acceptent_len_tete_didempotence():
+    """L'en-tête doit être DÉCLARÉE : sans elle, le front l'enverrait dans le
+    vide et le double débit resterait possible sans que rien ne le dise."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    chemins = TestClient(app).get("/openapi.json").json()["paths"]
+    for chemin in ("/analysis/stream", "/analysis/run"):
+        params = chemins[chemin]["post"].get("parameters") or []
+        noms = {p["name"] for p in params if p.get("in") == "header"}
+        assert "x-idempotency-key" in noms, (chemin, noms)
+
+
+# --- Dates sérialisées avec le « T » (revue Task 4, finding 5) -------------
+
+def test_les_dates_du_rapport_sortent_en_iso_avec_le_t(http):
+    """`json.dumps(default=str)` de l'événement SSE rendait
+    « 2026-09-12 17:12:36+02:00 » — un format que Safari refuse, donc un
+    chronomètre à « NaN » sur l'écran de génération."""
+    import json as _json
+
+    engine, uid = http
+    instant = dt.datetime(2026, 9, 12, 17, 12, 36, tzinfo=dt.timezone.utc)
+    with Session(engine) as db:
+        r = _rapport(db, uid, statut=rm.TERMINE, created_at=instant,
+                     termine_at=instant, pinned_at=instant, archived_at=instant,
+                     partage_at=instant, content="x")
+        d = reports_service.detail_dict(r)
+    for cle in ("created_at", "termine_at", "pinned_at", "archived_at",
+                "partage_at"):
+        assert isinstance(d[cle], str), cle
+        assert "T" in d[cle], (cle, d[cle])
+    # Sérialisable tel quel par le flux, sans `default=str` pour ces clés.
+    _json.loads(_json.dumps(d, default=str))
+    # La route HTTP continue de rendre un ISO valide (Pydantic reparse).
+    lu = _client(engine, uid).get(f"/reports/{d['id']}").json()
+    assert "T" in lu["created_at"]
