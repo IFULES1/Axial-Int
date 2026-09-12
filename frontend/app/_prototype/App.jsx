@@ -320,10 +320,9 @@ const STRINGS = {
     'reports.signalement.merci': 'Merci — votre retour est arrivé. Nous relisons ce rapport.',
     'reports.signalement.echec': 'L\'envoi a échoué. Réessayez dans un instant.',
 
-    'reports.editor.outline': 'Plan',
+    // `outline` / `activity` / `suggest` sont parties avec le CSS de l'éditeur
+    // trois colonnes jamais construit (Task 6).
     'reports.editor.sources': 'Sources',
-    'reports.editor.activity': 'Activité',
-    'reports.editor.suggest': 'Suggestion d\'Axial',
 
     // Rapports — liste, gestion, comparaison, export, partage (spec §4).
     // Les libellés génériques du menu ⋯ (Renommer, Épingler, Archiver,
@@ -573,6 +572,7 @@ const STRINGS = {
     'conv.menu.archiver': 'Archiver',
     'conv.menu.desarchiver': 'Désarchiver',
     'conv.menu.deplacer': 'Déplacer vers…',
+    'conv.menu.retirer_dossier': 'Retirer du dossier',
     'conv.renommer.aide': 'Entrée pour valider, Échap pour annuler',
     'conv.suppr.titre': 'Supprimer cette conversation ?',
     'conv.suppr.detail': 'La conversation et tous ses messages seront définitivement supprimés. Cette action est irréversible.',
@@ -735,10 +735,8 @@ const STRINGS = {
     'reports.signalement.merci': 'Thank you — your feedback arrived. We are re-reading this report.',
     'reports.signalement.echec': 'Sending failed. Try again in a moment.',
 
-    'reports.editor.outline': 'Outline',
+    // `outline` / `activity` / `suggest` removed with the three-column editor CSS (Task 6).
     'reports.editor.sources': 'Sources',
-    'reports.editor.activity': 'Activity',
-    'reports.editor.suggest': 'Axial\'s suggestion',
 
     // Reports — list, management, comparison, export, sharing (spec §4).
     'reports.liste.titre': 'Your reports',
@@ -967,6 +965,7 @@ const STRINGS = {
     'conv.menu.archiver': 'Archive',
     'conv.menu.desarchiver': 'Unarchive',
     'conv.menu.deplacer': 'Move to…',
+    'conv.menu.retirer_dossier': 'Remove from folder',
     'conv.renommer.aide': 'Enter to save, Esc to cancel',
     'conv.suppr.titre': 'Delete this conversation?',
     'conv.suppr.detail': 'The conversation and all its messages will be permanently deleted. This cannot be undone.',
@@ -3018,7 +3017,10 @@ function MenuConversation({ ouvert, onBasculer, actions, aide }) {
                   {a.sousMenu.map((s) => (
                     <button key={s.cle} className="ax-menu-item" role="menuitem"
                       onClick={(e) => { e.stopPropagation(); s.onClick(); }}>
-                      <Icon name="folder" size={13} /> {s.libelle}
+                      {/* `s.icone` facultative : les dossiers gardent l'icône
+                          dossier, « Retirer du dossier » en demande une autre —
+                          la même icône pour ranger et pour sortir se lisait mal. */}
+                      <Icon name={s.icone || 'folder'} size={13} /> {s.libelle}
                     </button>
                   ))}
                 </div>
@@ -4584,6 +4586,12 @@ function ReportsList({ rapports, projets, hasMore, chargement, archivesChargees,
   const connus = new Set((projets || []).map((p) => p.id));
   const sansDossier = rapports.filter(
     (r) => !r.archived_at && !r.pinned_at && !connus.has(r.project_id));
+  /* Les en-têtes de section sont conditionnés aux listes FILTRÉES, pas aux
+     listes brutes : sinon taper deux lettres sans correspondance laissait
+     « ÉPINGLÉS » et « RÉCENTS » debout au-dessus du vide (revue Task 5,
+     finding 7). */
+  const epinglesVisibles = epingles.filter(filtre);
+  const sansDossierVisibles = sansDossier.filter(filtre);
 
   const actions = (r) => [
     { cle: 'renommer', libelle: t('conv.menu.renommer'), icone: 'edit',
@@ -4596,10 +4604,20 @@ function ReportsList({ rapports, projets, hasMore, chargement, archivesChargees,
       onClick: () => { setMenuOuvert(null); gestion.archiver(r.id, !r.archived_at); } },
     { cle: 'deplacer', libelle: t('conv.menu.deplacer'), icone: 'folder',
       videLibelle: t('conv.dossier.vide'),
-      sousMenu: dossiersActifs.filter((p) => p.id !== r.project_id).map((p) => ({
-        cle: p.id, libelle: p.name,
-        onClick: () => { setMenuOuvert(null); gestion.deplacer(r.id, p.id); },
-      })) },
+      /* « Retirer du dossier » en tête quand le rapport est rangé : sans cette
+         entrée, `axDeplacerRapport(id, null)` — la seule façon d'exprimer la
+         sortie de dossier — n'avait aucune affordance, et un rapport rangé par
+         erreur ne pouvait plus en sortir (revue Task 5, finding 8). */
+      sousMenu: [
+        ...(r.project_id ? [{
+          cle: '__retirer', libelle: t('conv.menu.retirer_dossier'), icone: 'x',
+          onClick: () => { setMenuOuvert(null); gestion.deplacer(r.id, null); },
+        }] : []),
+        ...dossiersActifs.filter((p) => p.id !== r.project_id).map((p) => ({
+          cle: p.id, libelle: p.name,
+          onClick: () => { setMenuOuvert(null); gestion.deplacer(r.id, p.id); },
+        })),
+      ] },
     /* « Comparer avec… » n'a de sens que sur un rapport qui a du contenu : un
        `en_cours` n'a rien à comparer, un `annule` non plus. */
     (r.statut === TERMINE || r.statut === DEGRADE)
@@ -4746,19 +4764,19 @@ function ReportsList({ rapports, projets, hasMore, chargement, archivesChargees,
             <div className="caption ax-recherche-indice">{t('reports.recherche.min')}</div>
           )}
 
-          {epingles.length > 0 && (
+          {epinglesVisibles.length > 0 && (
             <>
               <div className="sidebar-section-label">{t('reports.section.epingles')}</div>
-              <ul className="ax-liste">{epingles.filter(filtre).map(ligne)}</ul>
+              <ul className="ax-liste">{epinglesVisibles.map(ligne)}</ul>
             </>
           )}
 
           {/* « Récents » ne coiffe QUE les rapports sans dossier d'accueil :
               chaque dossier porte déjà son propre titre. */}
-          {sansDossier.length > 0 && (
+          {sansDossierVisibles.length > 0 && (
             <>
               <div className="sidebar-section-label">{t('reports.section.recents')}</div>
-              <ul className="ax-liste">{sansDossier.filter(filtre).map(ligne)}</ul>
+              <ul className="ax-liste">{sansDossierVisibles.map(ligne)}</ul>
             </>
           )}
 
@@ -5682,7 +5700,7 @@ function PanneauPartage({ rapportId, jeton, onChange }) {
    seule zone que `@media print` masque : imprimer un rapport doit rendre le
    rapport, pas la barre d'outils qui a servi à l'imprimer (spec §6). */
 function ReportsEditor({ data, onBack, estAdmin, onModifierRelancer, onRegenerer,
-                         relanceEnCours }) {
+                         relanceEnCours, onSessionExpiree }) {
   const lang = window.AXIAL_LANG || 'fr';
   const t = window.useT();
   const [exportEnCours, setExportEnCours] = React.useState('');
@@ -5698,6 +5716,8 @@ function ReportsEditor({ data, onBack, estAdmin, onModifierRelancer, onRegenerer
 
   const [envoi, setEnvoi] = React.useState('');
   const [envoiMsg, setEnvoiMsg] = React.useState(null);
+  // `{ erreur, provider }` : le fournisseur sert au « Réessayer » de la carte.
+  const [erreurLivraison, setErreurLivraison] = React.useState(null);
   const [outils, setOutils] = React.useState({});
   const [signalement, setSignalement] = React.useState(false);
   const [partageOuvert, setPartageOuvert] = React.useState(false);
@@ -5710,16 +5730,31 @@ function ReportsEditor({ data, onBack, estAdmin, onModifierRelancer, onRegenerer
 
   const livrer = async (provider) => {
     if (!rapportId) return;
-    setEnvoi(provider); setEnvoiMsg(null);
+    setEnvoi(provider); setEnvoiMsg(null); setErreurLivraison(null);
     try {
       const res = await axDeliverReport(provider, rapportId);
       setEnvoiMsg({ ok: true, url: res.url,
                     texte: provider === 'notion' ? libelle('Page Notion créée')
                                                  : libelle('Déposé dans votre Drive') });
     } catch (e) {
-      setEnvoiMsg({ ok: false, texte: (e && e.message) || libelle('Envoi impossible.') });
+      /* `decrireErreur` + `CarteErreur` comme partout ailleurs : c'était le
+         dernier endroit de l'écran Rapports à montrer un `e.message` brut
+         d'exception (revue Task 5, finding 10). Une carte, parce qu'un envoi
+         raté a souvent une action à proposer — se reconnecter, réessayer. */
+      setErreurLivraison({ erreur: decrireErreur(e, t), provider });
     }
     setEnvoi('');
+  };
+
+  /* L'action de la carte : réessayer relance LE MÊME fournisseur (d'où le
+     `provider` gardé à côté de l'erreur), une session expirée reconnecte au
+     lieu d'afficher « reconnectez-vous » sans suite, le reste ferme la carte. */
+  const actionErreurLivraison = () => {
+    const courant = erreurLivraison;
+    setErreurLivraison(null);
+    if (!courant) return;
+    if (courant.erreur.action === 'reessayer') livrer(courant.provider);
+    else if (courant.erreur.action === 'reconnexion' && onSessionExpiree) onSessionExpiree();
   };
 
   /* Export : un seul chemin pour les trois formats (`?format=`), le serveur
@@ -5837,6 +5872,14 @@ function ReportsEditor({ data, onBack, estAdmin, onModifierRelancer, onRegenerer
         </div>
       </div>
 
+      {/* Échec de livraison : carte sous la barre d'actions, là où le geste a
+          eu lieu. Elle n'est pas dans `.rep-actions` — une erreur ne doit pas
+          être masquée par `@media print` sans que rien ne la remplace, et elle
+          disparaît au clic sur son action. */}
+      {erreurLivraison && (
+        <CarteErreur erreur={erreurLivraison.erreur} onAction={actionErreurLivraison} />
+      )}
+
       {partageOuvert && rapportId && (
         <PanneauPartage rapportId={rapportId} jeton={jeton} onChange={setJeton} />
       )}
@@ -5859,7 +5902,9 @@ function ReportsEditor({ data, onBack, estAdmin, onModifierRelancer, onRegenerer
       {sources.length > 0 && (
         <div className="rep-sources" style={{ marginTop: 28 }}>
           <div className="section-label">
-            Sources
+            {/* La clé existait déjà en FR + EN mais l'étiquette était en dur :
+                un compte en anglais lisait « Sources » par coïncidence. */}
+            {t('reports.editor.sources')}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {sources.map((s, i) => (
@@ -8521,8 +8566,14 @@ function App() {
   const relancerDepuisId = async (id, options) => {
     if (!id || relanceEnCours) return;
     setRelanceEnCours(true);
+    /* Clé d'idempotence comme au lancement (`startReport`) : une relance est un
+       débit, et « Réessayer » REPORTE la même clé — une panne réseau survenue
+       après l'acceptation serveur ne paie donc qu'une fois (revue Task 5,
+       finding 11). */
+    const opts = options || {};
+    const cle = opts.cleIdempotence || nouvelleCleIdempotence();
     try {
-      const r = await axRelancerRapport(id, options || {});
+      const r = await axRelancerRapport(id, { ...opts, idempotencyKey: cle });
       const etat = etatDepuisRapport(r);
       memoriserRapport(etat);
       setReportsState('generating');
@@ -8533,7 +8584,12 @@ function App() {
         setModaleCredits(true);
         axBalance().then((b) => setAxBal(b.available)).catch(() => {});
       }
-      setErreurRapport({ erreur, args: null });
+      // `relance` porte la MÊME clé : le « Réessayer » de la carte rejoue sans
+      // second débit si le serveur avait déjà accepté la première demande.
+      setErreurRapport({
+        erreur, args: null,
+        relance: { id, options: { ...opts, cleIdempotence: cle } },
+      });
       setReportsState('erreur');
     } finally {
       /* Dans un `finally` : la sortie sur `reconnexion` laissait le drapeau à
@@ -8568,7 +8624,13 @@ function App() {
      affiché (curseur de `GET /reports`), et sa présence est ce qui distingue
      « Charger plus » (on ajoute) d'un rafraîchissement (on remplace) : deux
      fonctions auraient fini par ne plus trier pareil. */
-  const chargerRapports = async ({ before, inclureArchives } = {}) => {
+  /* `fusionner` : garder les lignes déjà chargées au lieu de remplacer la
+     liste, sans pour autant passer un curseur. Sert à l'ouverture des
+     archives, qui relit la PREMIÈRE page avec `inclure_archives=true` : sans
+     lui, ouvrir « Archivés » après trois « Charger plus » jetait les pages
+     supplémentaires et ramenait la liste à 20 lignes (revue Task 5,
+     finding 9). Le dédoublonnage par identifiant fait le reste. */
+  const chargerRapports = async ({ before, inclureArchives, fusionner } = {}) => {
     if (rapportsEnVol.current) return;
     rapportsEnVol.current = true;
     setRapportsChargement(true);
@@ -8577,9 +8639,12 @@ function App() {
     try {
       const page = await axRapports({ limit: 20, before, inclure_archives: archives });
       const items = (page && page.items) || [];
-      setRapportsSuite(!!(page && page.has_more));
+      // En fusion, « Charger plus » doit rester disponible si la liste déjà
+      // chargée le permettait : l'ouverture des archives ne ferme pas la suite.
+      setRapportsSuite((avant) => (fusionner ? (avant || !!(page && page.has_more))
+                                             : !!(page && page.has_more)));
       setRapports((anciens) => {
-        if (!before) return items;
+        if (!before && !fusionner) return items;
         // Dédoublonnage par identifiant : un rapport créé PENDANT la
         // pagination peut décaler la fenêtre et faire revenir une ligne déjà
         // affichée. Le curseur du serveur ne répète rien, la course, si.
@@ -8739,7 +8804,7 @@ function App() {
       const dernier = rapports[rapports.length - 1];
       if (dernier) chargerRapports({ before: dernier.id });
     },
-    chargerArchives: () => chargerRapports({ inclureArchives: true }),
+    chargerArchives: () => chargerRapports({ inclureArchives: true, fusionner: true }),
   };
 
   /* « Reformuler » : retour au composeur avec la question pré-remplie. */
@@ -9815,6 +9880,7 @@ function App() {
             data={reportData}
             estAdmin={!!(axUser && axUser.is_admin)}
             relanceEnCours={relanceEnCours}
+            onSessionExpiree={sessionExpiree}
             onModifierRelancer={modifierEtRelancerRapport}
             onRegenerer={regenererRapport}
             onBack={() => { setQuestionInitiale(''); setReportsState('empty'); }}
@@ -9838,9 +9904,14 @@ function App() {
               <CarteErreur
                 erreur={erreurRapport.erreur}
                 onAction={() => {
-                  const { erreur, args } = erreurRapport;
+                  const { erreur, args, relance } = erreurRapport;
                   if (erreur.action === 'credits') { setSubRoute('credits'); return; }
                   if (erreur.action === 'reessayer' && args) { startReport(args); return; }
+                  /* Relance ratée : on rejoue la MÊME clé, donc sans second
+                     débit si le serveur avait déjà accepté. */
+                  if (erreur.action === 'reessayer' && relance) {
+                    relancerDepuisId(relance.id, relance.options); return;
+                  }
                   setReportsState('empty');
                 }}
               />

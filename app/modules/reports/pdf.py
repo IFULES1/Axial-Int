@@ -122,7 +122,10 @@ def render_pdf(title: str, markdown: str, sources: list[dict] | None = None,
     # Visualisations : celles préparées à l'archivage, sinon compilées ici.
     # `par_index` relie chaque bloc du markdown (```viz ou « Graphique : »)
     # à son rendu par rang d'apparition.
-    par_index = {v["index"]: v for v in (vizs or []) if isinstance(v, dict)}
+    # Une entrée abîmée (sans `index`) est ignorée : un export qui tombe en 500
+    # sur une ligne mal formée est un plus mauvais échec qu'un graphique manquant.
+    par_index = {v["index"]: v for v in (vizs or [])
+                 if isinstance(v, dict) and v.get("index") is not None}
     if not par_index:
         par_index = {v.index: v.dict() for v in viz_pipeline.extraire_et_compiler(markdown)}
 
@@ -176,7 +179,10 @@ def render_pdf(title: str, markdown: str, sources: list[dict] | None = None,
                 # Pas de graphique rendu : les données restent, en tableau.
                 if b.genre == "graphique" and b.texte:
                     story.append(Paragraph(_inline(b.texte, liens), h3))
-                cellules = viz_pipeline.tableau_de_repli(v["spec"]) if v else (b.cellules or [["—"]])
+                # `v.get("spec")` et non `v["spec"]` : une entrée sans `spec`
+                # retombe sur les cellules du markdown, jamais sur un 500.
+                cellules = (viz_pipeline.tableau_de_repli(v["spec"])
+                            if v and v.get("spec") else (b.cellules or [["—"]]))
                 story.append(tableau(cellules, liens))
             story.append(Spacer(1, 8))
         elif b.genre == "hr":

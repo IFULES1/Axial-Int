@@ -31,6 +31,12 @@ STATUTS: tuple[str, ...] = (EN_COURS, TERMINE, ECHEC, DEGRADE, ANNULE,
                             SOURCES_INSUFFISANTES)
 # Statuts terminaux : la tâche ne tourne plus, le front arrête son polling.
 STATUTS_TERMINAUX: tuple[str, ...] = tuple(s for s in STATUTS if s != EN_COURS)
+# Statuts qu'un rejeu de clé d'idempotence peut rendre : rapport encore vivant
+# ou déjà abouti. `echec` et `annule` en sont exclus — « Réessayer » reporte la
+# même clé, et rendre la ligne en échec fermerait la relance pendant dix
+# minutes (voir `analysis.service.rapport_par_idempotence`).
+STATUTS_REJOUABLES: tuple[str, ...] = (EN_COURS, TERMINE, DEGRADE,
+                                       SOURCES_INSUFFISANTES)
 
 # Étapes du moteur, dans l'ordre (spec §1).
 ETAPES: tuple[str, ...] = ("recherche", "selection", "couverture", "redaction",

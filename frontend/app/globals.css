@@ -1818,67 +1818,14 @@ html[data-theme="light"] .sidebar {
   letter-spacing: 0.04em;
 }
 
-.rep-source-counter {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px;
-  display: flex; align-items: center; gap: 14px;
-}
-.rep-source-counter .num {
-  font-family: var(--font-mono);
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--v-soft);
-  letter-spacing: -0.02em;
-}
-.rep-source-counter .lbl {
-  font-size: 12px;
-  color: var(--fg-2);
-  line-height: 1.4;
-}
-
 /* ============================================================
-   Reports — Editor (3-column)
-   ============================================================ */
-.rep-outline {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 18px 14px;
-  overflow-y: auto;
-  font-size: 13px;
-}
-.rep-outline-label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--fg-3);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  margin-bottom: 12px;
-  padding: 0 6px;
-}
-.rep-outline-item {
-  display: flex; align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 7px;
-  cursor: pointer;
-  color: var(--fg-2);
-  font-weight: 500;
-}
-.rep-outline-item:hover { background: rgba(121,118,247,0.06); color: var(--fg); }
-.rep-outline-item.active {
-  background: rgba(121,118,247,0.12);
-  color: var(--fg);
-}
-.rep-outline-item .num {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--fg-3);
-  margin-right: 4px;
-}
-
+   Reports — Document
+   ============================================================
+   L'éditeur « trois colonnes » (rail à onglets, panneau outline, cartes
+   de suggestion, bloc graphique nommé, confiance par section, compteur
+   de sources) n'a jamais été construit : son CSS a été retiré à la
+   Task 6 après vérification classe par classe dans `App.jsx`. Ne reste
+   que ce qui est réellement rendu — le document et ses enfants. */
 .rep-doc {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1933,83 +1880,6 @@ html[data-theme="light"] .sidebar {
   text-decoration: none;
 }
 .rep-doc .cite:hover { background: rgba(121,118,247,0.22); }
-
-.rep-suggest {
-  background: linear-gradient(180deg, rgba(121,118,247,0.06), rgba(121,118,247,0.02));
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  padding: 14px 16px;
-  margin: 16px 0;
-  display: flex; gap: 12px;
-}
-.rep-suggest-icon {
-  width: 26px; height: 26px;
-  border-radius: 7px;
-  background: rgba(121,118,247,0.16);
-  color: var(--v-soft);
-  display: inline-flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.rep-suggest-body { flex: 1; }
-.rep-suggest-label {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--v-soft);
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-.rep-suggest p { font-size: 13.5px; line-height: 1.55; color: var(--fg); margin: 0; }
-.rep-suggest-actions { display: flex; gap: 8px; margin-top: 10px; }
-
-.rep-chart {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 18px;
-  margin: 16px 0;
-}
-.rep-chart-title {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--fg-2);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  margin-bottom: 12px;
-}
-
-/* Right rail */
-.rep-rail {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 16px 14px;
-  overflow-y: auto;
-  display: flex; flex-direction: column;
-  gap: 18px;
-}
-.rep-rail-section { display: flex; flex-direction: column; gap: 10px; }
-.rep-rail-tabs {
-  display: flex;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 4px;
-}
-.rep-rail-tabs button {
-  flex: 1;
-  background: transparent;
-  border: 0;
-  color: var(--fg-2);
-  padding: 9px 0;
-  font-size: 12.5px; font-weight: 600;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  cursor: pointer;
-}
-.rep-rail-tabs button.active {
-  color: var(--fg);
-  border-bottom-color: var(--v-bright);
-}
 
 .source-card {
   background: var(--surface-2);
@@ -2077,30 +1947,6 @@ html[data-theme="light"] .sidebar {
   cursor: pointer;
 }
 .gap-callout .btn-amber:hover { background: rgba(245, 193, 108, 0.22); }
-
-.confidence-row {
-  display: flex; align-items: center;
-  gap: 10px;
-  font-size: 12.5px;
-}
-.confidence-row .lbl { flex: 1; color: var(--fg-2); }
-.confidence-bar {
-  flex: 0 0 80px;
-  height: 4px;
-  background: rgba(121,118,247,0.15);
-  border-radius: 999px;
-  overflow: hidden;
-}
-.confidence-fill { height: 100%; background: var(--v-bright); }
-.confidence-fill.low { background: #F5C16C; }
-.confidence-fill.med { background: var(--v-soft); }
-.confidence-row .pct {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--fg-3);
-  min-width: 32px;
-  text-align: right;
-}
 
 /* Les règles de l'écran « crédits insuffisants » (`.quota-card`,
    `.quota-usage` et leurs enfants, `.quota-bar*`) sont parties avec le

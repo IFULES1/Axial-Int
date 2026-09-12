@@ -1,4 +1,5 @@
 import io
+import re
 
 from app.modules.reports.pdf import _inline, render_pdf
 
@@ -112,3 +113,152 @@ def test_l_ancienne_marque_graphique_passe_par_le_meme_moteur():
     pdf = render_pdf("T", md)
     assert b"/XObject" in pdf
     assert "Acteur" not in _texte(pdf)    # le tableau est remplacé par le graphique
+
+
+# --- Parité écran / PDF : les titres de niveau 2 (spec §6) ------------------
+#
+# L'écran rend le markdown tel quel ; le PDF le reconstruit en flowables
+# ReportLab. La seule garantie qui compte pour le lecteur est que la STRUCTURE
+# soit la même : les mêmes titres de section, dans le même ordre, sans perte ni
+# ajout. Les titres attendus sont relus du markdown par une expression
+# indépendante (et non par `blocs.decouper`, que `pdf.py` utilise déjà) — sinon
+# le test et le code partageraient le même bug d'analyse.
+
+_H2_MARKDOWN = re.compile(r"^##[ \t]+(.+?)\s*$", re.MULTILINE)
+
+MD_CINQ_SECTIONS = """Chapeau introductif.
+
+## 1. Contexte du marché
+La demande a progressé de 18 % sur l'exercice. Le texte est volontairement
+long pour que le document dépasse une page et que les sections se répartissent
+sur plusieurs pages du PDF. """ + ("Phrase de remplissage. " * 40) + """
+
+## 2. Acteurs en présence
+| Acteur | Part |
+|---|---|
+| Alpha | 40 % |
+
+### 2.1 Une sous-partie qui ne doit pas compter
+Un titre de niveau 3 n'est pas une section.
+
+## 3. Dynamique de la demande
+""" + ("Encore du texte pour remplir la page. " * 40) + """
+
+## 4. Scénarios à trois ans
+- Scénario haut
+- Scénario bas
+
+## 5. Recommandations
+Conclusion.
+"""
+
+
+def _titres_h2_du_markdown(md: str) -> list[str]:
+    return _H2_MARKDOWN.findall(md)
+
+
+def _lignes(pdf: bytes) -> list[str]:
+    return [ligne.strip() for ligne in _texte(pdf).splitlines() if ligne.strip()]
+
+
+# Corps de fonte des styles de `pdf.py` : H1 18, H2 14, H3 12, corps 10,5.
+# Lire la TAILLE et non seulement le texte est ce qui distingue un vrai titre
+# de niveau 2 d'un paragraphe ou d'un `###` — l'extraction de texte seule les
+# confondrait.
+TAILLE_H2 = 14.0
+
+
+def _titres_du_pdf(pdf: bytes, taille: float = TAILLE_H2) -> list[str]:
+    """Les titres rendus à `taille`, dans l'ordre de lecture du document."""
+    from pypdf import PdfReader
+
+    titres: list[str] = []
+    courant: list[str] = []
+
+    def visiter(texte, cm, tm, police, corps):
+        nonlocal courant
+        if round(corps or 0, 1) == taille:
+            courant.append(texte)
+        elif courant:
+            titres.append("".join(courant).strip())
+            courant = []
+
+    for page in PdfReader(io.BytesIO(pdf)).pages:
+        page.extract_text(visitor_text=visiter)
+    if courant:
+        titres.append("".join(courant).strip())
+    return [t for t in titres if t]
+
+
+def test_les_titres_h2_du_pdf_sont_exactement_ceux_du_markdown_dans_le_meme_ordre():
+    """Parité de structure écran / PDF (spec §6) : même liste de sections, même
+    ordre, ni perte ni ajout. Le `###` du markdown ne doit PAS y figurer."""
+    attendus = _titres_h2_du_markdown(MD_CINQ_SECTIONS)
+    assert len(attendus) == 5, attendus
+
+    obtenus = _titres_du_pdf(render_pdf("Marché européen du lithium", MD_CINQ_SECTIONS))
+    assert obtenus == attendus, (obtenus, attendus)
+
+    # Le titre de niveau 3 existe bien dans le document, mais à sa taille.
+    assert "2.1 Une sous-partie qui ne doit pas compter" in _lignes(
+        render_pdf("T", MD_CINQ_SECTIONS))
+
+
+def test_un_titre_de_niveau_1_dans_le_corps_compte_comme_une_section():
+    """`pdf.py` rend `#` et `##` au même niveau : le H1 du document est le titre
+    passé à `render_pdf`, donc un `#` dans le corps est une section comme une
+    autre. Comportement volontaire, fixé ici pour qu'il ne dérive pas."""
+    md = "# Partie liminaire\nTexte.\n\n## 1. Marché\nTexte."
+    assert _titres_du_pdf(render_pdf("T", md)) == ["Partie liminaire", "1. Marché"]
+
+
+def test_la_section_sources_ajoutee_est_le_seul_titre_en_plus():
+    """Quand les données fournissent des sources, le PDF ajoute « Sources » —
+    et rien d'autre : c'est le seul écart de structure autorisé avec l'écran."""
+    md = MD_CINQ_SECTIONS
+    sources = [{"title": "Rapport Xerfi", "url": "https://xerfi.com/a",
+                "domain": "xerfi.com", "source": "web"}]
+    obtenus = _titres_du_pdf(render_pdf("T", md, sources=sources))
+    assert obtenus == _titres_h2_du_markdown(md) + ["Sources"], obtenus
+
+
+def test_un_titre_h2_en_gras_ou_avec_citation_reste_un_titre_h2():
+    """`_inline` traite les titres comme le corps : ni le `**` ni le lien de
+    citation ne doivent casser le titre, sinon l'écran et le PDF ne montrent
+    pas la même section."""
+    md = "## 1. **Marché** du lithium [2]\nTexte."
+    obtenus = _titres_du_pdf(render_pdf("T", md, sources=[
+        {"title": "A", "url": "https://a.fr", "domain": "a.fr", "source": "web"},
+        {"title": "B", "url": "https://b.fr", "domain": "b.fr", "source": "web"}]))
+    assert obtenus == ["1. Marché du lithium [2]", "Sources"], obtenus
+
+
+# --- Entrées `viz` abîmées : export dégradé, jamais 500 (revue Task 5, f. 2) --
+
+def test_une_entree_viz_sans_index_est_ignoree_sans_erreur():
+    md = "## 1. Parts\n" + VIZ_OK
+    # Ligne écrite à la main, telle qu'une migration ou un correctif manuel
+    # pourrait en laisser : ni `index`, ni `vl`.
+    pdf = render_pdf("T", md, vizs=[{"spec": {"title": "Parts"}}])
+    assert pdf.startswith(b"%PDF-")
+    assert "1. Parts" in _lignes(pdf)
+
+
+def test_une_entree_viz_sans_vl_ni_spec_retombe_sur_le_markdown():
+    md = "Graphique : Parts de marché\n| Acteur | Part |\n|---|---|\n| Alpha | 40 % |"
+    t = _texte(render_pdf("T", md, vizs=[{"index": 0}]))
+    # Aucun rendu, aucune spec : les chiffres du tableau markdown restent.
+    assert "Alpha" in t and "40 %" in t
+
+
+def test_le_docx_survit_a_une_entree_viz_abimee():
+    from app.modules.reports.export import vers_docx
+
+    class _R:
+        title = "T"
+        content = "## 1. Parts\n" + VIZ_OK
+        sources = None
+        viz = [{"spec": {"title": "Parts"}}, {"index": 0}]
+
+    octets = vers_docx(_R())
+    assert octets.startswith(b"PK")   # un .docx est un zip

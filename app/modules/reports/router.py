@@ -4,7 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import io
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Header, Query, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -210,11 +210,17 @@ def annuler(report_id: str, user: AuthUser = Depends(get_current_user),
 @router.post("/{report_id}/relancer", response_model=ReportDetail)
 def relancer(report_id: str, payload: RelanceIn | None = None,
              user: AuthUser = Depends(get_current_user),
-             db: Session = Depends(get_db)) -> ReportDetail:
+             db: Session = Depends(get_db),
+             x_idempotency_key: str | None = Header(default=None)) -> ReportDetail:
     """Crée un NOUVEAU rapport à partir d'un rapport existant.
 
     L'ancien n'est jamais écrasé (spec §1) : on veut pouvoir comparer, et un
     rapport payé ne disparaît pas parce qu'on en relance un autre.
+
+    `X-Idempotency-Key` (facultatif) : même contrat que `/analysis/stream` —
+    la même clé dans les dix minutes suit le rapport déjà lancé. « Régénérer »
+    et la relance après sources insuffisantes portent le même risque de double
+    débit sur panne réseau que le lancement (revue Task 5, finding 11).
     """
     from app.modules.analysis import service as analysis
     from app.modules.reports import models as rm
@@ -231,7 +237,7 @@ def relancer(report_id: str, payload: RelanceIn | None = None,
     nouveau = analysis.lancer_rapport(
         db, user.id, query=question, analysis_type=ancien.analysis_type,
         title=None, is_admin=user.is_admin, elargir=options.elargir,
-        forcer=options.forcer,
+        forcer=options.forcer, cle_idempotence=x_idempotency_key,
     )
     return ReportDetail(**service.detail_dict(nouveau, is_admin=user.is_admin))
 

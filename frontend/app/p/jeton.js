@@ -11,9 +11,14 @@
    `lastIndexOf('-')` le couperait en deux — le lien rendrait 404 sans qu'on
    comprenne pourquoi, au hasard des titres. La longueur, elle, est fixe. */
 
+/* Miroir de `JETON_LONGUEUR` dans `app/modules/reports/service.py` (= 22, dérivé
+   de `JETON_OCTETS = 16`). Les deux constantes doivent rester égales ; côté
+   backend, `test_le_jeton_a_la_longueur_exportee`
+   (`tests/test_rapports_v2.py`) casse avant le front si `JETON_OCTETS` change. */
 export const LONGUEUR_JETON = 22;
 
-const MOTIF_JETON = /^[A-Za-z0-9_-]{22}$/;
+// Construit depuis la constante : pas de « 22 » écrit deux fois dans ce fichier.
+const MOTIF_JETON = new RegExp(`^[A-Za-z0-9_-]{${LONGUEUR_JETON}}$`);
 
 /** `slug` → jeton, ou `null` si ce segment ne peut pas en porter un. */
 export function jetonDuSlug(slug) {

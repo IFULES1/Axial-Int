@@ -13,6 +13,7 @@
 import { notFound } from "next/navigation";
 
 import { parserMarkdown } from "../../../_prototype/markdown.js";
+import { APP, PageEtat, TEXTES } from "../../etats";
 import { jetonDuSlug } from "../../jeton.js";
 import "../../partage.css";
 
@@ -25,6 +26,16 @@ export const metadata = {
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8090";
+
+/* Issue de la lecture : le rapport, « revoque » (404 : lien mort ou jamais
+   ouvert) ou « panne » (5xx, réseau, JSON illisible). La distinction compte :
+   une panne backend faisait lire « lien introuvable » sur TOUS les liens
+   partagés, sans qu'aucune trace ne sépare la panne de la révocation (revue
+   Task 5, finding 3). */
+type Resultat =
+  | { etat: "ok"; rapport: RapportPublic }
+  | { etat: "revoque" }
+  | { etat: "panne" };
 
 type SourcePublique = {
   title?: string | null;
@@ -49,7 +60,7 @@ type RapportPublic = {
   pseudo: string;
 };
 
-async function lireRapport(jeton: string): Promise<RapportPublic | null> {
+async function lireRapport(jeton: string): Promise<Resultat> {
   let res: Response;
   try {
     res = await fetch(`${API}/partage/${encodeURIComponent(jeton)}`, {
@@ -57,17 +68,28 @@ async function lireRapport(jeton: string): Promise<RapportPublic | null> {
       headers: { Accept: "application/json" },
     });
   } catch (e) {
-    // API injoignable : on ne montre pas une page à moitié vide, on rend 404
-    // comme pour un lien révoqué. Le visiteur n'a rien à diagnostiquer.
-    return null;
+    // API injoignable. Tracé côté SERVEUR (console du process Next) : sans
+    // cette ligne, une panne backend se lisait « lien introuvable » sans
+    // qu'aucun journal ne le dise. Le visiteur, lui, ne voit rien de tout ça.
+    console.error("[partage] API injoignable", e);
+    return { etat: "panne" };
   }
-  if (!res.ok) return null;
+  if (res.status === 404) return { etat: "revoque" };
+  if (!res.ok) {
+    // Le jeton n'est PAS journalisé : il tient lieu d'autorisation, un journal
+    // d'application n'est pas l'endroit où le laisser traîner.
+    console.error(`[partage] API en erreur : HTTP ${res.status}`);
+    return { etat: "panne" };
+  }
   try {
-    return (await res.json()) as RapportPublic;
+    return { etat: "ok", rapport: (await res.json()) as RapportPublic };
   } catch (e) {
-    return null;
+    console.error("[partage] réponse illisible", e);
+    return { etat: "panne" };
   }
 }
+
+
 
 /* ---------- rendu des nœuds inline ---------- */
 /* Formes produites par `markdown.js` : text, strong, em, code, link, cite.
@@ -212,17 +234,26 @@ function Blocs({ blocks, viz, jeton }: { blocks: any[]; viz: VizPublique[] | nul
 function dateLisible(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+  return d.toLocaleDateString(TEXTES.locale, { day: "numeric", month: "long", year: "numeric" });
 }
 
 export default async function PagePartage(
   { params }: { params: { pseudo: string; slug: string } },
 ) {
   const jeton = jetonDuSlug(params.slug);
+  // Segment qui ne peut pas porter de jeton : c'est une URL inventée, donc un
+  // vrai 404 de routage (et non l'écran « plus partagé »).
   if (!jeton) notFound();
 
-  const rapport = await lireRapport(jeton);
-  if (!rapport) notFound();
+  const lu = await lireRapport(jeton);
+  if (lu.etat === "panne") {
+    return <PageEtat titre={TEXTES.panneTitre} corps={TEXTES.panneCorps} />;
+  }
+  /* Lien révoqué : `notFound()` rend le `not-found.tsx` de CE segment — la
+     page « Ce rapport n'est plus partagé », avec un vrai HTTP 404. Un lien
+     mort qui répondrait 200 tromperait robots et supervision. */
+  if (lu.etat === "revoque") notFound();
+  const rapport = lu.rapport;
 
   const blocks = parserMarkdown(rapport.content || "");
   const sources = rapport.sources || [];
@@ -232,18 +263,18 @@ export default async function PagePartage(
   const pseudo = rapport.pseudo || params.pseudo;
 
   return (
-    <div className="rp-racine">
+    <div className="partage-page">
       <div className="rp-corps">
         <header className="rp-entete">
-          <span>Rapport partagé par {pseudo}</span>
+          <span>{TEXTES.partagePar} {pseudo}</span>
           <span>·</span>
-          <a href="https://app.axial-ia.fr">Axial Intelligence</a>
+          <a href={APP}>{TEXTES.marque}</a>
         </header>
 
         <h1 className="rp-titre">{rapport.title}</h1>
         <p className="rp-meta">
           {dateLisible(rapport.created_at)}
-          {sources.length ? ` · ${sources.length} sources` : ""}
+          {sources.length ? ` · ${sources.length} ${TEXTES.sourcesSuffixe}` : ""}
         </p>
 
         <article className="rp-doc">
@@ -252,7 +283,7 @@ export default async function PagePartage(
 
         {sources.length > 0 && (
           <section className="rp-sources">
-            <div className="rp-sources-titre">Sources</div>
+            <div className="rp-sources-titre">{TEXTES.sources}</div>
             {sources.map((s, i) => (
               <div className="rp-source" key={i} id={`rp-src-${i + 1}`}>
                 <span className="rp-num">[{i + 1}]</span>
@@ -270,8 +301,7 @@ export default async function PagePartage(
         )}
 
         <footer className="rp-pied">
-          Rapport produit par <a href="https://app.axial-ia.fr">Axial Intelligence</a> —
-          le copilote stratégique des décisions de fondateur.
+          {TEXTES.piedAvant} <a href={APP}>{TEXTES.marque}</a> {TEXTES.piedApres}
         </footer>
       </div>
     </div>

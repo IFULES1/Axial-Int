@@ -112,7 +112,10 @@ def vers_docx(report) -> bytes:
 
     sources = report.sources if isinstance(report.sources, list) else None
     vizs = report.viz if isinstance(report.viz, list) else None
-    par_index = {v["index"]: v for v in (vizs or []) if isinstance(v, dict)}
+    # Entrée abîmée (sans `index`) ignorée — même règle que `pdf.py` : pas de
+    # 500 sur l'export d'une ligne mal formée.
+    par_index = {v["index"]: v for v in (vizs or [])
+                 if isinstance(v, dict) and v.get("index") is not None}
     if not par_index:
         # Rapport d'avant la V1 : aucun rendu archivé, on compile à la volée —
         # même moteur, même résultat que le PDF.
@@ -155,7 +158,8 @@ def vers_docx(report) -> bytes:
             else:
                 if b.genre == "graphique" and b.texte:
                     document.add_heading(_sans_gras(b.texte), level=2)
-                tableau(viz_pipeline.tableau_de_repli(v["spec"]) if v
+                tableau(viz_pipeline.tableau_de_repli(v["spec"])
+                        if v and v.get("spec")
                         else (b.cellules or [["Graphique non rendu"]]))
         elif b.genre == "hr":
             document.add_paragraph("")

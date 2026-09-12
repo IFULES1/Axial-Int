@@ -871,7 +871,7 @@ def rapport_par_idempotence(db, user_id: str, cle: str | None):
 
     from sqlalchemy import select
 
-    from app.modules.reports.models import Report
+    from app.modules.reports.models import STATUTS_REJOUABLES, Report
 
     if not cle:
         return None
@@ -881,12 +881,19 @@ def rapport_par_idempotence(db, user_id: str, cle: str | None):
         return None
     limite = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(
         seconds=DELAI_IDEMPOTENCE_SECONDES)
+    # Un rejeu suit un rapport VIVANT (`en_cours`) ou DÉJÀ ABOUTI (`termine`,
+    # `degrade`, `sources_insuffisantes`) — jamais un `echec` ni un `annule` :
+    # « Réessayer » reporte volontairement la même clé, et rendre la ligne en
+    # échec fermerait la relance pendant dix minutes, exactement le chemin que
+    # la clé devait protéger. Sur un statut terminal en erreur, une nouvelle
+    # ligne est créée.
     # `as_string()` : `->>` sous PostgreSQL, `json_extract` sous SQLite — la
     # même expression sur les deux moteurs, aucun SQL écrit à la main.
     return db.scalars(
         select(Report)
         .where(Report.user_id == uid,
                Report.detail["idempotence"].as_string() == cle,
+               Report.statut.in_(STATUTS_REJOUABLES),
                Report.created_at >= limite)
         .order_by(Report.created_at.desc())
         .limit(1)

@@ -24,6 +24,9 @@ const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8')
 const pagePublique = readFileSync(
   new URL('../app/p/[pseudo]/[slug]/page.tsx', import.meta.url), 'utf8');
 const cssPartage = readFileSync(new URL('../app/p/partage.css', import.meta.url), 'utf8');
+const etatsPartage = readFileSync(new URL('../app/p/etats.tsx', import.meta.url), 'utf8');
+const notFoundPartage = readFileSync(
+  new URL('../app/p/[pseudo]/[slug]/not-found.tsx', import.meta.url), 'utf8');
 
 /* ---------------------------------------------------------------- */
 
@@ -176,8 +179,11 @@ test('7 — la liste réemploie les composants de la liste des conversations', (
   assert.match(app, /terme\.length < 3[\s\S]{0,400}axRechercherRapports\(terme\)/);
   // « Charger plus » borné par le curseur `before` du dernier rapport affiché.
   assert.match(app, /chargerPlus: \(\) => \{[\s\S]{0,200}chargerRapports\(\{ before: dernier\.id \}\)/);
-  // Archives demandées SEULEMENT à la première ouverture de la section.
-  assert.match(app, /chargerArchives: \(\) => chargerRapports\(\{ inclureArchives: true \}\)/);
+  /* Archives demandées SEULEMENT à la première ouverture de la section, et en
+     FUSION : ouvrir « Archivés » après trois « Charger plus » ne doit pas jeter
+     les pages déjà chargées (revue Task 5, finding 9). */
+  assert.match(app, /chargerArchives: \(\) => chargerRapports\(\{ inclureArchives: true, fusionner: true \}\)/);
+  assert.match(app, /if \(!before && !fusionner\) return items;/);
   assert.match(app, /if \(ouvrir && !archivesChargees\) gestion\.chargerArchives\(\);/);
 });
 
@@ -187,7 +193,14 @@ test('8 — un rapport sans dossier connu est rendu sous « Récents »', () => 
      néant. C'est ce qui empêche un rapport de devenir invisible. */
   assert.match(app, /const connus = new Set\(\(projets \|\| \[\]\)\.map\(\(p\) => p\.id\)\);/);
   assert.match(app, /const sansDossier = rapports\.filter\(\s*\n?\s*\(r\) => !r\.archived_at && !r\.pinned_at && !connus\.has\(r\.project_id\)\);/);
-  assert.match(app, /\{t\('reports\.section\.recents'\)\}[\s\S]{0,200}sansDossier\.filter\(filtre\)\.map\(ligne\)/);
+  /* Les en-têtes de section suivent les listes FILTRÉES : une recherche sans
+     correspondance ne doit pas laisser « ÉPINGLÉS » / « RÉCENTS » au-dessus du
+     vide (revue Task 5, finding 7). */
+  assert.match(app, /const epinglesVisibles = epingles\.filter\(filtre\);/);
+  assert.match(app, /const sansDossierVisibles = sansDossier\.filter\(filtre\);/);
+  assert.match(app, /\{epinglesVisibles\.length > 0 &&/);
+  assert.match(app, /\{sansDossierVisibles\.length > 0 &&/);
+  assert.match(app, /\{t\('reports\.section\.recents'\)\}[\s\S]{0,200}sansDossierVisibles\.map\(ligne\)/);
 });
 
 test('9 — la liste est relue au retour sur le composeur', () => {
@@ -328,15 +341,42 @@ test('18 — la page publique est un rendu serveur, sans état ni indexation', (
   // tout de suite.
   assert.match(pagePublique, /\$\{API\}\/partage\/\$\{encodeURIComponent\(jeton\)\}/);
   assert.match(pagePublique, /cache: "no-store"/);
-  assert.match(pagePublique, /if \(!rapport\) notFound\(\);/);
+  // Un segment qui ne peut pas porter de jeton reste un 404 de routage.
   assert.match(pagePublique, /if \(!jeton\) notFound\(\);/);
+  /* 404 et panne sont DEUX écrans distincts, et chacun est tracé côté serveur
+     avant d'être rendu (revue Task 5, finding 3) : une panne backend ne doit
+     pas se lire « lien introuvable » sur tous les liens partagés. */
+  assert.match(pagePublique, /if \(res\.status === 404\) return \{ etat: "revoque" \};/);
+  assert.match(pagePublique, /etat === "panne"/);
+  assert.match(pagePublique, /etat === "revoque"/);
+  assert.match(pagePublique, /console\.error\("\[partage\] API injoignable"/);
+  assert.match(pagePublique, /console\.error\(`\[partage\] API en erreur : HTTP \$\{res\.status\}`\)/);
+  assert.match(pagePublique, /console\.error\("\[partage\] réponse illisible"/);
+  // Aucune fuite : ni jeton, ni message d'exception dans ce que voit le visiteur.
+  assert.match(etatsPartage, /revoqueTitre: "Ce rapport n'est plus partagé"/);
+  assert.match(etatsPartage, /panneTitre: "Service indisponible"/);
+  /* Textes français figés (spec §0, pas de `t()` ici) mais RASSEMBLÉS dans un
+     seul objet, partagé avec le `not-found.tsx` de la route : l'arbitrage est
+     visible et indexable par langue le jour où le partage devra suivre celle
+     du rapport (revue Task 5, finding 5). */
+  assert.match(etatsPartage, /^export const TEXTES = \{/m);
+  assert.match(pagePublique, /import \{ APP, PageEtat, TEXTES \} from "\.\.\/\.\.\/etats"/);
+  // Aucun texte en dur ne subsiste dans le corps de la page.
+  assert.ok(!/Rapport partagé par \{pseudo\}|>Sources<|Rapport produit par </.test(pagePublique),
+    'un texte en dur subsiste hors de TEXTES');
+  /* Le lien révoqué rend un VRAI 404 (le `not-found.tsx` du segment), pas une
+     page polie en 200 : le `noindex` ne dit rien du code de statut. */
+  assert.match(pagePublique, /if \(lu\.etat === "revoque"\) notFound\(\);/);
+  assert.match(notFoundPartage, /PageEtat titre=\{TEXTES\.revoqueTitre\}/);
+  assert.match(notFoundPartage, /import "\.\.\/\.\.\/partage\.css"/);
   // Le MÊME parseur que l'application.
   assert.match(pagePublique, /import \{ parserMarkdown \} from "\.\.\/\.\.\/\.\.\/_prototype\/markdown\.js"/);
   // Graphiques : l'image de l'API avec le jeton de partage en paramètre.
   assert.match(pagePublique, /\/viz\/\$\{encodeURIComponent\(viz\.empreinte\)\}\.svg\?p=\$\{encodeURIComponent\(jeton\)\}/);
   // En-tête et lien de retour.
-  assert.match(pagePublique, /Rapport partagé par \{pseudo\}/);
-  assert.match(pagePublique, /https:\/\/app\.axial-ia\.fr/);
+  assert.match(pagePublique, /\{TEXTES\.partagePar\} \{pseudo\}/);
+  assert.match(etatsPartage, /export const APP = "https:\/\/app\.axial-ia\.fr"/);
+  assert.match(pagePublique, /href=\{APP\}/);
   // Le pseudo vient du SERVEUR, pas du segment d'URL (retapable à la main).
   assert.match(pagePublique, /const pseudo = rapport\.pseudo \|\| params\.pseudo;/);
   // Les liens sortants d'un rapport public ne transmettent rien.
@@ -347,13 +387,27 @@ test('19 — la feuille de la page publique suit le thème du visiteur', () => {
   // Le visiteur n'a aucun réglage chez nous : c'est `prefers-color-scheme` qui
   // décide, et rien d'autre (l'app, elle, bascule sur `html[data-theme]`).
   assert.match(cssPartage, /@media \(prefers-color-scheme: light\)/);
-  assert.match(cssPartage, /\.rp-racine \{[\s\S]{0,600}--rp-bg: #07050f;/);
-  assert.match(cssPartage, /@media \(prefers-color-scheme: light\) \{\s*\n?\s*\.rp-racine \{[\s\S]{0,400}--rp-bg: #f7f5f2;/);
+  assert.match(cssPartage, /\.partage-page \{[\s\S]{0,600}--rp-bg: #07050f;/);
+  assert.match(cssPartage, /@media \(prefers-color-scheme: light\) \{\s*\n?\s*\.partage-page \{[\s\S]{0,400}--rp-bg: #f7f5f2;/);
+  /* Aucune règle GLOBALE, en particulier aucun `body { … }` : la feuille est
+     importée par une route, une règle globale survivrait à une navigation
+     client hors de `/p/…` (revue Task 5, finding 6). Chaque sélecteur de
+     premier niveau part donc de `.partage-page`. */
+  assert.ok(!/(^|\n)\s*(body|html)\s*[,{]/.test(cssPartage),
+    'la feuille publique ne doit porter aucune règle sur body / html');
+  for (const ligne of cssPartage.split('\n')) {
+    if (/^[.#a-zA-Z\[]/.test(ligne) && ligne.includes('{')) {
+      assert.ok(ligne.startsWith('.partage-page'),
+        `règle non portée par .partage-page : ${ligne}`);
+    }
+  }
+  // Le fond est peint sur la racine, dans les DEUX schémas (via --rp-bg).
+  assert.match(cssPartage, /\.partage-page \{[\s\S]{0,400}background: var\(--rp-bg\);/);
   // Aucune classe de l'application : la page ne dépend pas de `globals.css`.
   assert.ok(!/\.rep-|\.conv-|\.surface\b/.test(cssPartage),
     'la feuille publique ne doit pas dépendre des classes de l\'app');
   // Un tableau large défile dans sa boîte, pas dans la page.
-  assert.match(cssPartage, /\.rp-table-wrap \{ overflow-x: auto/);
+  assert.match(cssPartage, /\.partage-page \.rp-table-wrap \{ overflow-x: auto/);
 });
 
 /* ---------------------------------------------------------------- */
@@ -403,4 +457,105 @@ test('21 — les clés et le CSS du sélecteur de profondeur sont intacts', () =
     assert.ok(app.includes(`'${cle}'`), `clé de profondeur retirée : ${cle}`);
   }
   assert.match(css, /\.rep-depth-seg \{/);
+});
+
+/* ---------------- Task 6 : nettoyage et correctifs de revue ---------------- */
+
+test('22 — le CSS de l’éditeur trois colonnes jamais construit est retiré', () => {
+  /* Classes du bilan §6, vérifiées absentes de la FEUILLE. Celles que les
+     Tasks 2-5 ont finalement câblées (`.rep-gen-side`, `.rep-gen-progress*`,
+     `.task*`, `.source-card*`, `.gap-callout*`) ne sont PAS du code mort :
+     test 23 les protège. */
+  for (const classe of ['.rep-rail', '.rep-rail-section', '.rep-rail-tabs',
+                        '.rep-outline', '.rep-outline-label', '.rep-outline-item',
+                        '.rep-suggest', '.rep-suggest-icon', '.rep-suggest-body',
+                        '.rep-suggest-label', '.rep-suggest-actions',
+                        '.rep-chart', '.rep-chart-title',
+                        '.rep-source-counter',
+                        '.confidence-row', '.confidence-bar', '.confidence-fill',
+                        '.rep-editor']) {
+    assert.ok(!css.includes(classe + ' ') && !css.includes(classe + ','),
+      `CSS mort encore présent : ${classe}`);
+  }
+  // Et aucune de ces classes n'est rendue nulle part (la raison du retrait).
+  for (const nom of ['rep-rail', 'rep-outline', 'rep-suggest', 'rep-chart',
+                     'rep-source-counter', 'confidence-row', 'confidence-fill']) {
+    assert.ok(!app.includes(nom), `classe retirée mais encore rendue : ${nom}`);
+  }
+});
+
+test('23 — le CSS réellement rendu par les Tasks 2-5 est conservé', () => {
+  /* Le bilan §6 datait d'AVANT l'écran de génération : ces classes y étaient
+     listées comme mortes, elles sont désormais rendues. Les supprimer aurait
+     dépouillé l'écran de suivi. */
+  for (const classe of ['.rep-gen-side', '.rep-gen-progress', '.task-list',
+                        '.task-dot', '.task-body', '.task-title', '.task-meta',
+                        '.source-card', '.gap-callout', '.rep-doc']) {
+    assert.ok(css.includes(classe), `CSS vivant supprimé par erreur : ${classe}`);
+    assert.ok(app.includes(classe.slice(1)), `classe non rendue : ${classe}`);
+  }
+});
+
+test('24 — les clés i18n de l’éditeur trois colonnes sont retirées', () => {
+  /* `gap.*` / `conflict.*` étaient déjà parties avec la Task 2 ; restaient les
+     trois clés du rail. `reports.editor.sources` est CONSERVÉE — et désormais
+     réellement appelée, l'étiquette était en dur. */
+  for (const cle of ['reports.gap.title', 'reports.gap.body', 'reports.gap.add',
+                     'reports.gap.deepen', 'reports.gap.confidence',
+                     'reports.conflict.title', 'reports.conflict.body',
+                     'reports.conflict.recommendation', 'reports.conflict.use_a',
+                     'reports.conflict.use_b', 'reports.conflict.cite_both',
+                     'reports.editor.outline', 'reports.editor.activity',
+                     'reports.editor.suggest']) {
+    assert.ok(!app.includes(`'${cle}'`), `clé i18n morte encore déclarée : ${cle}`);
+  }
+  assert.match(app, /\{t\('reports\.editor\.sources'\)\}/);
+});
+
+test('25 — « Retirer du dossier » est offert quand le rapport est rangé', () => {
+  // Capacité du bridge sans affordance jusqu'ici (revue Task 5, finding 8).
+  assert.match(app, /cle: '__retirer', libelle: t\('conv\.menu\.retirer_dossier'\)/);
+  assert.match(app, /gestion\.deplacer\(r\.id, null\)/);
+  assert.match(app, /\.\.\.\(r\.project_id \? \[\{/);
+  for (const langue of ['fr', 'en']) {
+    const bloc = app.slice(app.indexOf('const STRINGS'), app.indexOf('window.AXIAL_I18N'));
+    const borne = bloc.indexOf('\n  en: {');
+    const partie = langue === 'fr' ? bloc.slice(0, borne) : bloc.slice(borne);
+    assert.ok(partie.includes("'conv.menu.retirer_dossier'"), `clé absente en ${langue}`);
+  }
+});
+
+test('26 — un envoi raté passe par decrireErreur et CarteErreur', () => {
+  /* Dernier endroit de l'écran Rapports à afficher un `e.message` brut
+     (revue Task 5, finding 10). */
+  const editeur = app.slice(app.indexOf('function ReportsEditor('),
+                            app.indexOf('function ReportsComparaison('));
+  assert.ok(editeur.length > 1000, 'corps de ReportsEditor introuvable');
+  assert.ok(!/\(e && e\.message\)/.test(editeur),
+    'un message d\'exception brut subsiste dans ReportsEditor');
+  assert.match(editeur, /setErreurLivraison\(\{ erreur: decrireErreur\(e, t\), provider \}\)/);
+  assert.match(editeur, /<CarteErreur erreur=\{erreurLivraison\.erreur\} onAction=\{actionErreurLivraison\}/);
+  // « Réessayer » relance LE MÊME fournisseur ; une session expirée reconnecte.
+  assert.match(editeur, /if \(courant\.erreur\.action === 'reessayer'\) livrer\(courant\.provider\);/);
+  assert.match(app, /onSessionExpiree=\{sessionExpiree\}/);
+});
+
+test('27 — une relance porte une clé d’idempotence, reportée par « Réessayer »', () => {
+  // Même risque de double débit que le lancement (revue Task 5, finding 11).
+  assert.match(app, /const cle = opts\.cleIdempotence \|\| nouvelleCleIdempotence\(\);/);
+  assert.match(app, /axRelancerRapport\(id, \{ \.\.\.opts, idempotencyKey: cle \}\)/);
+  assert.match(app, /relance: \{ id, options: \{ \.\.\.opts, cleIdempotence: cle \} \}/);
+  assert.match(app, /if \(erreur\.action === 'reessayer' && relance\) \{/);
+  // L'en-tête part bien sur la requête, et seulement si une clé est fournie.
+  assert.match(bridge, /axRelancerRapport\(id, \{ question, elargir, forcer, idempotencyKey \} = \{\}\)/);
+  assert.match(bridge, /headers: idempotencyKey \? \{ "X-Idempotency-Key": idempotencyKey \} : undefined,/);
+});
+
+test('28 — la longueur du jeton renvoie explicitement à la constante backend', () => {
+  const jetonJs = readFileSync(new URL('../app/p/jeton.js', import.meta.url), 'utf8');
+  // Le couplage doit être LISIBLE pour qui touchera `JETON_OCTETS`.
+  assert.match(jetonJs, /JETON_LONGUEUR/);
+  assert.match(jetonJs, /app\/modules\/reports\/service\.py/);
+  // Le motif est construit depuis la constante : pas de « 22 » écrit deux fois.
+  assert.match(jetonJs, /new RegExp\(`\^\[A-Za-z0-9_-\]\{\$\{LONGUEUR_JETON\}\}\$`\)/);
 });

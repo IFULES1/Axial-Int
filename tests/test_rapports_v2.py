@@ -2569,6 +2569,86 @@ def test_une_cle_didempotence_ne_traverse_pas_les_comptes(http):
         assert analyse.rapport_par_idempotence(db, str(autre), "partagee") is not None
 
 
+def test_un_rejeu_didempotence_ignore_un_rapport_en_echec_ou_annule(http):
+    """« Réessayer » reporte volontairement la même clé. Si le rejeu rendait la
+    ligne en échec, `stream_analysis` sortirait aussitôt de sa boucle et
+    l'utilisateur ne pourrait plus rien relancer pendant dix minutes — le chemin
+    même que la clé devait protéger (revue Task 5, finding 1)."""
+    from app.modules.analysis import service as analyse
+
+    engine, uid = http
+    maintenant = dt.datetime.now(dt.timezone.utc)
+    with Session(engine) as db:
+        for statut in (rm.ECHEC, rm.ANNULE):
+            _rapport(db, uid, statut=statut, detail={"idempotence": f"cle-{statut}"},
+                     created_at=maintenant)
+            assert analyse.rapport_par_idempotence(db, str(uid), f"cle-{statut}") is None, statut
+        # Vivant ou abouti : le rejeu suit bien le rapport existant.
+        for statut in (rm.EN_COURS, rm.TERMINE, rm.DEGRADE, rm.SOURCES_INSUFFISANTES):
+            r = _rapport(db, uid, statut=statut, detail={"idempotence": f"ok-{statut}"},
+                         created_at=maintenant)
+            trouve = analyse.rapport_par_idempotence(db, str(uid), f"ok-{statut}")
+            assert trouve is not None and str(trouve.id) == str(r.id), statut
+
+
+def test_un_rejeu_apres_echec_relance_vraiment(http):
+    """Bout en bout : deux appels de `lancer_rapport` sous la même clé, avec un
+    échec entre les deux, donnent DEUX lignes et DEUX tâches."""
+    from app.modules.analysis import service as analyse
+
+    import app.modules.memory.models  # noqa: F401 — enregistre `company_profiles`
+
+    engine, uid = http
+    Base.metadata.tables["company_profiles"].create(engine, checkfirst=True)
+    with Session(engine) as db:
+        db.add(CreditBalance(user_id=uid, free_credits=500))
+        db.commit()
+
+    appels = []
+
+    def _faux_thread(*a, **kw):
+        appels.append(kw.get("kwargs"))
+
+        class _T:
+            def start(self_inner):
+                pass
+        return _T()
+
+    import threading as _threading
+    vrai = _threading.Thread
+    _threading.Thread = _faux_thread
+    try:
+        with Session(engine) as db:
+            premier = analyse.lancer_rapport(
+                db, str(uid), query="Le marché du lithium",
+                analysis_type="synthese_executive", cle_idempotence="cle-retry")
+            premier.statut = rm.ECHEC
+            db.commit()
+            second = analyse.lancer_rapport(
+                db, str(uid), query="Le marché du lithium",
+                analysis_type="synthese_executive", cle_idempotence="cle-retry")
+            assert str(second.id) != str(premier.id)
+            assert len(appels) == 2, appels
+    finally:
+        _threading.Thread = vrai
+
+
+def test_le_jeton_a_la_longueur_exportee(http):
+    """`JETON_LONGUEUR` est la constante que `frontend/app/p/jeton.js` duplique
+    (`LONGUEUR_JETON`) pour découper `<slug>-<jeton>`. Ce test verrouille
+    l'accord entre `JETON_OCTETS` et la longueur annoncée : changer l'un sans
+    l'autre casserait silencieusement tous les liens partagés."""
+    from app.modules.reports import service as rs
+
+    engine, uid = http
+    assert rs.JETON_LONGUEUR == 22
+    with Session(engine) as db:
+        r = _rapport(db, uid, statut=rm.TERMINE, content="# Corps")
+        rid = str(r.id)
+    jeton = _client(engine, uid).post(f"/reports/{rid}/partage").json()["jeton"]
+    assert len(jeton) == rs.JETON_LONGUEUR, jeton
+
+
 def test_les_routes_de_lancement_acceptent_len_tete_didempotence():
     """L'en-tête doit être DÉCLARÉE : sans elle, le front l'enverrait dans le
     vide et le double débit resterait possible sans que rien ne le dise."""

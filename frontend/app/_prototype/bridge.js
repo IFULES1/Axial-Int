@@ -626,11 +626,18 @@ export async function axAnnulerRapport(id) {
   return axFetch(`/reports/${id}/annuler`, { method: "POST", body: {} });
 }
 /** « Modifier et relancer » / « Recherche élargie » / « Générer quand même » :
- * crée un NOUVEAU rapport, l'ancien est conservé. */
-export async function axRelancerRapport(id, { question, elargir, forcer } = {}) {
+ * crée un NOUVEAU rapport, l'ancien est conservé.
+ *
+ * `idempotencyKey` : même contrat que `axLancerRapport` — une relance est un
+ * lancement, donc un débit, et une panne réseau après l'acceptation serveur y
+ * exposait au même double débit (revue Task 5, finding 11). L'appelant passe
+ * la clé pour pouvoir la REPORTER sur son « Réessayer » ; sans clé, l'en-tête
+ * n'est pas envoyée et le serveur se comporte comme avant. */
+export async function axRelancerRapport(id, { question, elargir, forcer, idempotencyKey } = {}) {
   return axFetch(`/reports/${id}/relancer`, {
     method: "POST",
     body: { question: question || null, elargir: !!elargir, forcer: !!forcer },
+    headers: idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : undefined,
   });
 }
 /** « Signaler un problème » / « Votre avis » → `report_feedback` + email

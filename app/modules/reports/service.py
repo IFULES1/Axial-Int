@@ -36,6 +36,13 @@ RECHERCHE_MARGE = 80
 # `secrets.token_urlsafe(16)` = 22 caractères URL-safe, soit 128 bits : l'URL
 # n'est pas devinable, et c'est elle qui tient lieu d'autorisation.
 JETON_OCTETS = 16
+# Longueur exacte du jeton produit : `token_urlsafe(n)` rend base64url sans
+# remplissage, soit `ceil(4 * n / 3)` caractères. Le front en a besoin pour
+# découper `<slug>-<jeton>` dans l'URL publique — il la duplique dans
+# `frontend/app/p/jeton.js` (`LONGUEUR_JETON`). Toucher `JETON_OCTETS` sans
+# mettre à jour ce fichier casse la lecture des liens partagés ; le test
+# `test_le_jeton_a_la_longueur_exportee` verrouille l'accord ici.
+JETON_LONGUEUR = -(-4 * JETON_OCTETS // 3)  # 16 octets → 22 caractères
 JETON_ESSAIS = 3
 SLUG_MAX = 60
 PSEUDO_MAX = 40
