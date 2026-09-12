@@ -13,7 +13,7 @@
 import { notFound } from "next/navigation";
 
 import { parserMarkdown } from "../../../_prototype/markdown.js";
-import { APP, PageEtat, TEXTES } from "../../etats";
+import { APP, PageEtat, TEXTES, compterSources } from "../../etats";
 import { jetonDuSlug } from "../../jeton.js";
 import "../../partage.css";
 
@@ -25,7 +25,25 @@ export const metadata = {
   title: "Rapport partagé — Axial Intelligence",
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8090";
+/* DEUX URL d'API, deux contextes (revue finale, F9).
+ *
+ * `API_PUBLIQUE` — celle du NAVIGATEUR du visiteur. Elle part dans le HTML
+ * (`<img src>` des graphiques), donc elle doit être joignable depuis
+ * l'extérieur. `NEXT_PUBLIC_*` est figée à la compilation : c'est voulu ici.
+ *
+ * `API_INTERNE` — celle du PROCESS Next, pour le `fetch` de rendu serveur
+ * ci-dessous. Elle est lue à l'exécution (pas de préfixe `NEXT_PUBLIC_`, donc
+ * jamais envoyée au navigateur). Sans elle, le VPS faisait une requête HTTPS
+ * vers son propre nom public à chaque affichage d'une page partagée — DNS,
+ * TLS et reverse proxy pour joindre un backend qui écoute sur
+ * `127.0.0.1:8090` — et la page cassait si le certificat ou le proxy avait un
+ * souci. Sur le VPS, poser `API_INTERNE_URL=http://127.0.0.1:8090` dans
+ * `frontend/.env.local`.
+ */
+const API_PUBLIQUE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8090";
+const API_INTERNE = process.env.API_INTERNE_URL
+  || process.env.NEXT_PUBLIC_API_URL
+  || "http://127.0.0.1:8090";
 
 /* Issue de la lecture : le rapport, « revoque » (404 : lien mort ou jamais
    ouvert) ou « panne » (5xx, réseau, JSON illisible). La distinction compte :
@@ -63,7 +81,7 @@ type RapportPublic = {
 async function lireRapport(jeton: string): Promise<Resultat> {
   let res: Response;
   try {
-    res = await fetch(`${API}/partage/${encodeURIComponent(jeton)}`, {
+    res = await fetch(`${API_INTERNE}/partage/${encodeURIComponent(jeton)}`, {
       cache: "no-store",
       headers: { Accept: "application/json" },
     });
@@ -137,7 +155,7 @@ function Graphique({ viz, jeton }: { viz: VizPublique | undefined; jeton: string
             l'optimiseur d'images de Next. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={`${API}/viz/${encodeURIComponent(viz.empreinte)}.svg?p=${encodeURIComponent(jeton)}`}
+          src={`${API_PUBLIQUE}/viz/${encodeURIComponent(viz.empreinte)}.svg?p=${encodeURIComponent(jeton)}`}
           alt=""
           loading="lazy"
         />
@@ -274,7 +292,7 @@ export default async function PagePartage(
         <h1 className="rp-titre">{rapport.title}</h1>
         <p className="rp-meta">
           {dateLisible(rapport.created_at)}
-          {sources.length ? ` · ${sources.length} ${TEXTES.sourcesSuffixe}` : ""}
+          {sources.length ? ` · ${compterSources(sources.length)}` : ""}
         </p>
 
         <article className="rp-doc">

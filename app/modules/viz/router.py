@@ -33,6 +33,16 @@ router = APIRouter(prefix="/viz", tags=["viz"])
 # Privé et court : l'image reste dans le cache du navigateur autorisé (une page
 # de rapport en affiche plusieurs, on ne les recompile pas à chaque défilement)
 # mais aucun proxy partagé ne la conserve.
+#
+# COMPROMIS ASSUMÉ (revue finale, F16) : révoquer un partage n'invalide pas les
+# images déjà dans le navigateur du visiteur — il peut les revoir pendant une
+# heure au plus. Le RAPPORT, lui, disparaît immédiatement (la page publique est
+# en `cache: "no-store"`), donc ce qui survit est une image isolée, sans titre,
+# sans texte et sans source. Passer à `no-store` coûterait une recompilation
+# SVG par graphique et par défilement sur toutes les pages de rapport, pour
+# fermer une fenêtre d'une heure sur des données que le visiteur avait déjà
+# légitimement sous les yeux. Le jour où une révocation devra être immédiate,
+# c'est ici que la valeur tombe à `no-store`.
 _PRIVE = {"Cache-Control": "private, max-age=3600"}
 
 

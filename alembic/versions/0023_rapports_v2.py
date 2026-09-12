@@ -41,6 +41,7 @@ depends_on = None
 
 INDEX_PROJET = "ix_reports_project_id"
 INDEX_PARTAGE = "ux_reports_jeton_partage"
+INDEX_IDEMPOTENCE = "ux_reports_cle_idempotence"
 INDEX_OFFERT = "ux_credit_events_premier_rapport_offert"
 # Doit rester égal à `app.modules.analysis.onboarding.ACTION` ; le test
 # `test_rapports_v2.test_action_offerte_identique_partout` le vérifie.
@@ -83,6 +84,47 @@ def _index(*, creer: bool, nom: str, table: str, colonnes: list[str],
         _appliquer()
 
 
+def _dedoublonner_offert() -> None:
+    """Retire les `premier_rapport_offert` en double AVANT l'index unique.
+
+    L'index répare une course `SELECT`-puis-`INSERT` qui existait déjà sur
+    `main` (`onboarding.deja_offert`). Si cette course a produit un doublon en
+    production, `CREATE UNIQUE INDEX CONCURRENTLY` échoue — et comme il tourne
+    en `autocommit_block`, il laisse derrière lui un index INVALID à supprimer
+    à la main avant de pouvoir réessayer. Autant nettoyer ici : la ligne la
+    plus ANCIENNE est gardée (c'est celle qui a réellement offert le rapport,
+    les suivantes sont des rejeux), les autres partent.
+
+    PostgreSQL seulement : `ctid` n'existe pas ailleurs, et SQLite (tests) ne
+    peut pas produire le doublon — l'index y est créé dans la même transaction
+    sur une base neuve.
+    """
+    if op.get_bind().dialect.name != "postgresql":
+        return
+    op.execute(sa.text(f"""
+        DELETE FROM credit_events e
+        USING (
+            SELECT user_id, min(created_at) AS premier
+            FROM credit_events
+            WHERE action = '{ACTION_OFFERT}'
+            GROUP BY user_id HAVING count(*) > 1
+        ) d
+        WHERE e.action = '{ACTION_OFFERT}'
+          AND e.user_id = d.user_id
+          AND e.created_at > d.premier
+    """))
+    # Deux lignes exactement à la même microseconde : `created_at` ne les
+    # départage pas. Le `ctid` (adresse physique) le fait toujours.
+    op.execute(sa.text(f"""
+        DELETE FROM credit_events e
+        WHERE e.action = '{ACTION_OFFERT}'
+          AND e.ctid <> (
+              SELECT min(i.ctid) FROM credit_events i
+              WHERE i.action = '{ACTION_OFFERT}' AND i.user_id = e.user_id
+          )
+    """))
+
+
 def upgrade() -> None:
     # --- reports : génération suivie (§1) ---------------------------------
     op.add_column("reports", sa.Column(
@@ -111,9 +153,21 @@ def upgrade() -> None:
         "jeton_partage", sa.String(length=32), nullable=True))
     op.add_column("reports", sa.Column(
         "partage_at", sa.DateTime(timezone=True), nullable=True))
+    # --- idempotence : une COLONNE, pas une clé dans le JSON `detail` ------
+    # La clé d'idempotence vivait dans `detail` et se relisait par un SELECT :
+    # deux requêtes concurrentes portant la même clé lisaient toutes deux
+    # « rien », créaient deux lignes et débitaient deux fois. Une colonne avec
+    # un index unique `(user_id, cle_idempotence)` transforme la course en
+    # `IntegrityError`, que le moteur rattrape pour rendre la ligne existante.
+    # Les NULL n'entrent pas en collision dans un index unique PostgreSQL :
+    # les rapports sans clé (offert, admin, import hérité) ne se gênent pas.
+    op.add_column("reports", sa.Column(
+        "cle_idempotence", sa.String(length=64), nullable=True))
     _index(creer=True, nom=INDEX_PROJET, table="reports", colonnes=["project_id"])
     _index(creer=True, nom=INDEX_PARTAGE, table="reports",
            colonnes=["jeton_partage"], unique=True)
+    _index(creer=True, nom=INDEX_IDEMPOTENCE, table="reports",
+           colonnes=["user_id", "cle_idempotence"], unique=True)
 
     # --- report_feedback (§3) ---------------------------------------------
     op.create_table(
@@ -135,6 +189,7 @@ def upgrade() -> None:
     # --- rapport offert : un seul par compte (§5.4) ------------------------
     # Index PARTIEL : le registre reste append-only pour toutes les autres
     # actions (un compte a bien plusieurs `agent_message`).
+    _dedoublonner_offert()
     _index(creer=True, nom=INDEX_OFFERT, table="credit_events",
            colonnes=["user_id"], unique=True,
            where=f"action = '{ACTION_OFFERT}'")
@@ -153,9 +208,12 @@ def downgrade() -> None:
     op.drop_index("ix_report_feedback_report_id", table_name="report_feedback")
     op.drop_table("report_feedback")
 
+    _index(creer=False, nom=INDEX_IDEMPOTENCE, table="reports",
+           colonnes=["user_id", "cle_idempotence"])
     _index(creer=False, nom=INDEX_PARTAGE, table="reports", colonnes=["jeton_partage"])
     _index(creer=False, nom=INDEX_PROJET, table="reports", colonnes=["project_id"])
     op.drop_constraint("fk_reports_project_id", "reports", type_="foreignkey")
+    op.drop_column("reports", "cle_idempotence")
     op.drop_column("reports", "partage_at")
     op.drop_column("reports", "jeton_partage")
     op.drop_column("reports", "project_id")

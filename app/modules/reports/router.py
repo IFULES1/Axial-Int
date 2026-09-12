@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import io
+import logging
 
 from fastapi import APIRouter, Depends, Header, Query, Response
 from fastapi.responses import StreamingResponse
@@ -14,6 +15,8 @@ from app.errors import AppError
 from app.modules.auth.schemas import AuthUser
 from app.modules.auth.security import get_current_admin, get_current_user
 from app.modules.reports import service
+
+logger = logging.getLogger("axial.reports.router")
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -154,6 +157,15 @@ def list_all(limit: int = Query(default=service.LISTE_LIMITE_DEFAUT, ge=1,
              user: AuthUser = Depends(get_current_user),
              db: Session = Depends(get_db)) -> ReportPage:
     """En cours d'abord, puis épinglés, puis par date décroissante."""
+    # Balayage des orphelins de CE compte avant de lister (revue finale, F6) :
+    # c'est l'écran où une ligne figée à « 62 % » se voit, et le balayage de
+    # démarrage ne repasse jamais sur une API qui reste debout des semaines.
+    # Ne lève pas : une liste doit s'afficher même si le balayage échoue.
+    try:
+        service.balayer_orphelins_du_compte(db, user.id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Balayage des orphelins de %s impossible : %s", user.id, e)
+        db.rollback()
     items, has_more = service.list_reports(
         db, user.id, limit=limit, before=before,
         inclure_archives=inclure_archives)

@@ -1459,21 +1459,29 @@ def _datee(db, uid, jours, **kw):
 # --- Liste, tri, pagination (§4) -------------------------------------------
 
 def test_liste_en_cours_puis_epingles_puis_date(http):
+    """Les dates sont RELATIVES à maintenant, et le rapport en cours tient dans
+    l'échéance : depuis la revue finale (F6), `GET /reports` balaye les
+    orphelins du compte, et un `en_cours` vieux de trente jours n'est plus une
+    génération à rouvrir — c'est précisément un orphelin."""
     engine, uid = http
+    maintenant = dt.datetime.now(dt.timezone.utc)
+
+    def _minutes(m, **kw):
+        return _rapport(db, uid, created_at=maintenant - dt.timedelta(minutes=m), **kw)
+
     with Session(engine) as db:
-        attendus = {str(_datee(db, uid, 5, title="Vieux", statut=rm.TERMINE).id),
-                    str(_datee(db, uid, 1, title="Récent", statut=rm.TERMINE).id),
-                    str(_datee(db, uid, 9, title="Épinglé", statut=rm.TERMINE,
-                               pinned_at=dt.datetime(2026, 9, 1,
-                                                     tzinfo=dt.timezone.utc)).id),
-                    str(_datee(db, uid, 30, title="En cours", statut=rm.EN_COURS,
-                               progression=62).id)}
+        attendus = {str(_minutes(50, title="Vieux", statut=rm.TERMINE).id),
+                    str(_minutes(10, title="Récent", statut=rm.TERMINE).id),
+                    str(_minutes(90, title="Épinglé", statut=rm.TERMINE,
+                                 pinned_at=maintenant).id),
+                    str(_minutes(20, title="En cours", statut=rm.EN_COURS,
+                                 progression=62).id)}
     page = _client(engine, uid).get("/reports").json()
     assert [i["title"] for i in page["items"]] == [
         "En cours", "Épinglé", "Récent", "Vieux"]
     assert page["has_more"] is False
-    # Un rapport en cours reste en tête MÊME s'il est le plus ancien : c'est
-    # celui que l'utilisateur cherche à rouvrir.
+    # Un rapport en cours reste en tête MÊME s'il n'est pas le plus récent :
+    # c'est celui que l'utilisateur cherche à rouvrir.
     assert page["items"][0]["progression"] == 62
     assert {i["id"] for i in page["items"]} == attendus
 
@@ -1483,7 +1491,10 @@ def test_pagination_par_curseur_ne_saute_ni_ne_repete_aucun_rapport(http):
     with Session(engine) as db:
         # Deux rapports à la MÊME date : sans départage sur l'identifiant, le
         # jumeau du rapport borne disparaissait de la fenêtre suivante.
-        meme = dt.datetime(2026, 9, 1, 12, 0, tzinfo=dt.timezone.utc)
+        # Date de RÉFÉRENCE proche de maintenant : « E » est `en_cours` et le
+        # balayage par compte (F6) rangerait en échec un `en_cours` plus vieux
+        # que l'échéance, ce qui changerait l'ordre attendu.
+        meme = dt.datetime.now(dt.timezone.utc)
         for i in range(7):
             _rapport(db, uid, title=f"R{i}", statut=rm.TERMINE,
                      created_at=meme - dt.timedelta(days=i // 2))
@@ -2522,7 +2533,7 @@ def test_meme_cle_didempotence_ne_lance_pas_un_second_rapport(http):
             assert str(second.id) == str(premier.id)
             # … et une autre clé en crée bien un nouveau.
             assert str(autre.id) != str(premier.id)
-            assert (premier.detail or {}).get("idempotence") == "cle-abc"
+            assert premier.cle_idempotence == "cle-abc"
             lignes = db.scalars(select(Report).where(Report.user_id == uid)).all()
             assert len(lignes) == 2
             # Deux lancements réels, pas trois : le rejeu n'a pas démarré de tâche.
@@ -2539,11 +2550,11 @@ def test_une_cle_didempotence_perimee_relance_un_rapport(http):
     engine, uid = http
     with Session(engine) as db:
         vieux = _rapport(
-            db, uid, statut=rm.TERMINE, detail={"idempotence": "cle-vieille"},
+            db, uid, statut=rm.TERMINE, cle_idempotence="cle-vieille",
             created_at=dt.datetime.now(dt.timezone.utc)
             - dt.timedelta(seconds=analyse.DELAI_IDEMPOTENCE_SECONDES + 60))
         recent = _rapport(
-            db, uid, statut=rm.TERMINE, detail={"idempotence": "cle-fraiche"},
+            db, uid, statut=rm.TERMINE, cle_idempotence="cle-fraiche",
             created_at=dt.datetime.now(dt.timezone.utc) - dt.timedelta(seconds=5))
         assert analyse.rapport_par_idempotence(db, str(uid), "cle-vieille") is None
         assert str(analyse.rapport_par_idempotence(
@@ -2563,7 +2574,7 @@ def test_une_cle_didempotence_ne_traverse_pas_les_comptes(http):
     engine, uid = http
     autre = uuidlib.uuid4()
     with Session(engine) as db:
-        _rapport(db, autre, statut=rm.TERMINE, detail={"idempotence": "partagee"},
+        _rapport(db, autre, statut=rm.TERMINE, cle_idempotence="partagee",
                  created_at=dt.datetime.now(dt.timezone.utc))
         assert analyse.rapport_par_idempotence(db, str(uid), "partagee") is None
         assert analyse.rapport_par_idempotence(db, str(autre), "partagee") is not None
@@ -2580,12 +2591,12 @@ def test_un_rejeu_didempotence_ignore_un_rapport_en_echec_ou_annule(http):
     maintenant = dt.datetime.now(dt.timezone.utc)
     with Session(engine) as db:
         for statut in (rm.ECHEC, rm.ANNULE):
-            _rapport(db, uid, statut=statut, detail={"idempotence": f"cle-{statut}"},
+            _rapport(db, uid, statut=statut, cle_idempotence=f"cle-{statut}",
                      created_at=maintenant)
             assert analyse.rapport_par_idempotence(db, str(uid), f"cle-{statut}") is None, statut
         # Vivant ou abouti : le rejeu suit bien le rapport existant.
         for statut in (rm.EN_COURS, rm.TERMINE, rm.DEGRADE, rm.SOURCES_INSUFFISANTES):
-            r = _rapport(db, uid, statut=statut, detail={"idempotence": f"ok-{statut}"},
+            r = _rapport(db, uid, statut=statut, cle_idempotence=f"ok-{statut}",
                          created_at=maintenant)
             trouve = analyse.rapport_par_idempotence(db, str(uid), f"ok-{statut}")
             assert trouve is not None and str(trouve.id) == str(r.id), statut
@@ -2687,3 +2698,534 @@ def test_les_dates_du_rapport_sortent_en_iso_avec_le_t(http):
     # La route HTTP continue de rendre un ISO valide (Pydantic reparse).
     lu = _client(engine, uid).get(f"/reports/{d['id']}").json()
     assert "T" in lu["created_at"]
+
+
+# ==========================================================================
+# Revue finale de branche — findings F1 à F11
+# ==========================================================================
+
+# --- F1 — le repli bloquant porte la MÊME clé d'idempotence ----------------
+
+def test_f1_le_repli_bloquant_rend_le_meme_rapport_et_ne_debite_quune_fois(
+        base, monkeypatch):
+    """Scénario de la revue : le flux est accepté par le backend puis coupé par
+    un 5xx de proxy (`stream_unavailable`), et le front se replie sur
+    `POST /analysis/run` avec la MÊME clé. Sans idempotence sur `/run`, ce repli
+    créait une seconde ligne, une seconde génération et un SECOND débit."""
+    from app.modules.analysis import service
+
+    _brancher_moteur(monkeypatch)
+    uid = uuidlib.uuid4()
+
+    # 1) Le flux a démarré et abouti : la ligne existe, sous la clé du clic.
+    premier = _lancer(base, uid, monkeypatch, cle_idempotence="cle-du-clic")
+    assert premier.statut == rm.TERMINE
+    debit = premier.detail["credits"]
+    assert debit > 0
+    solde_apres_flux = _solde(base, uid)
+
+    # 2) Le repli bloquant rejoue la même clé : MÊME rapport, aucun débit.
+    with Session(base) as db:
+        repli = service.lancer_rapport(
+            db, str(uid), query="ma question", analysis_type="analyse_risques",
+            attendre=True, cle_idempotence="cle-du-clic")
+    assert str(repli.id) == str(premier.id)
+    assert _solde(base, uid) == solde_apres_flux, "le repli a débité une 2e fois"
+    with Session(base) as db:
+        lignes = db.scalars(select(Report).where(Report.user_id == uid)).all()
+    assert len(lignes) == 1, "le repli a créé une seconde ligne"
+
+
+def test_f1_la_route_run_transmet_len_tete_au_moteur():
+    """La route DOIT déclarer l'en-tête et la passer en `cle_idempotence` :
+    déclarée sans être transmise, elle ne protégerait de rien."""
+    import inspect
+
+    from app.modules.analysis import router as analysis_router
+
+    source = inspect.getsource(analysis_router.run)
+    assert "x_idempotency_key" in source
+    assert "cle_idempotence=x_idempotency_key" in source
+
+
+def test_f1_le_bridge_repasse_la_cle_sur_le_repli():
+    """`lancerBloquant` appelait `/analysis/run` SANS en-tête, alors que le flux
+    l'avait envoyée : c'est là que naissait le double débit."""
+    import pathlib
+
+    bridge = pathlib.Path("frontend/app/_prototype/bridge.js").read_text(
+        encoding="utf-8")
+    bloc = bridge[bridge.index("async function lancerBloquant"):
+                  bridge.index("export async function axRapports")]
+    assert "idempotencyKey" in bloc
+    assert '"X-Idempotency-Key"' in bloc
+    assert "return lancerBloquant(body, idempotencyKey)" in bridge
+
+
+# --- F2 — une panne APRÈS la clôture ne renverse pas un rapport payé -------
+
+def test_f2_un_echec_apres_la_cloture_ne_reecrit_pas_un_rapport_termine(http):
+    """`_ranger_echec` relit la ligne : déjà `termine`, elle n'est pas touchée.
+
+    Sans cette garde, une panne de relecture post-commit (`expire_on_commit`
+    recharge les objets) faisait afficher « Échec — aucun crédit n'a été
+    débité » sur un rapport payé et archivé.
+    """
+    from app.modules.analysis import service as analyse
+
+    engine, uid = http
+    with Session(engine) as db:
+        r = _rapport(db, uid, statut=rm.TERMINE, content="Le corps du rapport",
+                     detail={"credits": 25})
+        analyse._ranger_echec(db, r, RuntimeError("connexion perdue"))
+        db.refresh(r)
+        assert r.statut == rm.TERMINE
+        assert r.content == "Le corps du rapport"
+        assert (r.detail or {}).get("credits") == 25
+        assert "raison" not in (r.detail or {})
+        # La garde ne bloque pas le cas normal : une ligne encore en cours part
+        # bien en échec.
+        vivant = _rapport(db, uid, statut=rm.EN_COURS)
+        analyse._ranger_echec(db, vivant, RuntimeError("boum"))
+        db.refresh(vivant)
+        assert vivant.statut == rm.ECHEC
+
+
+def test_f2_une_finition_ratee_apres_le_commit_laisse_le_rapport_termine(
+        http, monkeypatch):
+    """Bout en bout : la relecture post-commit lève, `finalize` l'absorbe."""
+    from app.modules.analysis import service as analyse
+    from app.modules.analytics import client as analytics
+
+    engine, uid = http
+    with Session(engine) as db:
+        db.add(CreditBalance(user_id=uid, free_credits=500))
+        db.commit()
+        rapport = _rapport(db, uid, statut=rm.EN_COURS)
+        monkeypatch.setattr(analytics, "increment_usage", _qui_leve)
+        signale = []
+        monkeypatch.setattr(analyse, "_signaler_apres_cloture",
+                            lambda *a, **kw: signale.append(a))
+        res = analyse.finalize(db, str(uid), "synthese_executive",
+                               analyse.AnalysisResult(
+                                   analysis_type="synthese_executive",
+                                   title="T", content="Corps", sources=[]),
+                               is_admin=False, rapport=rapport)
+        assert res["statut"] == rm.TERMINE
+        assert res["charged"] > 0
+        db.expire_all()
+        assert db.get(Report, rapport.id).statut == rm.TERMINE
+        # L'incident est signalé, pas avalé en silence.
+        assert signale
+
+
+def _qui_leve(*a, **kw):
+    raise RuntimeError("connexion perdue au pire moment")
+
+
+# --- F3 — battement du flux SSE -------------------------------------------
+
+def test_f3_le_flux_bat_toutes_les_quinze_secondes(http, monkeypatch):
+    """Horloge FICTIVE : la cadence se vérifie sans attendre quinze secondes.
+
+    Le générateur n'émettait un événement que si `(etape, progression)` avait
+    changé. Une longue section silencieuse laissait la connexion muette et le
+    `proxy_read_timeout` la coupait, alors que la génération allait bien.
+    """
+    from app.modules.analysis import service as analyse
+
+    engine, uid = http
+    with Session(engine) as db:
+        rapport = _rapport(db, uid, statut=rm.EN_COURS, etape="redaction",
+                           progression=40)
+        rid = rapport.id
+
+    horloge = {"t": 0.0}
+    monkeypatch.setattr(analyse, "_horloge", lambda: horloge["t"])
+    monkeypatch.setattr(analyse, "_attendre",
+                        lambda s: horloge.__setitem__("t", horloge["t"] + s))
+    monkeypatch.setattr(analyse, "lancer_rapport",
+                        lambda *a, **kw: _lire(engine, rid))
+
+    trames, gen = [], analyse.stream_analysis(
+        db=Session(engine), user_id=str(uid), is_admin=False, query="q",
+        analysis_type="synthese_executive")
+    for trame in gen:
+        trames.append(trame)
+        # Quatre-vingt-dix secondes d'étape inchangée : six battements attendus
+        # (un toutes les 15 s), puis on ferme.
+        if horloge["t"] >= 90:
+            gen.close()
+            break
+
+    battements = [t for t in trames if t.startswith(": keepalive")]
+    assert 5 <= len(battements) <= 7, (len(battements), horloge["t"])
+    # Le battement n'est PAS un événement : aucun `data:`, donc rien à décoder
+    # côté front.
+    assert all("data:" not in b for b in battements)
+    assert analyse.BATTEMENT_SSE_SECONDES == 15
+
+
+def _lire(engine, rid):
+    with Session(engine) as db:
+        return db.get(Report, rid)
+
+
+def test_f3_la_configuration_nginx_laisse_trente_minutes_a_lapi():
+    """`proxy_read_timeout 300s` face à une échéance de 1800 s : le repli
+    bloquant (`POST /analysis/run`, requête tenue ouverte) rendait un 504 à
+    cinq minutes sur un rapport qui se terminait — et était débité."""
+    import pathlib
+    import re
+
+    from app.config import DELAI_MAX_RAPPORT_SECONDES
+
+    conf = pathlib.Path("deploy/nginx-axial.conf").read_text(encoding="utf-8")
+    bloc = conf[conf.index("location /api/"):conf.index("location /", conf.index(
+        "location /api/") + 1)]
+    delai = re.search(r"proxy_read_timeout\s+(\d+)s", bloc)
+    assert delai, bloc
+    assert int(delai.group(1)) >= DELAI_MAX_RAPPORT_SECONDES, bloc
+    # Le SSE exige HTTP/1.1 : en HTTP/1.0 nginx bufferise et le flux arrive
+    # d'un bloc, à la fin.
+    assert "proxy_http_version 1.1;" in bloc, bloc
+
+
+# --- F4 — dédoublonnage avant l'index unique partiel -----------------------
+
+def test_f4_la_migration_dedoublonne_avant_de_creer_lindex_unique():
+    """L'index unique partiel sur `credit_events` échoue si un doublon
+    préexiste — et, créé en CONCURRENTLY hors transaction, il laisse derrière
+    lui un index INVALID à supprimer à la main."""
+    import pathlib
+
+    source = pathlib.Path("alembic/versions/0023_rapports_v2.py").read_text(
+        encoding="utf-8")
+    assert "_dedoublonner_offert" in source
+    # L'ordre est ce qui compte : nettoyer APRÈS la création ne sert à rien.
+    assert source.index("_dedoublonner_offert()\n    _index(creer=True, nom=INDEX_OFFERT")
+    # La ligne la plus ANCIENNE est gardée : c'est celle qui a réellement
+    # offert le rapport.
+    assert "min(created_at)" in source
+    # PostgreSQL seulement (`ctid` n'existe pas ailleurs).
+    assert 'dialect.name != "postgresql"' in source
+
+
+# --- F5 — l'idempotence est une COLONNE, adossée à un index unique ---------
+
+def test_f5_la_cle_didempotence_est_une_colonne_indexee_unique():
+    cols = Base.metadata.tables["reports"].c
+    assert "cle_idempotence" in cols
+    index = {i.name: i for i in Base.metadata.tables["reports"].indexes}
+    ux = index.get("ux_reports_cle_idempotence")
+    assert ux is not None and ux.unique
+    assert [c.name for c in ux.columns] == ["user_id", "cle_idempotence"]
+
+
+def test_f5_une_course_sur_la_meme_cle_rend_la_ligne_existante(http):
+    """Deux requêtes concurrentes lisaient toutes deux « rien », créaient deux
+    lignes et débitaient deux fois. La base tranche désormais : la perdante
+    reçoit une `IntegrityError` et repart avec la ligne de la gagnante."""
+    from app.modules.analysis import service as analyse
+
+    engine, uid = http
+    with Session(engine) as db_a, Session(engine) as db_b:
+        premier = analyse._nouvelle_ligne(
+            db_a, str(uid), analysis_type="synthese_executive", title=None,
+            question="q", statut=rm.EN_COURS, cle_idempotence="course")
+        # `db_b` n'a rien vu passer : c'est exactement la course de la revue.
+        second = analyse._nouvelle_ligne(
+            db_b, str(uid), analysis_type="synthese_executive", title=None,
+            question="q", statut=rm.EN_COURS, cle_idempotence="course")
+        assert str(second.id) == str(premier.id)
+        assert db_a.scalars(
+            select(Report).where(Report.user_id == uid)).all().__len__() == 1
+
+
+def test_f5_une_relance_apres_echec_libere_la_cle(http):
+    """L'index unique ne doit pas fermer la relance légitime : « Réessayer »
+    reporte la même clé, et la ligne en échec la rend."""
+    import app.modules.memory.models  # noqa: F401
+
+    from app.modules.analysis import service as analyse
+
+    engine, uid = http
+    Base.metadata.tables["company_profiles"].create(engine, checkfirst=True)
+    with Session(engine) as db:
+        db.add(CreditBalance(user_id=uid, free_credits=500))
+        db.commit()
+
+    import threading as _threading
+    vrai = _threading.Thread
+    _threading.Thread = lambda *a, **kw: type("_T", (), {"start": lambda s: None})()
+    try:
+        with Session(engine) as db:
+            premier = analyse.lancer_rapport(
+                db, str(uid), query="q", analysis_type="synthese_executive",
+                cle_idempotence="meme-cle")
+            premier.statut = rm.ECHEC
+            db.commit()
+            second = analyse.lancer_rapport(
+                db, str(uid), query="q", analysis_type="synthese_executive",
+                cle_idempotence="meme-cle")
+            assert str(second.id) != str(premier.id)
+            db.refresh(premier)
+            # La clé a migré sur la nouvelle ligne : l'index unique tient.
+            assert premier.cle_idempotence is None
+            assert second.cle_idempotence == "meme-cle"
+    finally:
+        _threading.Thread = vrai
+
+
+# --- F6 — balayage des orphelins par compte, en ligne ----------------------
+
+def _orphelin(db, uid, *, minutes):
+    from app.config import DELAI_MAX_RAPPORT_SECONDES
+
+    return _rapport(db, uid, statut=rm.EN_COURS, progression=62,
+                    created_at=dt.datetime.now(dt.timezone.utc)
+                    - dt.timedelta(seconds=DELAI_MAX_RAPPORT_SECONDES)
+                    - dt.timedelta(minutes=minutes))
+
+
+def test_f6_la_liste_balaye_les_orphelins_du_compte(http):
+    """Le balayage ne tournait qu'au démarrage de l'API : une instance debout
+    trois semaines laissait une ligne figée à « 62 % » pour toujours, sur
+    laquelle le front poll indéfiniment."""
+    engine, uid = http
+    autre = uuidlib.uuid4()
+    with Session(engine) as db:
+        vieux = _orphelin(db, uid, minutes=10).id
+        etranger = _orphelin(db, autre, minutes=10).id
+        frais = _rapport(db, uid, statut=rm.EN_COURS,
+                         created_at=dt.datetime.now(dt.timezone.utc)).id
+
+    page = _client(engine, uid).get("/reports").json()["items"]
+    par_id = {i["id"]: i for i in page}
+    assert par_id[str(vieux)]["statut"] == rm.ECHEC
+    assert par_id[str(frais)]["statut"] == rm.EN_COURS
+
+    with Session(engine) as db:
+        assert db.get(Report, vieux).detail["raison"] == "delai_depasse"
+        # Le balayage est BORNÉ au compte : celui d'un autre utilisateur n'est
+        # pas touché par la lecture de cette liste.
+        assert db.get(Report, etranger).statut == rm.EN_COURS
+
+
+def test_f6_le_lancement_balaye_aussi(base, monkeypatch):
+    """Deuxième point de passage : lancer un rapport range d'abord les
+    orphelins du compte, pour que la liste ne montre pas une génération morte
+    à côté de la nouvelle."""
+    from app.config import DELAI_MAX_RAPPORT_SECONDES
+
+    _brancher_moteur(monkeypatch)
+    uid = uuidlib.uuid4()
+    with Session(base) as db:
+        vieux = _rapport(db, uid, statut=rm.EN_COURS, progression=62,
+                         created_at=dt.datetime.now(dt.timezone.utc)
+                         - dt.timedelta(seconds=DELAI_MAX_RAPPORT_SECONDES + 600))
+        vieux_id = vieux.id
+    _lancer(base, uid, monkeypatch)
+    range_ = _relire(base, vieux_id)
+    assert range_.statut == rm.ECHEC
+    assert range_.detail["raison"] == "delai_depasse"
+
+
+def test_f6_le_balayage_au_demarrage_est_conserve(http):
+    """La correction ajoute un balayage, elle n'en retire pas : le redémarrage
+    reste le cas où TOUS les comptes ont des lignes à ranger."""
+    from app.modules.reports import service as rs
+
+    engine, uid = http
+    with Session(engine) as db:
+        vieux = _orphelin(db, uid, minutes=10)
+        assert rs.balayer_orphelins(db) == 1
+        db.refresh(vieux)
+        assert vieux.detail["raison"] == "interrompu_par_redemarrage"
+
+
+# --- F8 — l'échéance est tenue par le flux, pas seulement par la tâche -----
+
+def test_f8_le_flux_range_en_echec_un_rapport_muet_hors_delai(http, monkeypatch):
+    """Un fournisseur muet ne rend aucune portion : `Suivi.chunk` n'est jamais
+    appelé, donc ni le Stop ni l'échéance ne sont vus par la tâche. Le flux,
+    lui, relit la ligne toutes les deux secondes — c'est le seul témoin
+    éveillé."""
+    from app.modules.analysis import service as analyse
+
+    engine, uid = http
+    with Session(engine) as db:
+        muet = _orphelin(db, uid, minutes=5)
+        rid = muet.id
+
+    horloge = {"t": 0.0}
+    monkeypatch.setattr(analyse, "_horloge", lambda: horloge["t"])
+    monkeypatch.setattr(analyse, "_attendre",
+                        lambda s: horloge.__setitem__("t", horloge["t"] + s))
+    monkeypatch.setattr(analyse, "lancer_rapport",
+                        lambda *a, **kw: _lire(engine, rid))
+
+    trames = list(analyse.stream_analysis(
+        db=Session(engine), user_id=str(uid), is_admin=False, query="q",
+        analysis_type="synthese_executive"))
+    assert '"done": true' in trames[-1].lower()
+    with Session(engine) as db:
+        ligne = db.get(Report, rid)
+        assert ligne.statut == rm.ECHEC
+        assert ligne.detail["raison"] == "delai_depasse"
+
+
+def test_f8_la_marge_protege_une_tache_qui_range_elle_meme(http):
+    """La marge évite de doubler le moteur entre le dépassement de l'échéance
+    et l'écriture de son propre `delai_depasse`."""
+    from app.config import DELAI_MAX_RAPPORT_SECONDES
+    from app.modules.reports import service as rs
+
+    assert rs.MARGE_ECHEANCE_SECONDES == 60
+    engine, uid = http
+    with Session(engine) as db:
+        # Juste au-delà de l'échéance, mais dans la marge : pas touché.
+        dans_la_marge = _rapport(
+            db, uid, statut=rm.EN_COURS,
+            created_at=dt.datetime.now(dt.timezone.utc)
+            - dt.timedelta(seconds=DELAI_MAX_RAPPORT_SECONDES + 10))
+        assert rs.marquer_delai_depasse(db, dans_la_marge) is False
+        assert rs.balayer_orphelins_du_compte(db, str(uid)) == 0
+        # Au-delà de la marge : rangé.
+        perdu = _orphelin(db, uid, minutes=5)
+        assert rs.marquer_delai_depasse(db, perdu) is True
+        # Idempotent : une ligne déjà terminale n'est pas réécrite.
+        assert rs.marquer_delai_depasse(db, perdu) is False
+
+
+def test_f8_le_commentaire_nomme_les_delais_de_lecture_des_fournisseurs():
+    """La borne d'un fournisseur muet est son délai de LECTURE : le code doit
+    le dire, sinon la prochaine lecture croira l'échéance seule suffisante."""
+    import pathlib
+
+    source = pathlib.Path("app/modules/analysis/service.py").read_text(
+        encoding="utf-8")
+    assert "600 s Claude" in source and "180 s Gemini" in source
+
+
+# --- F10 — l'événement « rapport supprimé » porte un code ------------------
+
+def test_f10_levenement_de_suppression_porte_un_code(http, monkeypatch):
+    """C'était le SEUL événement d'erreur sans `code` : le front tombait dans
+    la branche par défaut « Réessayer », restait sur l'écran de suivi et
+    attendait un polling qui avalait le 404 — un sablier indéfini."""
+    import json as _json
+
+    from app.modules.analysis import service as analyse
+
+    engine, uid = http
+    with Session(engine) as db:
+        r = _rapport(db, uid, statut=rm.EN_COURS)
+        rid = r.id
+
+    horloge = {"t": 0.0}
+    monkeypatch.setattr(analyse, "_horloge", lambda: horloge["t"])
+
+    def _attendre(s):
+        horloge["t"] += s
+        # Le rapport disparaît pendant sa génération.
+        with Session(engine) as db:
+            ligne = db.get(Report, rid)
+            if ligne is not None:
+                db.delete(ligne)
+                db.commit()
+
+    monkeypatch.setattr(analyse, "_attendre", _attendre)
+    monkeypatch.setattr(analyse, "lancer_rapport",
+                        lambda *a, **kw: _lire(engine, rid))
+
+    trames = list(analyse.stream_analysis(
+        db=Session(engine), user_id=str(uid), is_admin=False, query="q",
+        analysis_type="synthese_executive"))
+    dernier = _json.loads(trames[-1].removeprefix("data: "))
+    assert dernier["code"] == "rapport_supprime"
+    assert dernier["done"] is True
+
+
+# --- F11 — le cache d'empreintes viz est invalidé à la clôture -------------
+
+def test_f11_la_cloture_dun_rapport_invalide_le_cache_des_empreintes(
+        base, monkeypatch):
+    """Juste après avoir payé 25 crédits, l'utilisateur pouvait ouvrir son
+    rapport et n'y voir AUCUN graphique pendant une minute, sans message : le
+    cache de 60 s ne connaissait pas les nouvelles empreintes et
+    `GET /viz/{empreinte}.svg` rendait 404."""
+    from app.modules.viz import service as viz_service
+
+    import time as _time
+
+    _brancher_moteur(monkeypatch)
+    uid = uuidlib.uuid4()
+    # Cache chauffé : c'est ce que laisse n'importe quelle image chargée dans la
+    # minute précédente — un jeu d'empreintes qui ne connaît pas celles du
+    # rapport qu'on est en train de produire.
+    viz_service._cache_empreintes[str(uid)] = (_time.monotonic(), set())
+
+    _lancer(base, uid, monkeypatch)
+    assert str(uid) not in viz_service._cache_empreintes, (
+        "le cache d'empreintes survit à la clôture : les graphiques du rapport "
+        "tout juste payé rendront 404 pendant une minute")
+
+
+def test_f11_un_message_finalise_invalide_aussi_le_cache():
+    """Même correction côté conversations : le `preparer_sans_faute` d'un
+    message pose lui aussi de nouvelles empreintes."""
+    import pathlib
+
+    source = pathlib.Path("app/modules/intelligence/service.py").read_text(
+        encoding="utf-8")
+    bloc = source[source.index("def _finalize_turn"):
+                  source.index("def _reponse_assistant")]
+    assert "viz_service.invalider_cache(user_id)" in bloc
+
+
+def test_f11_invalider_cache_ne_leve_jamais():
+    from app.modules.viz import service as viz_service
+
+    viz_service.invalider_cache(None)
+    viz_service.invalider_cache("")
+    viz_service.invalider_cache("compte-inconnu")
+
+
+# --- F7 — le pool de connexions est réglable -------------------------------
+
+def test_f7_le_pool_vient_de_la_configuration():
+    """Chaque génération suivie occupe DEUX connexions pendant toute sa durée
+    (le générateur SSE et le moteur) : le défaut de SQLAlchemy, 5 + 10, tombait
+    à sept rapports simultanés — et le symptôme était un `echec` sur un rapport
+    qui n'avait rien de fautif."""
+    import pathlib
+
+    from app.config import Settings
+    from app.db import _options_de_pool
+
+    champs = Settings.model_fields
+    assert champs["db_pool_size"].default == 10
+    assert champs["db_max_overflow"].default == 20
+    # SQLite (tests, dev) n'a pas de QueuePool : lui passer ces arguments
+    # ferait échouer l'import du module.
+    assert _options_de_pool("sqlite://") == {}
+    assert _options_de_pool("postgresql+psycopg://x/y") == {
+        "pool_size": 10, "max_overflow": 20}
+    exemple = pathlib.Path(".env.example").read_text(encoding="utf-8")
+    for cle in ("DB_POOL_SIZE", "DB_MAX_OVERFLOW", "API_INTERNE_URL",
+                "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"):
+        assert cle in exemple, cle
+
+
+# --- F13 — la constante morte est retirée ----------------------------------
+
+def test_f13_la_constante_sources_internes_a_disparu():
+    """Elle n'était référencée nulle part et suggérait une liste noire, alors
+    que le masquage réel est fermé sur le web — donc plus sûr."""
+    from app.modules.reports import service as rs
+
+    assert not hasattr(rs, "SOURCES_INTERNES")
+    # La règle réelle n'a pas bougé.
+    assert rs._sources_publiables([{"source": "notion", "title": "Secret"}]) == [
+        dict(rs._JALON_SOURCE_INTERNE)]

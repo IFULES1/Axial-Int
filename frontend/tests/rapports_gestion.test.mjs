@@ -293,8 +293,15 @@ test('14 — le lancement porte un signal et une clé d’idempotence', () => {
 test('15 — la reprise au montage est gardée contre l’obsolescence', () => {
   // Une réponse tardive de `GET /reports/{id}` ne doit pas écraser un état SSE
   // plus avancé, ni réécrire le stockage par-dessus (revue Task 4).
-  assert.match(app,
-    /const repris = etatDepuisStockage\(brut\);[\s\S]{0,1400}let actif = true;[\s\S]{0,1200}return \(\) => \{ actif = false; \};/);
+  // Le bloc est isolé AVANT d'être testé : une expression régulière qui
+  // traverse tout le fichier finit par attraper le `let actif` de l'effet
+  // suivant dès qu'on ajoute dix lignes au-dessus.
+  const debut = app.indexOf('const repris = etatDepuisStockage(brut);');
+  assert.ok(debut > 0, 'effet de reprise introuvable');
+  const bloc = app.slice(debut, app.indexOf('}, [route]);', debut));
+  assert.match(bloc, /let actif = true;/);
+  assert.match(bloc, /if \(!actif\) return;/);
+  assert.match(bloc, /return \(\) => \{ actif = false; \};/);
 });
 
 /* ---------------------------------------------------------------- */
@@ -339,7 +346,17 @@ test('18 — la page publique est un rendu serveur, sans état ni indexation', (
   assert.match(pagePublique, /robots: \{ index: false, follow: false \}/);
   // Lecture serveur du rapport public, sans cache : un lien révoqué rend 404
   // tout de suite.
-  assert.match(pagePublique, /\$\{API\}\/partage\/\$\{encodeURIComponent\(jeton\)\}/);
+  /* Lecture SSR par l'URL INTERNE (revue finale, F9) : `NEXT_PUBLIC_API_URL`
+     vaut l'URL publique en production, donc le VPS faisait un aller-retour
+     DNS + TLS + proxy vers son propre nom pour joindre un backend qui écoute
+     sur 127.0.0.1. Les IMAGES, elles, gardent l'URL publique : c'est le
+     navigateur du visiteur qui les charge. */
+  assert.match(pagePublique, /\$\{API_INTERNE\}\/partage\/\$\{encodeURIComponent\(jeton\)\}/);
+  assert.match(pagePublique, /const API_INTERNE = process\.env\.API_INTERNE_URL/);
+  assert.match(pagePublique, /\|\| process\.env\.NEXT_PUBLIC_API_URL/);
+  assert.match(pagePublique, /\$\{API_PUBLIQUE\}\/viz\//);
+  assert.ok(!/API_INTERNE\}\/viz\//.test(pagePublique),
+    "les images doivent garder l'URL publique");
   assert.match(pagePublique, /cache: "no-store"/);
   // Un segment qui ne peut pas porter de jeton reste un 404 de routage.
   assert.match(pagePublique, /if \(!jeton\) notFound\(\);/);
@@ -353,14 +370,26 @@ test('18 — la page publique est un rendu serveur, sans état ni indexation', (
   assert.match(pagePublique, /console\.error\(`\[partage\] API en erreur : HTTP \$\{res\.status\}`\)/);
   assert.match(pagePublique, /console\.error\("\[partage\] réponse illisible"/);
   // Aucune fuite : ni jeton, ni message d'exception dans ce que voit le visiteur.
-  assert.match(etatsPartage, /revoqueTitre: "Ce rapport n'est plus partagé"/);
+  /* Le 404 ne prétend plus trancher entre « révoqué » et « n'a jamais
+     existé » (revue finale, F15) : le backend rend 404 dans les deux cas,
+     délibérément — répondre différemment dirait à qui essaie des jetons au
+     hasard lesquels ont existé. Le `<title>` du `not-found.tsx` reprend
+     désormais le titre mot pour mot. */
+  assert.match(etatsPartage, /revoqueTitre: "Ce lien ne mène à aucun rapport"/);
+  assert.ok(!/Demandez-lui un nouveau lien/.test(etatsPartage),
+    "phrase incohérente avec le cas « n'a jamais existé »");
+  assert.match(notFoundPartage, /title: "Ce lien ne mène à aucun rapport — Axial Intelligence"/);
+  assert.ok(!/Lien expiré/.test(notFoundPartage), 'le <title> disait « expiré »');
+  // « 1 source » et non « 1 sources ».
+  assert.match(etatsPartage, /sourcesSuffixeUn: "source"/);
+  assert.match(pagePublique, /compterSources\(sources\.length\)/);
   assert.match(etatsPartage, /panneTitre: "Service indisponible"/);
   /* Textes français figés (spec §0, pas de `t()` ici) mais RASSEMBLÉS dans un
      seul objet, partagé avec le `not-found.tsx` de la route : l'arbitrage est
      visible et indexable par langue le jour où le partage devra suivre celle
      du rapport (revue Task 5, finding 5). */
   assert.match(etatsPartage, /^export const TEXTES = \{/m);
-  assert.match(pagePublique, /import \{ APP, PageEtat, TEXTES \} from "\.\.\/\.\.\/etats"/);
+  assert.match(pagePublique, /import \{ APP, PageEtat, TEXTES, compterSources \} from "\.\.\/\.\.\/etats"/);
   // Aucun texte en dur ne subsiste dans le corps de la page.
   assert.ok(!/Rapport partagé par \{pseudo\}|>Sources<|Rapport produit par </.test(pagePublique),
     'un texte en dur subsiste hors de TEXTES');

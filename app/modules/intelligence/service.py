@@ -1153,6 +1153,16 @@ def _finalize_turn(db: Session, user_id: str, turn: _Turn, answer: str, *,
     db.commit()
     db.refresh(assistant_msg)
 
+    # Le message vient d'acquérir ses empreintes de graphiques : le cache de
+    # 60 s de `viz.service` rendrait `404` sur les images de la réponse qu'on
+    # est en train d'afficher (revue finale, F11).
+    try:
+        from app.modules.viz import service as viz_service
+
+        viz_service.invalider_cache(user_id)
+    except Exception as e:  # noqa: BLE001 — un cache n'est jamais bloquant
+        logger.warning("Invalidation du cache d'empreintes impossible : %s", e)
+
     if billing_res is not None:
         from app.modules.analytics import client as analytics
 

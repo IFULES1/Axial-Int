@@ -21,9 +21,16 @@ export const ECHEC = 'echec';
 export const DEGRADE = 'degrade';
 export const ANNULE = 'annule';
 export const SOURCES_INSUFFISANTES = 'sources_insuffisantes';
+/* Statut PUREMENT front (revue finale, F10) : la base ne le connaît pas, elle
+   ne connaît que l'absence de ligne. Le rapport a été supprimé pendant sa
+   génération — `GET /reports/{id}` rend 404. Le polling avalait ce 404 (« un
+   aller-retour raté n'interrompt pas le suivi »), ce qui est juste pour une
+   coupure réseau et faux pour une suppression : le sablier tournait
+   indéfiniment sur un rapport qui n'existait plus. */
+export const SUPPRIME = 'supprime';
 
 export const STATUTS_TERMINAUX = [TERMINE, ECHEC, DEGRADE, ANNULE,
-                                  SOURCES_INSUFFISANTES];
+                                  SOURCES_INSUFFISANTES, SUPPRIME];
 
 /** Clé de reprise après rechargement de page. */
 export const CLE_STOCKAGE = 'axial_rapport_en_cours';
@@ -40,6 +47,8 @@ export const RAISONS_BANDEAU = [
   'truncated_generation', 'llm_unavailable', 'empty_generation',
   'investors_unavailable', 'couverture_partielle', 'generation_failed',
   'delai_depasse', 'annule_par_utilisateur',
+  // Rapport supprimé pendant sa génération (revue finale, F10).
+  'rapport_supprime',
 ];
 
 /** `ReportOut` / `ReportDetail` → état d'écran.
@@ -218,6 +227,22 @@ export function libelleEtape(etat, t) {
   }
   if (etape === 'finalisation') return t('reports.etape.finalisation');
   return t('reports.etape.demarrage');
+}
+
+/** État d'un rapport disparu pendant sa génération (revue finale, F10).
+ *
+ *  Conserve l'identifiant et la question — l'écran doit pouvoir proposer
+ *  « relancer la même question » — et pose la raison qui nomme le bandeau.
+ *  Appelé sur un 404 du polling ET sur le `code: "rapport_supprime"` du flux :
+ *  les deux chemins mènent au même écran.
+ */
+export function etatSupprime(etat) {
+  return {
+    ...(etat || {}),
+    statut: SUPPRIME,
+    progression: 100,
+    detail: { ...((etat && etat.detail) || {}), raison: 'rapport_supprime' },
+  };
 }
 
 /** Libellé du bandeau d'un rapport dégradé / partiel (spec §3).

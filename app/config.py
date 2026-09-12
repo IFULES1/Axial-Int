@@ -40,6 +40,18 @@ class Settings(BaseSettings):
     # --- Databases --------------------------------------------------------
     # App database (business data + auth mirror).
     database_url: str = "postgresql+psycopg://axial:axial@localhost:5432/axial"
+    # Pool de connexions. Le défaut de SQLAlchemy (5 + 10 = 15) ne tient pas
+    # les générations suivies : CHAQUE rapport en cours occupe DEUX connexions
+    # pendant toute sa durée — celle du générateur SSE, qui relit la ligne
+    # toutes les 2 s, et celle du moteur, qui écrit son avancement. Sept
+    # rapports simultanés épuisaient donc le pool, et le symptôme était un
+    # `echec` sur un rapport qui n'avait rien de fautif. 10 + 20 = 30, soit
+    # quinze générations concurrentes, avec de la marge pour les requêtes
+    # ordinaires. Réglable sans redéploiement (`DB_POOL_SIZE`,
+    # `DB_MAX_OVERFLOW`) : le bon chiffre dépend aussi de ce que la base
+    # accepte côté Supabase.
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
     # Qdrant vector store.
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "documents"

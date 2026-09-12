@@ -10,9 +10,13 @@
 import { PageEtat, TEXTES } from "../../etats";
 import "../../partage.css";
 
+// Le titre reprend MOT POUR MOT `TEXTES.revoqueTitre` : il disait « Lien
+// expiré » quand le corps disait autre chose (revue finale, F15). Écrit en
+// clair et non interpolé — `metadata` est évalué au build, et la duplication
+// est verrouillée par `frontend/tests/etapes.test.mjs`.
 export const metadata = {
   robots: { index: false, follow: false },
-  title: "Lien expiré — Axial Intelligence",
+  title: "Ce lien ne mène à aucun rapport — Axial Intelligence",
 };
 
 export default function Introuvable() {

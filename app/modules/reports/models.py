@@ -51,6 +51,12 @@ class Report(Base):
     # écart permanent entre le modèle et la base.
     __table_args__ = (
         Index("ux_reports_jeton_partage", "jeton_partage", unique=True),
+        # Idempotence du lancement (revue finale, F5) : c'est CETTE contrainte
+        # qui ferme la course entre deux requêtes portant la même clé. Déclarée
+        # ici pour que la base des tests (`create_all`) porte exactement la même
+        # règle que la production (migration 0023, en CONCURRENTLY).
+        Index("ux_reports_cle_idempotence", "user_id", "cle_idempotence",
+              unique=True),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(SAUuid, primary_key=True, default=uuid.uuid4)
@@ -120,3 +126,12 @@ class Report(Base):
     # (les NULL n'entrent pas en collision dans un index unique PostgreSQL).
     jeton_partage: Mapped[str | None] = mapped_column(String(32))
     partage_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+
+    # --- Idempotence du lancement (revue finale, F5) -----------------------
+    # La clé `X-Idempotency-Key` du lancement. Une COLONNE et non une entrée du
+    # JSON `detail` : seule une contrainte en base ferme la course entre deux
+    # requêtes portant la même clé (toutes deux lisaient « rien », créaient une
+    # ligne et débitaient). L'index unique `(user_id, cle_idempotence)` la
+    # transforme en `IntegrityError`, que `_nouvelle_ligne` rattrape pour
+    # rendre la ligne déjà créée.
+    cle_idempotence: Mapped[str | None] = mapped_column(String(64))

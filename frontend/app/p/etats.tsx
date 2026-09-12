@@ -16,13 +16,28 @@ export const TEXTES = {
   partagePar: "Rapport partagé par",
   marque: "Axial Intelligence",
   sources: "Sources",
+  // Singulier ET pluriel : le compteur affichait « 1 sources » (revue finale,
+  // F15). Une fonction plutôt que deux clés à recoller sur place — le choix se
+  // fait ici, avec les textes, pas dans le JSX.
   sourcesSuffixe: "sources",
+  sourcesSuffixeUn: "source",
   piedAvant: "Rapport produit par",
   piedApres: "— le copilote stratégique des décisions de fondateur.",
-  revoqueTitre: "Ce rapport n'est plus partagé",
+  /* Écran 404 (revue finale, F15). Trois incohérences corrigées :
+     le `<title>` disait « Lien expiré » quand le corps disait « révoqué » ;
+     la phrase qui renvoyait vers l'auteur n'avait aucun sens sur un lien qui
+     n'a jamais existé ; et le texte prétendait trancher entre les deux.
+
+     Il ne PEUT pas trancher : le backend rend 404 pour un jeton révoqué comme
+     pour un jeton inventé, délibérément — répondre différemment dirait à qui
+     essaie des jetons au hasard lesquels ont existé. Le texte dit donc
+     l'ACTION possible (redemander un lien), pas un diagnostic qu'on n'a pas.
+     Le `<title>` de `not-found.tsx` reprend `revoqueTitre` mot pour mot. */
+  revoqueTitre: "Ce lien ne mène à aucun rapport",
   revoqueCorps:
-    "Le lien a été révoqué par son auteur, ou il n'a jamais existé. "
-    + "Demandez-lui un nouveau lien.",
+    "Le lien a été révoqué par son auteur, ou l'adresse est incomplète. "
+    + "Vérifiez l'adresse copiée, ou redemandez un lien à la personne qui vous "
+    + "l'a transmis.",
   panneTitre: "Service indisponible",
   panneCorps:
     "Nous n'arrivons pas à afficher ce rapport pour le moment. "
@@ -31,6 +46,11 @@ export const TEXTES = {
   // Locale des dates : figée avec les textes, pour la même raison.
   locale: "fr-FR",
 };
+
+/** « 1 source » / « 12 sources ». Le compteur rendait « 1 sources ». */
+export function compterSources(n: number): string {
+  return `${n} ${n > 1 ? TEXTES.sourcesSuffixe : TEXTES.sourcesSuffixeUn}`;
+}
 
 /* Écran d'état : lien révoqué ou service en panne. Aucun détail technique —
    ni code HTTP, ni message d'exception, ni jeton : le visiteur n'a rien à

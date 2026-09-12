@@ -578,9 +578,20 @@ export async function axUploadDocument(file, _retried = false) {
  * un `ReportDetail` — donc `id`, et non plus `report_id`. On le normalise ici
  * pour que l'appelant n'ait qu'une forme de rapport à connaître, quelle que
  * soit la route qui l'a produit. Non exporté : le seul chemin du front est
- * `axLancerRapport`. */
-async function lancerBloquant(body) {
-  const r = await axFetch("/analysis/run", { method: "POST", body });
+ * `axLancerRapport`.
+ *
+ * `idempotencyKey` — la MÊME clé que le flux a envoyée (revue finale, F1).
+ * `stream_unavailable` est levé sur `!res.ok || !res.body`, c'est-à-dire
+ * précisément le 5xx d'un proxy survenu APRÈS que le backend a accepté la
+ * requête et lancé la tâche : sans la clé, ce repli créait une seconde ligne,
+ * une seconde génération et un SECOND débit — exactement le scénario que la
+ * clé devait fermer. `/analysis/run` a la même sémantique que `/stream`. */
+async function lancerBloquant(body, idempotencyKey) {
+  const r = await axFetch("/analysis/run", {
+    method: "POST",
+    body,
+    headers: idempotencyKey ? { "X-Idempotency-Key": idempotencyKey } : undefined,
+  });
   // `report_id` conservé en alias : le flux le porte sur chaque événement, et
   // l'écran de génération lit la même clé dans les deux cas.
   return r && r.id ? { ...r, report_id: r.id } : r;
@@ -603,7 +614,9 @@ export async function axLancerRapport(body, onEvent, { signal, idempotencyKey } 
       messageInterrompu: "Génération interrompue.",
     });
   } catch (e) {
-    if (e && e.code === "stream_unavailable") return lancerBloquant(body);  // repli
+    // Repli, avec la MÊME clé (revue finale, F1) : un repli sans clé rejouait
+    // la génération et le débit.
+    if (e && e.code === "stream_unavailable") return lancerBloquant(body, idempotencyKey);
     throw e;
   }
 }

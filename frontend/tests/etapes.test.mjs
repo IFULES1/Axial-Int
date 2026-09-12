@@ -15,6 +15,7 @@ import {
   EN_COURS, TERMINE, ECHEC, DEGRADE, SOURCES_INSUFFISANTES, CLE_STOCKAGE,
   ETAPES, estTerminal, etatAuLancement, etatDepuisEvenement, etatDepuisRapport,
   etatDepuisStockage, versStockage, libelleEtape, libelleRaison,
+  SUPPRIME, RAISONS_BANDEAU, etatSupprime,
 } from '../app/_prototype/rapports_etat.js';
 
 const racine = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -323,8 +324,112 @@ test('15 — le front a bien basculé sur le contrat de Task 3', () => {
   assert.equal(CLE_STOCKAGE, 'axial_rapport_en_cours');
   assert.match(app, /RAPPORT_CLE_STOCKAGE/);
   // Polling 3 s et arrêt sur statut terminal.
-  assert.match(app, /setInterval\([\s\S]{0,400}?axRapport\(idEnCours\)[\s\S]{0,400}?\}, 3000\)/);
+  assert.match(app, /setInterval\([\s\S]{0,400}?axRapport\(idEnCours\)[\s\S]{0,900}?\}, 3000\)/);
   // Stop branché sur la route d'annulation.
   assert.match(bridge, /reports\/\$\{id\}\/annuler/);
   assert.match(bridge, /reports\/\$\{id\}\/relancer/);
+});
+
+/* ==================================================================
+   Revue finale de branche — F1, F10, F12
+   ================================================================== */
+
+// --- F10 : rapport supprimé pendant sa génération -------------------------
+
+test('16 — F10 : un rapport supprimé est un état TERMINAL, pas un sablier', () => {
+  // Le statut existe côté front seulement : la base ne connaît que l'absence
+  // de ligne.
+  assert.equal(SUPPRIME, 'supprime');
+  assert.ok(estTerminal(SUPPRIME),
+    'un rapport supprimé doit arrêter le chrono et le polling');
+
+  const encours = etatDepuisEvenement(etatAuLancement('Marché du lithium'), {
+    progress: 55, step: 'generate', etape: 'redaction', report_id: 'r-9',
+    detail: { section: '3. Concurrence' },
+  });
+  const fin = etatSupprime(encours);
+  assert.equal(fin.statut, SUPPRIME);
+  assert.equal(fin.progression, 100);
+  assert.equal(fin.detail.raison, 'rapport_supprime');
+  // L'identifiant ET la question survivent : l'écran doit pouvoir proposer de
+  // relancer la même question.
+  assert.equal(fin.id, 'r-9');
+  assert.equal(fin.question, 'Marché du lithium');
+  // Le bandeau a un texte, en français comme en anglais.
+  assert.ok(RAISONS_BANDEAU.indexOf('rapport_supprime') !== -1);
+  assert.equal(libelleRaison(fin, tCle), 'reports.degrade.rapport_supprime');
+  assert.notEqual(libelleRaison(fin, tFr), 'reports.degrade.rapport_supprime');
+});
+
+test('17 — F10 : le 404 du polling est terminal, l’événement SSE porte un code', () => {
+  /* Le `catch` du polling avalait TOUT (« un aller-retour raté n'interrompt
+     pas le suivi ») : juste pour une coupure réseau, faux pour une
+     suppression — le sablier tournait sur un rapport qui n'existait plus. */
+  assert.match(app, /\.catch\(\(e\) => \{[\s\S]{0,600}?\(e && e\.status\) === 404[\s\S]{0,300}?etatSupprime\(/);
+  // Le flux, lui, nomme le cas : `decrireErreur` a une branche dédiée, et
+  // `startReport` ne reste PAS sur l'écran de suivi pour ce code.
+  assert.match(app, /rapport_supprime: \['err\.rapport_supprime', 'reessayer'\]/);
+  assert.match(app, /e\.code === 'rapport_supprime'[\s\S]{0,300}?etatSupprime\(encours\)/);
+  // Les deux textes de fin d'écran passent par `t()`, FR et EN.
+  for (const langue of ['fr', 'en']) {
+    const dico = clesI18n(langue);
+    for (const cle of ['reports.statut.supprime', 'reports.statut.supprime_detail',
+                       'reports.degrade.rapport_supprime', 'reports.badge.supprime',
+                       'err.rapport_supprime.titre', 'err.rapport_supprime.detail']) {
+      assert.ok(dico.has(cle), `${langue}/${cle} manquante`);
+    }
+  }
+});
+
+// --- F12 : les dix codes backend sont nommés et traduits -------------------
+
+test('18 — F12 : les codes d’erreur des rapports ne tombent plus en français', () => {
+  const CODES = {
+    rapport_en_cours: 'err.rapport_en_cours',
+    rapport_non_en_cours: 'err.rapport_non_en_cours',
+    rapport_non_partageable: 'err.rapport_non_partageable',
+    jeton_indisponible: 'err.jeton_indisponible',
+    format_inconnu: 'err.format_inconnu',
+    motif_inconnu: 'err.motif_inconnu',
+    note_invalide: 'err.note_invalide',
+    question_absente: 'err.question_absente',
+    titre_vide: 'err.titre_vide',
+    unknown_analysis_type: 'err.type_inconnu',
+  };
+  const fr = clesI18n('fr');
+  const en = clesI18n('en');
+  for (const [code, prefixe] of Object.entries(CODES)) {
+    // La table de `decrireErreur` cite bien le code ET son préfixe de clé.
+    assert.ok(app.includes(`${code}: ['${prefixe}'`),
+      `${code} absent de la table de decrireErreur`);
+    for (const [langue, dico] of [['fr', fr], ['en', en]]) {
+      for (const suffixe of ['titre', 'detail']) {
+        const cle = `${prefixe}.${suffixe}`;
+        assert.ok(dico.has(cle), `${langue}/${cle} manquante`);
+      }
+    }
+  }
+  // Vouvoiement : aucun tutoiement dans les nouveaux textes français.
+  for (const prefixe of Object.values(CODES)) {
+    for (const suffixe of ['titre', 'detail']) {
+      const texte = fr.get(`${prefixe}.${suffixe}`) || '';
+      assert.ok(!/\b(tu|ton|ta|tes|toi)\b/i.test(texte), texte);
+    }
+  }
+});
+
+// --- F1 : la clé d'idempotence survit au repli bloquant -------------------
+
+test('19 — F1 : le repli bloquant porte la même clé que le flux', () => {
+  /* `stream_unavailable` est levé sur `!res.ok || !res.body`, c'est-à-dire le
+     5xx d'un proxy survenu APRÈS que le backend a accepté la requête : sans la
+     clé, le repli créait une seconde ligne, une seconde génération et un
+     second débit. */
+  assert.match(bridge, /async function lancerBloquant\(body, idempotencyKey\)/);
+  assert.match(bridge, /lancerBloquant[\s\S]{0,800}?idempotencyKey \? \{ "X-Idempotency-Key": idempotencyKey \} : undefined/);
+  assert.match(bridge, /e\.code === "stream_unavailable"\) return lancerBloquant\(body, idempotencyKey\)/);
+  // Et la clé est bien celle du flux : un seul `cle` par lancement, reportée
+  // sur « Réessayer » (`args.cleIdempotence`).
+  assert.match(app, /const cle = cleIdempotence \|\| nouvelleCleIdempotence\(\);/);
+  assert.match(app, /idempotencyKey: cle/);
 });

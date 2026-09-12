@@ -64,6 +64,22 @@ def empreintes_du_compte(db: Session, user_id: str) -> set[str]:
     return empreintes
 
 
+def invalider_cache(user_id: str | None) -> None:
+    """Oublie les empreintes mémoïsées de ce compte. Ne lève jamais.
+
+    À appeler dès qu'une ligne du compte gagne de NOUVELLES empreintes : à la
+    clôture d'un rapport et à l'archivage d'un message. Sans cela, un compte
+    dont le cache venait d'être chauffé (n'importe quelle image chargée dans la
+    minute précédente) recevait un `404 not_found` sur les graphiques du
+    rapport qu'il venait de payer, pendant une minute entière et sans message
+    — le front retombait silencieusement sur le tableau de chiffres
+    (revue finale, F11).
+    """
+    if not user_id:
+        return
+    _cache_empreintes.pop(str(user_id), None)
+
+
 def preparer(db: Session, markdown: str) -> list[dict]:
     """Liste sérialisable (forme `Viz`) à stocker sur le rapport ou le message.
     Les specs compilés sont enregistrés par empreinte s'ils ne le sont pas déjà."""

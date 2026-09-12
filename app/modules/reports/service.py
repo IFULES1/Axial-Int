@@ -46,13 +46,10 @@ JETON_LONGUEUR = -(-4 * JETON_OCTETS // 3)  # 16 octets → 22 caractères
 JETON_ESSAIS = 3
 SLUG_MAX = 60
 PSEUDO_MAX = 40
-# Sources à ne JAMAIS publier : ce sont les documents privés de l'utilisateur
-# et son espace Notion. Le partage est public — un lien transmis par erreur ne
-# doit pas exposer le contenu de son coffre.
-# Valeurs réellement produites par `app/shared/grounding.py` : « interne » (base
-# de connaissance), « document » (fichier déposé par l'utilisateur), « notion ».
-# Tout ce qui n'est pas « web » reste privé : la liste est fermée sur le web.
-SOURCES_INTERNES = ("interne", "document", "documents", "notion", "rag", "kb")
+# Le masquage des sources internes n'est PAS une liste noire : il est fermé sur
+# le web (`_sources_publiables`, plus bas), donc un genre de source encore
+# inconnu est masqué par défaut. Une constante `SOURCES_INTERNES` traînait ici,
+# référencée nulle part, et suggérait le contraire — retirée (revue finale, F13).
 
 # --- Export ----------------------------------------------------------------
 FORMATS_EXPORT = ("pdf", "md", "docx")
@@ -641,20 +638,103 @@ def balayer_orphelins(db: Session, *, delai_secondes: int | None = None) -> int:
         select(Report).where(Report.statut == rm.EN_COURS,
                              Report.created_at < limite)))
     for report in orphelins:
-        report.statut = rm.ECHEC
-        report.progression = 100
-        report.termine_at = _now()
-        report.detail = {
-            **(report.detail or {}),
-            "raison": "interrompu_par_redemarrage",
-            "message": ("La génération a été interrompue par un redémarrage du "
-                        "service. Vous pouvez la relancer ; rien n'a été débité."),
-        }
+        _ranger_orphelin(report, raison="interrompu_par_redemarrage", message=(
+            "La génération a été interrompue par un redémarrage du service. "
+            "Vous pouvez la relancer ; rien n'a été débité."))
     if orphelins:
         db.commit()
         logger.warning("Balayage au démarrage : %d rapport(s) interrompu(s) "
                        "rangé(s) en échec.", len(orphelins))
     return len(orphelins)
+
+
+# --- Balayage par compte, en ligne (revue finale, F6) ----------------------
+
+# Marge au-delà de l'échéance du moteur avant de déclarer une ligne perdue. Le
+# moteur range lui-même son rapport quand il dépasse l'échéance ; le balayage
+# ne doit pas lui couper l'herbe sous le pied entre le dépassement et
+# l'écriture du statut. Soixante secondes suffisent largement pour un `commit`.
+MARGE_ECHEANCE_SECONDES = 60
+
+MESSAGE_DELAI_DEPASSE = (
+    "La génération a dépassé le délai maximal et a été arrêtée. Aucun crédit "
+    "n'a été débité — vous pouvez la relancer.")
+
+
+def _ranger_orphelin(report: Report, *, raison: str, message: str) -> None:
+    """Écrit l'échec sur la ligne, SANS committer (l'appelant groupe)."""
+    from app.modules.reports import models as rm
+
+    report.statut = rm.ECHEC
+    report.progression = 100
+    report.termine_at = _now()
+    report.detail = {**(report.detail or {}), "raison": raison, "message": message}
+
+
+def _echeance_orpheline() -> dt.datetime:
+    from app.config import DELAI_MAX_RAPPORT_SECONDES
+
+    return _now() - dt.timedelta(
+        seconds=DELAI_MAX_RAPPORT_SECONDES + MARGE_ECHEANCE_SECONDES)
+
+
+def balayer_orphelins_du_compte(db: Session, user_id: str) -> int:
+    """Range les `en_cours` périmés de CE compte. Appelé au lancement d'un
+    rapport et à chaque `GET /reports`.
+
+    Le balayage de démarrage ne tournait qu'au `lifespan` de l'API : une
+    instance debout trois semaines laissait pour toujours une ligne figée à
+    « 62 % », sur laquelle le front poll indéfiniment sans que l'utilisateur
+    puisse ni relancer ni comprendre. Le faire par compte, aux deux endroits
+    où il regarde ses rapports, coûte un `SELECT` indexé sur `user_id` et ferme
+    le trou sans ordonnanceur (revue finale, F6).
+    """
+    from app.modules.reports import models as rm
+
+    try:
+        uid = uuid.UUID(user_id)
+    except (ValueError, AttributeError, TypeError):
+        return 0
+    orphelins = list(db.scalars(
+        select(Report).where(Report.user_id == uid,
+                             Report.statut == rm.EN_COURS,
+                             Report.created_at < _echeance_orpheline())))
+    for report in orphelins:
+        _ranger_orphelin(report, raison="delai_depasse",
+                         message=MESSAGE_DELAI_DEPASSE)
+    if orphelins:
+        db.commit()
+        logger.warning("Balayage du compte %s : %d rapport(s) rangé(s) en "
+                       "échec (délai dépassé).", user_id, len(orphelins))
+    return len(orphelins)
+
+
+def marquer_delai_depasse(db: Session, report: Report) -> bool:
+    """Range CETTE ligne en `echec` si elle est `en_cours` au-delà de
+    l'échéance. Rend `True` si elle a été rangée.
+
+    Utilisé par la boucle du flux SSE (revue finale, F8) : un fournisseur muet
+    ne rend aucune portion, donc `Suivi.chunk` n'est jamais appelé et la tâche
+    ne voit ni le Stop ni son échéance. Le flux, lui, relit la ligne toutes les
+    deux secondes — c'est le seul témoin éveillé.
+    """
+    from app.modules.reports import models as rm
+
+    if report is None or report.statut != rm.EN_COURS:
+        return False
+    # SQLite (tests) rend des dates NAÏVES là où PostgreSQL en rend des
+    # aware : comparer les deux formes lève un `TypeError`. On ramène donc la
+    # date lue à de l'UTC aware avant toute comparaison.
+    cree = report.created_at
+    if cree is None:
+        return False
+    if cree.tzinfo is None:
+        cree = cree.replace(tzinfo=dt.timezone.utc)
+    if cree >= _echeance_orpheline():
+        return False
+    _ranger_orphelin(report, raison="delai_depasse", message=MESSAGE_DELAI_DEPASSE)
+    db.commit()
+    return True
 
 
 # --- Export (spec §4) ------------------------------------------------------

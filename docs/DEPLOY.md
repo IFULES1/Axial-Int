@@ -55,6 +55,41 @@ doppler setup --project axial --config prd
 
 > Le schéma DB est appliqué **par moi via l'API Supabase** après création du projet — tu n'as pas à lancer les migrations.
 
+### 3.1 Migration `0023_rapports_v2` — AVANT le redémarrage du backend
+
+Rapports v2 ajoute treize colonnes à `reports`, la table `report_feedback`, un
+index unique partiel sur `credit_events` et `credit_balances.legacy_verifie_at`.
+
+**Ordre obligatoire : migrer, PUIS redémarrer.** L'ancien code tolère des
+colonnes en trop ; le nouveau lit des colonnes qui n'existent pas encore. Il
+n'y a donc aucune fenêtre où l'ancien code casse, mais il y en a une où le
+nouveau casse.
+
+**Contrôle préalable obligatoire.** L'index unique partiel échoue s'il existe
+déjà un doublon `premier_rapport_offert` — et, créé en `CONCURRENTLY` hors
+transaction, il laisse derrière lui un index **INVALID** à supprimer à la main.
+La migration dédoublonne elle-même (elle garde la ligne la plus ancienne), mais
+il faut savoir ce qu'elle va supprimer :
+
+```sql
+-- À exécuter sur la base de PRODUCTION avant `alembic upgrade head`.
+SELECT user_id, count(*)
+FROM credit_events
+WHERE action = 'premier_rapport_offert'
+GROUP BY user_id HAVING count(*) > 1;
+```
+
+S'il reste un index invalide d'une tentative précédente :
+
+```sql
+SELECT indexrelid::regclass FROM pg_index WHERE NOT indisvalid;
+DROP INDEX CONCURRENTLY ux_credit_events_premier_rapport_offert;
+```
+
+Nouvelles variables à poser dans Doppler (`prd`) avant le redémarrage :
+`DB_POOL_SIZE=10`, `DB_MAX_OVERFLOW=20`, et `GOOGLE_CLIENT_ID` /
+`GOOGLE_CLIENT_SECRET` si la livraison Google Drive doit apparaître.
+
 ## 4. Qdrant (binaire natif) + service
 ```bash
 # le binaire bin/qdrant est déjà dans le repo (ou re-télécharge la release aarch64/x86_64 selon le VPS)
@@ -86,6 +121,24 @@ sudo systemctl restart axial-qdrant
 > même : `grep -c '127.0.0.1:8090' .next/static/chunks/*.js` doit valoir 0, puis
 > tester une inscription depuis un compte neuf dans le navigateur.
 
+> **Deuxième variable depuis Rapports v2 : `API_INTERNE_URL`.** La page publique
+> `/p/<pseudo>/<slug>` est rendue **côté serveur** : son `fetch` part du process
+> Next, pas du navigateur. Sans cette variable il reprenait `NEXT_PUBLIC_API_URL`,
+> donc le VPS faisait un aller-retour DNS + TLS + reverse proxy vers son propre
+> nom public pour joindre un backend qui écoute sur `127.0.0.1:8090` — et la page
+> cassait si le certificat ou le proxy avait un souci. Elle est lue à
+> l'EXÉCUTION (pas de préfixe `NEXT_PUBLIC_`), donc elle va dans le `.env.local`
+> du VPS et **pas** dans la ligne de build :
+>
+> ```
+> # /opt/axial-intelligence/frontend/.env.local
+> NEXT_PUBLIC_API_URL=https://app.axial-ia.fr/api
+> API_INTERNE_URL=http://127.0.0.1:8090
+> ```
+>
+> Les `<img>` des graphiques d'un rapport partagé gardent, elles, l'URL
+> publique : c'est le navigateur du visiteur qui les charge.
+
 ```bash
 cd /opt/axial-intelligence/frontend
 NEXT_PUBLIC_API_URL=https://app.axial-ia.fr/api npm ci && \
@@ -97,10 +150,27 @@ sudo cp /opt/axial-intelligence/deploy/axial-frontend.service /etc/systemd/syste
 sudo systemctl daemon-reload && sudo systemctl enable --now axial-backend axial-worker axial-frontend
 ```
 
-## 8. Caddy (reverse proxy)
-Ajoute le bloc de `deploy/Caddyfile` à ton Caddyfile existant (ne touche pas au bloc de l'ancienne app), puis :
+## 8. Reverse proxy
+
+> **Lequel est en service ?** `deploy/` porte DEUX configurations —
+> `deploy/nginx-axial.conf` (`app.axial-ia.fr`) et `deploy/Caddyfile`
+> (`app.axial-ia.com`, coquille préexistante). C'est **nginx** qui sert la
+> production ; le `Caddyfile` est un reliquat.
+
+**Timeout — obligatoire depuis Rapports v2.** `POST /analysis/run` (le repli
+bloquant du flux) tient la requête HTTP ouverte pendant TOUTE la génération,
+jusqu'à 1800 s (`DELAI_MAX_RAPPORT_SECONDES`). À `proxy_read_timeout 300s`,
+nginx rendait un **504** à cinq minutes sur un rapport de 32 000 tokens qui se
+terminait normalement — et **était débité**. `deploy/nginx-axial.conf` porte
+désormais `proxy_read_timeout 1800s` et `proxy_http_version 1.1` sur `/api/`
+(HTTP/1.0 bufferise le SSE et le rend d'un seul bloc, à la fin).
+
+Le flux SSE est protégé en plus par un battement (`: keepalive` toutes les 15 s,
+`app/modules/analysis/service.py`) : le timeout est une borne, pas le mécanisme.
+
 ```bash
-sudo systemctl reload caddy
+sudo cp /opt/axial-intelligence/deploy/nginx-axial.conf /etc/nginx/sites-available/axial
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
 ## 9. Stripe live

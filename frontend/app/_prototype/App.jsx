@@ -6,10 +6,10 @@
 import React from "react";
 import {
   CLE_STOCKAGE as RAPPORT_CLE_STOCKAGE, EN_COURS, SOURCES_INSUFFISANTES,
-  TERMINE, DEGRADE, ECHEC, ANNULE,
+  TERMINE, DEGRADE, ECHEC, ANNULE, SUPPRIME,
   ETAPES as RAPPORT_ETAPES, estTerminal, etatAuLancement, etatDepuisEvenement,
-  etatDepuisRapport, etatDepuisStockage, versStockage, libelleEtape,
-  libelleRaison,
+  etatDepuisRapport, etatDepuisStockage, etatSupprime, versStockage,
+  libelleEtape, libelleRaison,
 } from "./rapports_etat";
 import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument } from "./bridge";
 import { parserMarkdown } from "./markdown";
@@ -280,6 +280,9 @@ const STRINGS = {
     'reports.statut.echec': 'La génération a échoué',
     'reports.statut.echec_detail': 'Aucun crédit n\'a été débité. Vous pouvez relancer la même question.',
     'reports.statut.relancer': 'Relancer',
+    // Rapport supprimé pendant sa génération (revue finale, F10).
+    'reports.statut.supprime': 'Ce rapport a été supprimé',
+    'reports.statut.supprime_detail': 'Il a été supprimé pendant sa génération. Aucun crédit n\'a été débité. Vous pouvez relancer la même question.',
 
     // Sources insuffisantes (spec §2)
     'reports.sources_insuf.titre': 'Sources insuffisantes',
@@ -299,9 +302,10 @@ const STRINGS = {
     'reports.degrade.generation_failed': 'La rédaction a échoué en cours de route. Aucun crédit n\'a été débité — relancez la génération.',
     'reports.degrade.empty_generation': 'Le modèle n\'a rien produit. Aucun crédit n\'a été débité — relancez la génération.',
     'reports.degrade.investors_unavailable': 'La base d\'investisseurs Axial était indisponible : ce rapport s\'appuie uniquement sur la recherche web.',
-    'reports.degrade.couverture_partielle': 'Couverture partielle : les sources trouvées ne couvrent qu\'une partie de la question. Vérifiez les points chiffrés avant de vous en servir.',
+    'reports.degrade.couverture_partielle': 'Sources partielles : les sources trouvées ne couvrent qu\'une partie de la question. Vérifiez les points chiffrés avant de vous en servir.',
     'reports.degrade.delai_depasse': 'La génération a dépassé le délai maximal et a été interrompue. Aucun crédit n\'a été débité.',
     'reports.degrade.annule_par_utilisateur': 'Génération arrêtée à votre demande. Aucun crédit n\'a été débité.',
+    'reports.degrade.rapport_supprime': 'Ce rapport a été supprimé pendant sa génération. Aucun crédit n\'a été débité.',
 
     // Signalement / avis (spec §3)
     'reports.signalement.ouvrir': 'Signaler un problème',
@@ -351,6 +355,7 @@ const STRINGS = {
     'reports.badge.degrade': 'Incomplet',
     'reports.badge.echec': 'Échec',
     'reports.badge.annule': 'Arrêté',
+    'reports.badge.supprime': 'Supprimé',
     'reports.cout.pastille': 'Coût de ce rapport',
     'reports.compare.titre': 'Comparaison',
     'reports.compare.choisir': 'Choisissez le second rapport dans la liste.',
@@ -368,7 +373,7 @@ const STRINGS = {
     'reports.livrer.drive': 'Dans Google Drive',
     'reports.partage.ouvrir': 'Partager',
     'reports.partage.titre': 'Lien de partage public',
-    'reports.partage.body': 'Toute personne ayant ce lien peut lire le rapport, sans compte Axial. Ni vos coûts, ni vos documents internes n\'y apparaissent.',
+    'reports.partage.body': 'Toute personne ayant ce lien peut lire le rapport, sans compte Axial. Vos coûts n\'y apparaissent pas, et la liste de vos documents internes est masquée. Le texte du rapport, lui, reste tel quel : relisez-le s\'il s\'appuie sur des éléments confidentiels.',
     'reports.partage.creer': 'Créer le lien',
     'reports.partage.creation': 'Création…',
     'reports.partage.copier': 'Copier le lien',
@@ -593,6 +598,32 @@ const STRINGS = {
     'err.facturation.detail': 'Aucun crédit n\'a été débité et la réponse n\'a pas été enregistrée. Réessayez dans un instant.',
     'err.defaut.titre': 'La réponse a échoué',
     'err.defaut.detail': 'Une erreur inattendue est survenue.',
+    /* Codes rendus par les routes de rapports (revue finale, F12). Ils
+       tombaient dans la branche par défaut, qui affiche le `message` du
+       backend — rédigé en FRANÇAIS uniquement : un utilisateur en anglais
+       lisait du français. Même correctif que pour `projet_non_vide`. */
+    'err.rapport_en_cours.titre': 'Ce rapport est encore en cours',
+    'err.rapport_en_cours.detail': 'Attendez la fin de la génération, ou arrêtez-la, avant de lancer cette action.',
+    'err.rapport_non_en_cours.titre': 'Ce rapport n\u2019est plus en cours',
+    'err.rapport_non_en_cours.detail': 'La génération est déjà terminée : il n\u2019y a plus rien à arrêter.',
+    'err.rapport_non_partageable.titre': 'Partage impossible',
+    'err.rapport_non_partageable.detail': 'Ce rapport n\u2019a pas encore de contenu à partager.',
+    'err.jeton_indisponible.titre': 'Lien de partage indisponible',
+    'err.jeton_indisponible.detail': 'Nous n\u2019avons pas pu créer le lien. Réessayez dans un instant.',
+    'err.format_inconnu.titre': 'Format d\u2019export inconnu',
+    'err.format_inconnu.detail': 'Les formats disponibles sont PDF, Markdown et DOCX.',
+    'err.motif_inconnu.titre': 'Motif de signalement inconnu',
+    'err.motif_inconnu.detail': 'Choisissez un motif dans la liste proposée.',
+    'err.note_invalide.titre': 'Note invalide',
+    'err.note_invalide.detail': 'La note doit être comprise entre 1 et 5.',
+    'err.question_absente.titre': 'Rien à relancer',
+    'err.question_absente.detail': 'Ce rapport ne porte aucune question d\u2019origine : rédigez-en une pour le relancer.',
+    'err.titre_vide.titre': 'Titre vide',
+    'err.titre_vide.detail': 'Saisissez un titre : un rapport sans nom est introuvable dans la liste.',
+    'err.type_inconnu.titre': 'Type d\u2019analyse inconnu',
+    'err.type_inconnu.detail': 'Ce type de rapport n\u2019existe plus. Choisissez-en un dans la liste.',
+    'err.rapport_supprime.titre': 'Ce rapport a été supprimé',
+    'err.rapport_supprime.detail': 'Il a été supprimé pendant sa génération. Aucun crédit n\u2019a été débité — vous pouvez relancer la même question.',
   },
   en: {
     'common.continue': 'Continue',
@@ -698,6 +729,9 @@ const STRINGS = {
     'reports.statut.echec': 'Generation failed',
     'reports.statut.echec_detail': 'No credits were charged. You can run the same question again.',
     'reports.statut.relancer': 'Run again',
+    // Report deleted while it was being generated (final review, F10).
+    'reports.statut.supprime': 'This report was deleted',
+    'reports.statut.supprime_detail': 'It was deleted while it was being generated. No credits were charged. You can run the same question again.',
 
     'reports.sources_insuf.titre': 'Not enough sources',
     'reports.sources_insuf.body': 'The sources we found cannot answer this question reliably. No credits were charged.',
@@ -715,9 +749,10 @@ const STRINGS = {
     'reports.degrade.generation_failed': 'Writing failed mid-way. No credits were charged — run it again.',
     'reports.degrade.empty_generation': 'The model produced nothing. No credits were charged — run it again.',
     'reports.degrade.investors_unavailable': 'The Axial investor database was unavailable: this report relies on web search only.',
-    'reports.degrade.couverture_partielle': 'Partial coverage: the sources found only cover part of the question. Double-check every figure before using it.',
+    'reports.degrade.couverture_partielle': 'Partial sources: the sources found only cover part of the question. Double-check every figure before using it.',
     'reports.degrade.delai_depasse': 'Generation exceeded the maximum delay and was interrupted. No credits were charged.',
     'reports.degrade.annule_par_utilisateur': 'Generation stopped at your request. No credits were charged.',
+    'reports.degrade.rapport_supprime': 'This report was deleted while it was being generated. No credits were charged.',
 
     'reports.signalement.ouvrir': 'Report a problem',
     'reports.signalement.titre': 'Your feedback on this report',
@@ -757,6 +792,7 @@ const STRINGS = {
     'reports.badge.degrade': 'Incomplete',
     'reports.badge.echec': 'Failed',
     'reports.badge.annule': 'Stopped',
+    'reports.badge.supprime': 'Deleted',
     'reports.cout.pastille': 'Cost of this report',
     'reports.compare.titre': 'Comparison',
     'reports.compare.choisir': 'Pick the second report in the list.',
@@ -774,7 +810,7 @@ const STRINGS = {
     'reports.livrer.drive': 'To Google Drive',
     'reports.partage.ouvrir': 'Share',
     'reports.partage.titre': 'Public share link',
-    'reports.partage.body': 'Anyone with this link can read the report, with no Axial account. Neither your costs nor your internal documents appear on it.',
+    'reports.partage.body': 'Anyone with this link can read the report, with no Axial account. Your costs do not appear, and the list of your internal documents is hidden. The body of the report is shared as it stands: read it through if it draws on confidential material.',
     'reports.partage.creer': 'Create the link',
     'reports.partage.creation': 'Creating…',
     'reports.partage.copier': 'Copy link',
@@ -986,6 +1022,29 @@ const STRINGS = {
     'err.facturation.detail': 'No credits were debited and the answer was not saved. Please try again in a moment.',
     'err.defaut.titre': 'The answer failed',
     'err.defaut.detail': 'An unexpected error occurred.',
+    // Backend report codes (final review, F12) — see the FR table above.
+    'err.rapport_en_cours.titre': 'This report is still running',
+    'err.rapport_en_cours.detail': 'Wait for the generation to finish, or stop it, before running this action.',
+    'err.rapport_non_en_cours.titre': 'This report is no longer running',
+    'err.rapport_non_en_cours.detail': 'The generation is already over: there is nothing left to stop.',
+    'err.rapport_non_partageable.titre': 'Sharing is not possible',
+    'err.rapport_non_partageable.detail': 'This report has no content to share yet.',
+    'err.jeton_indisponible.titre': 'Share link unavailable',
+    'err.jeton_indisponible.detail': 'We could not create the link. Try again in a moment.',
+    'err.format_inconnu.titre': 'Unknown export format',
+    'err.format_inconnu.detail': 'The available formats are PDF, Markdown and DOCX.',
+    'err.motif_inconnu.titre': 'Unknown feedback reason',
+    'err.motif_inconnu.detail': 'Pick a reason from the list.',
+    'err.note_invalide.titre': 'Invalid rating',
+    'err.note_invalide.detail': 'The rating must be between 1 and 5.',
+    'err.question_absente.titre': 'Nothing to run again',
+    'err.question_absente.detail': 'This report carries no original question: write one to run it again.',
+    'err.titre_vide.titre': 'Empty title',
+    'err.titre_vide.detail': 'Enter a title: a report with no name cannot be found in the list.',
+    'err.type_inconnu.titre': 'Unknown analysis type',
+    'err.type_inconnu.detail': 'This report type no longer exists. Pick one from the list.',
+    'err.rapport_supprime.titre': 'This report was deleted',
+    'err.rapport_supprime.detail': 'It was deleted while it was being generated. No credits were charged — you can run the same question again.',
   },
 };
 
@@ -2796,6 +2855,34 @@ function decrireErreur(e, t) {
   if (reseau) {
     return { titre: t('err.reseau.titre'), detail: t('err.reseau.detail'), action: 'reessayer' };
   }
+  // Codes des routes de rapports (revue finale, F12). Ils tombaient tous dans
+  // la branche par défaut, qui affiche le `message` du backend — rédigé en
+  // FRANÇAIS uniquement. Un utilisateur en anglais lisait donc du français, ce
+  // que le code évitait déjà pour `projet_non_vide`.
+  //
+  // `action` par code : rien à réessayer quand c'est l'état du rapport ou la
+  // saisie qui ne convient pas ; « Réessayer » seulement quand un nouvel essai
+  // a une chance d'aboutir (jeton de partage, rapport supprimé).
+  const CODES_RAPPORTS = {
+    rapport_en_cours: ['err.rapport_en_cours', null],
+    rapport_non_en_cours: ['err.rapport_non_en_cours', null],
+    rapport_non_partageable: ['err.rapport_non_partageable', null],
+    jeton_indisponible: ['err.jeton_indisponible', 'reessayer'],
+    format_inconnu: ['err.format_inconnu', null],
+    motif_inconnu: ['err.motif_inconnu', null],
+    note_invalide: ['err.note_invalide', null],
+    question_absente: ['err.question_absente', null],
+    titre_vide: ['err.titre_vide', null],
+    unknown_analysis_type: ['err.type_inconnu', null],
+    // Événement SSE de suppression (revue finale, F10) : il ne portait aucun
+    // code, donc il tombait ici en « Réessayer » et l'écran de suivi attendait
+    // indéfiniment un rapport qui n'existait plus.
+    rapport_supprime: ['err.rapport_supprime', 'reessayer'],
+  };
+  if (CODES_RAPPORTS[code]) {
+    const [prefixe, action] = CODES_RAPPORTS[code];
+    return { titre: t(`${prefixe}.titre`), detail: t(`${prefixe}.detail`), action };
+  }
   // Message du backend s'il existe : il est déjà rédigé pour l'utilisateur.
   return {
     titre: t('err.defaut.titre'),
@@ -4490,12 +4577,16 @@ function BadgeStatutRapport({ statut, t }) {
   if (statut === SOURCES_INSUFFISANTES) {
     return <span className="chip chip-warning">{t('reports.sources_insuf.titre')}</span>;
   }
-  if (statut === ECHEC || statut === ANNULE) {
-    return (
-      <span className="chip rep-chip-echec">
-        {t(statut === ECHEC ? 'reports.badge.echec' : 'reports.badge.annule')}
-      </span>
-    );
+  const CHIPS_ECHEC = {
+    [ECHEC]: 'reports.badge.echec',
+    [ANNULE]: 'reports.badge.annule',
+    // `supprime` est un statut purement front (revue finale, F10) : la ligne
+    // n'existe plus en base, donc il n'arrive jamais d'une liste — seulement
+    // de l'écran de suivi. Le badge est là pour ne pas dépendre de ce détail.
+    [SUPPRIME]: 'reports.badge.supprime',
+  };
+  if (CHIPS_ECHEC[statut]) {
+    return <span className="chip rep-chip-echec">{t(CHIPS_ECHEC[statut])}</span>;
   }
   return null;
 }
@@ -4990,12 +5081,22 @@ function ReportsGenerating({ etat, onStop, onRelancer, onRetour, onSignaler }) {
   /* Statuts terminaux qui n'ouvrent PAS l'éditeur (`annule`, `echec`) : la
      ligne de rapport reste l'état de l'écran, on affiche ce qu'elle dit plutôt
      que de renvoyer l'utilisateur sur un écran vide sans explication. */
-  const fin = (terminal && (etat.statut === 'annule' || etat.statut === 'echec'))
+  /* `supprime` rejoint les deux autres (revue finale, F10) : le rapport a été
+     supprimé pendant sa génération, il n'y a pas d'éditeur à ouvrir et
+     l'écran doit le DIRE — c'est ce qui manquait, le sablier tournait. Son
+     texte passe par `t()`, comme les autres : le backend n'en rend aucun. */
+  const CLES_FIN = {
+    annule: ['reports.statut.annule', 'reports.statut.annule_detail'],
+    echec: ['reports.statut.echec', 'reports.statut.echec_detail'],
+    [SUPPRIME]: ['reports.statut.supprime', 'reports.statut.supprime_detail'],
+  };
+  const fin = (terminal && CLES_FIN[etat.statut])
     ? {
-        titre: etat.statut === 'annule' ? t('reports.statut.annule') : t('reports.statut.echec'),
-        detail: detail.message
-          || (etat.statut === 'annule' ? t('reports.statut.annule_detail')
-                                       : t('reports.statut.echec_detail')),
+        titre: t(CLES_FIN[etat.statut][0]),
+        // Un rapport supprimé n'a plus de ligne, donc plus de `detail.message`
+        // du backend : le texte est forcément le nôtre.
+        detail: (etat.statut !== SUPPRIME && detail.message)
+          || t(CLES_FIN[etat.statut][1]),
       }
     : null;
 
@@ -8452,7 +8553,18 @@ function App() {
         const etat = etatDepuisRapport(r);
         if (estTerminal(etat.statut)) { rangerRapportTermine(r); return; }
         memoriserRapport(etat);
-      }).catch(() => { /* un aller-retour raté n'interrompt pas le suivi */ });
+      }).catch((e) => {
+        if (!actif) return;
+        /* Un aller-retour raté n'interrompt pas le suivi — SAUF un 404
+           (revue finale, F10). Avaler le 404 était juste pour une coupure
+           réseau et faux pour une suppression : le rapport n'existe plus,
+           personne ne l'écrira jamais, et le sablier tournait indéfiniment.
+           404 est donc TERMINAL. */
+        if ((e && e.status) === 404) {
+          memoriserRapport(etatSupprime(rapportEnCoursRef.current));
+          setReportsState('generating');   // l'écran de suivi rend cette fin
+        }
+      });
     }, 3000);
     return () => { actif = false; clearInterval(id); };
   }, [idEnCours, statutEnCours, rangerRapportTermine, memoriserRapport]);
@@ -8512,6 +8624,14 @@ function App() {
          prend le relais. Repartir sur une carte d'erreur ferait croire à une
          génération perdue — et ferait relancer, donc payer, une seconde fois. */
       const encours = rapportEnCoursRef.current;
+      /* Sauf si le rapport a été SUPPRIMÉ pendant sa génération (revue
+         finale, F10) : là, il n'y a plus rien à suivre et le polling ne
+         rendra jamais que des 404. On montre la fin, on n'attend pas. */
+      if (e && e.code === 'rapport_supprime') {
+        memoriserRapport(etatSupprime(encours));
+        setReportsState('generating');   // l'écran de suivi rend cette fin
+        return;
+      }
       if (encours && encours.id && erreur.action === 'reessayer') {
         memoriserRapport({ ...encours, suiviAbandonne: true });
         return;

@@ -39,6 +39,32 @@ logger = logging.getLogger("axial.analysis")
 # battement fictif à +3 % a disparu : ce que le flux émet vient de la base.
 INTERVALLE_SUIVI_SECONDES = 2
 
+# Battement du flux SSE (revue finale, F3). Le générateur n'émettait un
+# événement que si `(etape, progression)` avait changé : une recherche
+# multi-angles, un juge de couverture ou une longue section laissaient la
+# connexion muette plusieurs minutes, et le `proxy_read_timeout` du reverse
+# proxy la coupait. Un commentaire SSE (`: keepalive`) est ignoré par
+# `EventSource` comme par le lecteur maison du bridge — il ne sert qu'à faire
+# passer des octets. 15 s : le tiers du timeout le plus court qu'on puisse
+# raisonnablement trouver devant nous (voir `deploy/nginx-axial.conf`).
+BATTEMENT_SSE_SECONDES = 15
+
+
+def _horloge() -> float:
+    """Horloge monotone du suivi. Isolée pour être bouchonnable dans les tests
+    (la cadence du battement se vérifie avec une horloge fictive, pas avec des
+    `sleep` réels)."""
+    import time as _time
+
+    return _time.monotonic()
+
+
+def _attendre(secondes: float) -> None:
+    """Attente du suivi. Isolée pour la même raison que `_horloge`."""
+    import time as _time
+
+    _time.sleep(secondes)
+
 # Amorce conservée quand l'utilisateur clique sur Stop : de quoi montrer que la
 # rédaction avait commencé, pas de quoi lire le rapport sans l'avoir payé.
 LIMITE_CONTENU_PARTIEL = 2000
@@ -725,6 +751,7 @@ def finalize(db, user_id: str, analysis_type: str, result: AnalysisResult,
                   if result.status_note == "sources_insuffisantes" else rm.DEGRADE)
         _cloturer(db, rapport, result, statut=statut, charged=0,
                   viz=_viz_hors_transaction(db, result.content or ""))
+        _oublier_empreintes(user_id)
         return {"report_id": str(rapport.id), "charged": 0, "statut": statut}
 
     from app.modules.analytics import client as analytics
@@ -753,18 +780,77 @@ def finalize(db, user_id: str, analysis_type: str, result: AnalysisResult,
         db.rollback()
         raise
 
-    analytics.increment_usage(user_id, analyses=1, credits=charged, reports=1)
-    result.metadata["report_id"] = str(rapport.id)
-    result.metadata["charged"] = charged
-    result.metadata["viz"] = rapport.viz or []
-    return {"report_id": str(rapport.id), "charged": charged, "statut": rm.TERMINE}
+    # --- APRÈS le commit de clôture : plus rien ne peut faire échouer -------
+    # Le rapport est `termine` ET débité en base. Tout ce qui suit est du
+    # confort (mesure d'usage, relecture des viz pour l'appelant) et s'exécute
+    # sur une session dont `expire_on_commit` vient d'invalider les objets :
+    # `rapport.viz` déclenche un SELECT de rechargement qui, s'il échoue,
+    # remontait jusqu'à `_ranger_echec` et réécrivait en `echec` un rapport
+    # payé, avec le message « aucun crédit n'a été débité ». On journalise et
+    # on notifie, on ne range plus (revue finale, F2).
+    identifiant = str(rapport.id)
+    try:
+        _oublier_empreintes(user_id)
+        analytics.increment_usage(user_id, analyses=1, credits=charged, reports=1)
+        result.metadata["report_id"] = identifiant
+        result.metadata["charged"] = charged
+        result.metadata["viz"] = rapport.viz or []
+    except Exception as e:  # noqa: BLE001 — le rapport est acquis, pas la relecture
+        logger.exception("Rapport %s : finition après clôture échouée (%s)",
+                         identifiant, e)
+        _signaler_apres_cloture(identifiant, e)
+    return {"report_id": identifiant, "charged": charged, "statut": rm.TERMINE}
+
+
+def _oublier_empreintes(user_id: str) -> None:
+    """Le rapport vient d'acquérir de nouvelles empreintes de graphiques : le
+    cache de 60 s de `viz.service` rendrait `404` sur les images du rapport
+    tout juste payé (revue finale, F11)."""
+    try:
+        from app.modules.viz import service as viz_service
+
+        viz_service.invalider_cache(user_id)
+    except Exception as e:  # noqa: BLE001 — un cache n'est jamais bloquant
+        logger.warning("Invalidation du cache d'empreintes impossible : %s", e)
+
+
+def _signaler_apres_cloture(rapport_id: str, erreur: BaseException) -> None:
+    """Prévient l'équipe d'un incident SURVENU APRÈS la clôture d'un rapport.
+
+    Le rapport est terminé et débité : il n'y a rien à réparer côté
+    utilisateur, mais quelque chose a cassé au pire moment et le journal seul
+    ne réveille personne. Ne lève jamais — un notifieur en panne ne doit pas
+    ressusciter le chemin d'échec qu'on vient justement de fermer.
+    """
+    try:
+        from app.shared import notifier
+
+        notifier.notifier_erreur(
+            titre="Incident après clôture d'un rapport",
+            route=f"/reports/{rapport_id}/cloture", methode="POST",
+            user_email=None, exc=erreur,
+            action=f"Vérifier le rapport {rapport_id} : clôturé et débité, "
+                   "mais la finition a échoué.")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Signalement post-clôture impossible : %s", e)
 
 
 def _nouvelle_ligne(db, user_id: str, *, analysis_type: str, title: str | None,
                     question: str | None, statut: str,
                     cle_idempotence: str | None = None):
-    """La ligne `reports` créée AU LANCEMENT (spec §1) — contenu vide."""
+    """La ligne `reports` créée AU LANCEMENT (spec §1) — contenu vide.
+
+    La clé d'idempotence est posée dans sa propre COLONNE, adossée à l'index
+    unique `(user_id, cle_idempotence)` de la migration 0023 (revue finale,
+    F5). Elle vivait dans le JSON `detail` et se relisait par un `SELECT` :
+    deux requêtes concurrentes portant la même clé lisaient toutes deux
+    « rien », créaient deux lignes et débitaient deux fois. Ici la base
+    tranche — la perdante reçoit une `IntegrityError` et repart avec la ligne
+    de la gagnante.
+    """
     import uuid as _uuid
+
+    from sqlalchemy.exc import IntegrityError
 
     from app.modules.reports.models import Report
 
@@ -772,15 +858,58 @@ def _nouvelle_ligne(db, user_id: str, *, analysis_type: str, title: str | None,
         id=_uuid.uuid4(), user_id=_uuid.UUID(user_id), analysis_type=analysis_type,
         title=title or _titre_provisoire(analysis_type), content="",
         statut=statut, progression=0, etape=None, question=question,
-        # La clé vit dans `detail` : aucune colonne, donc aucune migration, et
-        # `detail` est déjà le sac de contexte de la ligne. Elle est écrite
-        # AVANT tout débit — c'est le seul ordre qui rend le rejeu utile.
-        detail=({"idempotence": cle_idempotence} if cle_idempotence else None),
+        # Écrite AVANT tout débit — c'est le seul ordre qui rend le rejeu utile.
+        cle_idempotence=cle_idempotence or None,
     )
     db.add(rapport)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        existante = _ligne_de_la_cle(db, user_id, cle_idempotence)
+        if existante is not None:
+            return existante
+        raise
     db.refresh(rapport)
     return rapport
+
+
+def _ligne_de_la_cle(db, user_id: str, cle: str | None):
+    """La ligne qui porte cette clé pour ce compte, quel que soit son statut."""
+    import uuid as _uuid
+
+    from sqlalchemy import select
+
+    from app.modules.reports.models import Report
+
+    if not cle:
+        return None
+    try:
+        uid = _uuid.UUID(user_id)
+    except (ValueError, AttributeError, TypeError):
+        return None
+    return db.scalars(select(Report).where(Report.user_id == uid,
+                                           Report.cle_idempotence == cle)).first()
+
+
+def _liberer_cle(db, user_id: str, cle: str | None) -> None:
+    """Détache la clé d'une ligne qui ne se rejoue plus, pour qu'elle resserve.
+
+    « Réessayer » reporte volontairement la même clé après un `echec` ou un
+    `annule` — et après dix minutes, un même clic n'est plus un rejeu mais une
+    nouvelle demande. Sans cette libération, l'index unique refuserait la
+    nouvelle ligne : la contrainte qui ferme le double débit fermerait aussi la
+    relance légitime. Appelée seulement quand `rapport_par_idempotence` n'a
+    rien rendu, donc toute ligne encore porteuse de la clé est ici périmée ou
+    terminale en erreur.
+    """
+    if not cle:
+        return
+    ligne = _ligne_de_la_cle(db, user_id, cle)
+    if ligne is None:
+        return
+    ligne.cle_idempotence = None
+    db.commit()
 
 
 def _titre_provisoire(analysis_type: str) -> str:
@@ -887,17 +1016,34 @@ def rapport_par_idempotence(db, user_id: str, cle: str | None):
     # échec fermerait la relance pendant dix minutes, exactement le chemin que
     # la clé devait protéger. Sur un statut terminal en erreur, une nouvelle
     # ligne est créée.
-    # `as_string()` : `->>` sous PostgreSQL, `json_extract` sous SQLite — la
-    # même expression sur les deux moteurs, aucun SQL écrit à la main.
+    # Lecture par COLONNE (revue finale, F5) : la même colonne que celle que
+    # l'index unique protège, donc le rejeu et la contrainte parlent bien du
+    # même champ — la clé n'est plus une entrée du JSON `detail`.
     return db.scalars(
         select(Report)
         .where(Report.user_id == uid,
-               Report.detail["idempotence"].as_string() == cle,
+               Report.cle_idempotence == cle,
                Report.statut.in_(STATUTS_REJOUABLES),
                Report.created_at >= limite)
         .order_by(Report.created_at.desc())
         .limit(1)
     ).first()
+
+
+def _balayer_ce_compte(db, user_id: str) -> None:
+    """Range les `en_cours` périmés de ce compte. Ne lève jamais.
+
+    Le balayage ne doit jamais empêcher un lancement : s'il échoue, la ligne
+    orpheline reste (le balayage de démarrage et `GET /reports` repasseront),
+    mais le rapport demandé part quand même.
+    """
+    try:
+        from app.modules.reports import service as reports
+
+        reports.balayer_orphelins_du_compte(db, user_id)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Balayage des orphelins de %s impossible : %s", user_id, e)
+        db.rollback()
 
 
 def lancer_rapport(db, user_id: str, *, query: str, analysis_type: str,
@@ -921,6 +1067,14 @@ def lancer_rapport(db, user_id: str, *, query: str, analysis_type: str,
     deja = rapport_par_idempotence(db, user_id, cle_idempotence)
     if deja is not None:
         return deja
+    # Rien à rejouer : la clé est peut-être encore portée par une ligne périmée
+    # ou en échec, que l'index unique opposerait à la nouvelle (revue finale, F5).
+    _liberer_cle(db, user_id, cle_idempotence)
+    # Balayage des orphelins DE CE COMPTE (revue finale, F6) : une API qui reste
+    # debout des semaines ne repasse jamais par le balayage de démarrage, et un
+    # rapport figé à « 62 % » y restait pour toujours. Le lancement est le
+    # moment naturel — la personne est justement en train de regarder sa liste.
+    _balayer_ce_compte(db, user_id)
     # Type et solde vérifiés AVANT de créer la ligne : une question mal formée
     # doit rendre un 400, pas un rapport en échec dans la liste.
     if not is_valid_type(analysis_type):
@@ -1112,12 +1266,24 @@ def _ranger_echec(db, rapport, erreur: BaseException, *,
     `raison` — « delai_depasse » quand l'échéance globale a coupé la tâche :
     le front (Task 4) doit pouvoir distinguer « ça a planté » de « ça a duré
     trop longtemps », les deux ne se relancent pas dans le même état d'esprit.
+
+    **Ne touche JAMAIS à un rapport déjà terminal** (revue finale, F2). Le
+    commit de clôture débite ET archive d'un seul geste : passé ce commit, une
+    panne de relecture (`expire_on_commit` recharge les objets) remontait
+    jusqu'ici et réécrivait en `echec` un rapport payé, avec le message
+    « aucun crédit n'a été débité ». Les crédits étaient perdus et l'écran
+    mentait. La relecture ci-dessous est la seule autorité : si la ligne est
+    déjà `termine` (ou `annule`, ou dégradée), l'échec est journalisé, pas écrit.
     """
     from app.modules.reports import models as rm
 
     db.rollback()
     rapport = db.get(rm.Report, rapport.id)
     if rapport is None:
+        return
+    if rapport.statut != rm.EN_COURS:
+        logger.error("Rapport %s déjà en statut « %s » : échec NON écrit (%s)",
+                     rapport.id, rapport.statut, type(erreur).__name__)
         return
     detail = dict(rapport.detail or {})
     detail["raison"] = raison
@@ -1164,9 +1330,8 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
     le front actuel continue de fonctionner jusqu'à Task 4, augmenté de
     `etape`, `detail` et `report_id`.
     """
-    import time as _time
-
     from app.modules.reports import models as rm
+    from app.modules.reports import service as reports
 
     try:
         rapport = lancer_rapport(db, user_id, query=query,
@@ -1187,15 +1352,16 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
                 "report_id": rapport_id, "detail": {},
                 "message": "Démarrage de l'analyse…"})
 
-    depart = _time.monotonic()
+    depart = _horloge()
+    dernier_octet = depart   # dernier instant où quelque chose est parti
     dernier: tuple | None = None
     while True:
-        _time.sleep(INTERVALLE_SUIVI_SECONDES)
+        _attendre(INTERVALLE_SUIVI_SECONDES)
         # La boucle est BORNÉE par la même échéance que le moteur : sans elle,
         # une tâche morte sans avoir pu écrire son statut (pool saturé) faisait
         # tourner ce générateur indéfiniment en tenant une connexion — donc en
         # aggravant la saturation qui l'avait causée.
-        if (_time.monotonic() - depart) > _delai_max():
+        if (_horloge() - depart) > _delai_max():
             yield _sse({"progress": 100, "step": "done", "done": True,
                         "etape": None, "report_id": rapport_id,
                         "code": "delai_depasse", "detail": {},
@@ -1212,21 +1378,44 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
         ligne = db.get(rm.Report, rapport.id)
         if ligne is None:
             yield _sse({"step": "error", "done": True, "detail": {},
+                        # `code` posé (revue finale, F10) : c'était le SEUL
+                        # événement d'erreur sans code, donc le front tombait
+                        # dans la branche par défaut « Réessayer », restait sur
+                        # l'écran de suivi et attendait un polling qui avalait
+                        # le 404 — un sablier indéfini sur un rapport disparu.
+                        "code": "rapport_supprime",
                         "error": "Le rapport a été supprimé pendant sa génération."})
             return
+        # Échéance du RAPPORT (revue finale, F8) et non du suivi : un
+        # fournisseur muet ne rend aucune portion, donc `Suivi.chunk` n'est
+        # jamais appelé et ni le Stop ni l'échéance ne sont vus par la tâche.
+        # Les délais de lecture des fournisseurs (600 s Claude, 180 s Gemini)
+        # bornent un silence, mais pas la durée totale : ce sont eux qui
+        # garantissent qu'une tâche muette finit par lever — ici, on ne
+        # l'attend plus. La marge évite de ranger une tâche qui est justement
+        # en train d'écrire son propre `delai_depasse`.
+        if reports.marquer_delai_depasse(db, ligne):
+            logger.warning("Rapport %s rangé en échec par le flux : échéance "
+                           "dépassée", rapport_id)
         if ligne.statut != rm.EN_COURS:
             break
         empreinte = (ligne.etape, ligne.progression)
         if empreinte == dernier:
+            # Battement (revue finale, F3) : sans octet sur la connexion, le
+            # reverse proxy la coupe au bout de son `proxy_read_timeout`. Un
+            # commentaire SSE ne porte pas d'événement — les lecteurs
+            # l'ignorent, les proxys le comptent.
+            if (_horloge() - dernier_octet) >= BATTEMENT_SSE_SECONDES:
+                dernier_octet = _horloge()
+                yield ": keepalive\n\n"
             continue
         dernier = empreinte
+        dernier_octet = _horloge()
         yield _sse({"progress": ligne.progression, "step": _STEP_HERITE.get(
                         ligne.etape or "", "generate"),
                     "etape": ligne.etape, "report_id": rapport_id,
                     "detail": ligne.detail or {},
                     "message": (ligne.detail or {}).get("message") or ""})
-
-    from app.modules.reports import service as reports
 
     detail = reports.detail_dict(ligne, is_admin=is_admin)
     evenement = {
