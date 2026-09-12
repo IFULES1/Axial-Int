@@ -3229,3 +3229,43 @@ def test_f13_la_constante_sources_internes_a_disparu():
     # La règle réelle n'a pas bougé.
     assert rs._sources_publiables([{"source": "notion", "title": "Secret"}]) == [
         dict(rs._JALON_SOURCE_INTERNE)]
+
+
+def test_une_course_sur_la_cle_ne_lance_pas_deux_moteurs(http, monkeypatch):
+    """Deux requêtes simultanées avec la même clé : la seconde perd l'INSERT
+    (index unique), reçoit la ligne de la gagnante… et ne doit PAS démarrer
+    un second moteur dessus (sinon deux débits sur le même rapport)."""
+    from app.modules.analysis import service as analyse
+
+    import app.modules.memory.models  # noqa: F401
+
+    engine, uid = http
+    Base.metadata.tables["company_profiles"].create(engine, checkfirst=True)
+    with Session(engine) as db:
+        db.add(CreditBalance(user_id=uid, free_credits=500))
+        db.commit()
+
+    lances = []
+
+    class _T:
+        def __init__(self, *a, **kw):
+            lances.append(kw.get("kwargs"))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(analyse.threading, "Thread", _T)
+    # Simule la course : la pré-lecture de la clé ne voit rien (comme si les
+    # deux requêtes s'étaient croisées), mais l'INSERT échoue et retombe sur
+    # la ligne de la gagnante.
+    monkeypatch.setattr(analyse, "rapport_par_idempotence", lambda *a, **k: None)
+
+    with Session(engine) as db:
+        gagnante = analyse.lancer_rapport(
+            db, str(uid), query="Le marché du lithium",
+            analysis_type="synthese_executive", cle_idempotence="cle-course")
+        perdante = analyse.lancer_rapport(
+            db, str(uid), query="Le marché du lithium",
+            analysis_type="synthese_executive", cle_idempotence="cle-course")
+        assert str(perdante.id) == str(gagnante.id)
+        assert len(lances) == 1, "un seul moteur pour une seule ligne"

@@ -868,9 +868,13 @@ def _nouvelle_ligne(db, user_id: str, *, analysis_type: str, title: str | None,
         db.rollback()
         existante = _ligne_de_la_cle(db, user_id, cle_idempotence)
         if existante is not None:
+            # La ligne de la gagnante : son moteur tourne déjà, il ne faut
+            # surtout pas en lancer un second dessus (deux débits).
+            existante.preexistante = True
             return existante
         raise
     db.refresh(rapport)
+    rapport.preexistante = False
     return rapport
 
 
@@ -903,10 +907,24 @@ def _liberer_cle(db, user_id: str, cle: str | None) -> None:
     rien rendu, donc toute ligne encore porteuse de la clé est ici périmée ou
     terminale en erreur.
     """
+    import datetime as _dt
+
+    from app.modules.reports.models import STATUTS_REJOUABLES
+
     if not cle:
         return
     ligne = _ligne_de_la_cle(db, user_id, cle)
     if ligne is None:
+        return
+    # Jamais sur une ligne rejouable encore fraîche : en cas de course, la
+    # pré-lecture peut avoir manqué la ligne de la gagnante — la libérer ici
+    # ouvrirait la porte à une seconde ligne, donc à un second moteur.
+    limite = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(
+        seconds=DELAI_IDEMPOTENCE_SECONDES)
+    cree = ligne.created_at
+    if cree is not None and cree.tzinfo is None:
+        cree = cree.replace(tzinfo=_dt.timezone.utc)
+    if ligne.statut in STATUTS_REJOUABLES and cree is not None and cree >= limite:
         return
     ligne.cle_idempotence = None
     db.commit()
@@ -1084,6 +1102,10 @@ def lancer_rapport(db, user_id: str, *, query: str, analysis_type: str,
     rapport = _nouvelle_ligne(db, user_id, analysis_type=analysis_type,
                               title=title, question=query, statut=rm.EN_COURS,
                               cle_idempotence=cle_idempotence)
+    if getattr(rapport, "preexistante", False):
+        # Course perdue sur la clé d'idempotence : la ligne appartient à un
+        # moteur déjà lancé. On la rend telle quelle, sans second moteur.
+        return rapport
     # Le contexte d'entreprise et le profil sont lus ICI, sur la session de la
     # requête : la tâche ne doit dépendre d'aucun objet de cette session.
     from app.modules.memory import service as memory
