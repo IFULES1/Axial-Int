@@ -90,10 +90,27 @@ def _retrieve_context(query: str, user_id: str, top_k: int):
 
 # --- Suivi de progression et Stop (spec §1) --------------------------------
 
-class AnnulationDemandee(Exception):
+class ArretGeneration(Exception):
+    """Interruption qui doit traverser les `except Exception` du pipeline.
+
+    Une base commune aux deux motifs d'arrêt (Stop de l'utilisateur, échéance
+    dépassée) : chaque `try/except Exception` large de `run_analysis` la réémet
+    par un seul `except ArretGeneration: raise`, sans avoir à connaître la liste.
+    """
+
+
+class AnnulationDemandee(ArretGeneration):
     """Stop demandé par l'utilisateur — remonte jusqu'au moteur, qui range le
     rapport en `annule` sans rien débiter. Une exception plutôt qu'un code de
     retour : elle traverse les cinq étapes sans que chacune ait à la relayer."""
+
+
+class DelaiDepasse(ArretGeneration):
+    """Échéance globale atteinte — le rapport part en `echec`, rien n'est débité.
+
+    Distincte de l'annulation : personne ne l'a demandée, et le statut doit le
+    dire (`echec` + `detail.raison = "delai_depasse"`, et non `annule`).
+    """
 
 
 class Suivi:
@@ -114,9 +131,16 @@ class Suivi:
     CHUNKS_PAR_VERIFICATION = 20
 
     def __init__(self, db, rapport):
+        import time as _time
+
         self.db = db
         self.rapport = rapport
         self._chunks = 0
+        # Échéance globale : les délais des fournisseurs sont des délais par
+        # lecture, aucun ne borne la durée totale d'un rapport (jusqu'à quatre
+        # appels de 32 000 tokens avec les reprises). Relue à chaque
+        # `verifier()`, donc entre les étapes et toutes les 20 portions.
+        self._depart = _time.monotonic()
         # Ce que la rédaction avait produit au moment du Stop. Rempli par
         # `_rediger`, relu par `_ranger_annule` : le texte est dans une variable
         # locale du générateur de flux, il faut le faire remonter avant que
@@ -135,12 +159,28 @@ class Suivi:
         self.rapport.detail = fusion
         self.db.commit()
 
+    def depasse_le_delai(self) -> bool:
+        """Vrai si l'échéance globale du rapport est atteinte.
+
+        Lue sur le module de configuration à chaque appel (et non capturée à
+        l'import) pour rester réglable sans redémarrage — et bouchonnable.
+        """
+        import time as _time
+
+        from app import config as app_config
+
+        return (_time.monotonic() - self._depart) > app_config.DELAI_MAX_RAPPORT_SECONDES
+
     def verifier(self) -> None:
         """Relit le drapeau depuis la BASE (et non l'objet en mémoire) : il est
-        posé par une autre requête, sur une autre session."""
+        posé par une autre requête, sur une autre session. Vérifie du même
+        geste l'échéance globale — les deux motifs d'arrêt sont relus aux mêmes
+        instants (entre les étapes, toutes les 20 portions)."""
         self.db.refresh(self.rapport)
         if self.rapport.annulation_demandee:
             raise AnnulationDemandee()
+        if self.depasse_le_delai():
+            raise DelaiDepasse()
 
     def chunk(self, texte: str) -> None:
         """Appelé à chaque portion reçue du modèle pendant la rédaction."""
@@ -154,6 +194,14 @@ class Suivi:
 
 # En deçà, le rapport n'aurait rien de solide à citer : la génération serait
 # une extrapolation facturée. Le seuil est celui de la spec §2.
+#
+# « Pertinentes » se lit ici comme un NOMBRE de citations survivantes, pas
+# comme un score : le seuil compte les entrées qui restent après le rerank et
+# la déduplication — exactement ce que le modèle de rédaction verra — sans lire
+# le score du reranker. Lecture plus permissive que la spec §2 (« dont le score
+# dépasse le seuil du reranker »), assumée : l'orchestrateur ne remonte aucun
+# score aujourd'hui, et le brief laissait `orchestrator.py` optionnel. Le jour
+# où un score remonte, c'est ici que le filtre se resserre.
 MIN_SOURCES_PERTINENTES = 5
 
 # Jugement de couverture. NOUVEAU prompt court, tier `chat` : il ne touche à
@@ -298,10 +346,18 @@ def _rediger(*, system: str, prompt: str, tier: str, max_tokens: int,
     raison = None
     prompt_courant, historique = prompt, None
 
+    # Fournisseur épinglé dès la première passe : `stream_text` rejoue sa
+    # chaîne de repli à chaque appel, et si Claude devenait indisponible entre
+    # deux reprises, la suite du rapport serait écrite par Gemini — deux styles
+    # recollés dans un même document. Mieux vaut un rapport tronqué (statut
+    # `truncated_generation`, rien débité) qu'un rapport épissé.
+    fournisseur: str | None = None
+
     for reprise in range(REPRISES_REDACTION_MAX + 1):
         flux = llm_client.stream_text(system=system, prompt=prompt_courant,
                                       tier=tier, history=historique,
-                                      max_tokens=max_tokens, mesure=mesure)
+                                      max_tokens=max_tokens, mesure=mesure,
+                                      fournisseur=fournisseur)
         try:
             while True:
                 try:
@@ -325,7 +381,7 @@ def _rediger(*, system: str, prompt: str, tier: str, max_tokens: int,
                             min(85, 50 + int(35 * min(vues, total) / total)),
                             section=f"{min(max(vues, 1), total)}/{total}",
                             message="Rédaction du rapport…")
-        except AnnulationDemandee:
+        except ArretGeneration:
             # Faire remonter l'amorce AVANT que l'exception ne déroule la pile :
             # `morceaux` est local à cette fonction.
             suivi.contenu_partiel = "".join(morceaux)
@@ -339,6 +395,9 @@ def _rediger(*, system: str, prompt: str, tier: str, max_tokens: int,
             break
         logger.info("Rapport tronqué, reprise %d/%d", reprise + 1,
                     REPRISES_REDACTION_MAX)
+        # `mesure["provider"]` est rempli par le fournisseur qui a répondu :
+        # c'est le seul moyen de savoir qui a commencé, donc qui doit finir.
+        fournisseur = mesure.get("provider") or fournisseur
         historique = [{"role": "user", "content": prompt},
                       {"role": "assistant", "content": partiel}]
         prompt_courant = SUITE_CONSIGNE
@@ -417,7 +476,7 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
         web_results = web_search.search_multi(angles, top_k=top_k,
                                               requete_de_rang=query,
                                               compteur=appels_recherche)
-    except AnnulationDemandee:
+    except ArretGeneration:
         raise
     except Exception as e:
         logger.warning("Web search failed: %s", e)
@@ -547,7 +606,7 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
         result = _rediger(system=SYSTEM_PROMPT + lg.consigne_miroir(),
                           prompt=prompt, tier=tier, max_tokens=32000,
                           suivi=suivi, analysis_type=analysis_type)
-    except AnnulationDemandee:
+    except ArretGeneration:
         raise
     except Exception as e:
         logger.warning("Generation failed: %s", e)
@@ -664,7 +723,8 @@ def finalize(db, user_id: str, analysis_type: str, result: AnalysisResult,
             return {"report_id": None, "charged": 0}
         statut = (rm.SOURCES_INSUFFISANTES
                   if result.status_note == "sources_insuffisantes" else rm.DEGRADE)
-        _cloturer(db, rapport, result, statut=statut, charged=0)
+        _cloturer(db, rapport, result, statut=statut, charged=0,
+                  viz=_viz_hors_transaction(db, result.content or ""))
         return {"report_id": str(rapport.id), "charged": 0, "statut": statut}
 
     from app.modules.analytics import client as analytics
@@ -674,12 +734,20 @@ def finalize(db, user_id: str, analysis_type: str, result: AnalysisResult,
         rapport = _nouvelle_ligne(db, user_id, analysis_type=analysis_type,
                                   title=result.title, question=None,
                                   statut=rm.EN_COURS)
+    # Visualisations préparées AVANT la transaction de clôture, sur leur propre
+    # commit : elles insèrent des `VizRendu` partagés par empreinte, et deux
+    # rapports concurrents qui produisent la même viz se collisionnent. Dans la
+    # transaction de clôture, cette collision laissait la session en
+    # `PendingRollbackError` et faisait partir en `echec` un rapport de 32 000
+    # tokens entièrement produit. Ici, elle ne coûte au pire que les viz.
+    viz = _viz_hors_transaction(db, result.content or "")
     # Débit SANS commit : il rejoint la transaction de l'archivage ci-dessous.
     billing_res = billing.consume_credits(db, user_id, analysis_type,
                                           is_admin=is_admin, commit=False)
     charged = billing_res.get("charged", 0)
     try:
-        _cloturer(db, rapport, result, statut=rm.TERMINE, charged=charged)
+        _cloturer(db, rapport, result, statut=rm.TERMINE, charged=charged,
+                  viz=viz)
     except Exception:
         # Un seul rollback pour les deux : le débit n'a jamais été committé.
         db.rollback()
@@ -717,12 +785,39 @@ def _titre_provisoire(analysis_type: str) -> str:
         analysis_type.replace("_", " ").title()
 
 
-def _cloturer(db, rapport, result: AnalysisResult, *, statut: str,
-              charged: int) -> None:
-    """Écrit le terme du rapport dans la session courante, SANS committer le
-    débit séparément : `db.commit()` ici clôt les deux d'un coup."""
+def _viz_hors_transaction(db, contenu: str) -> list[dict] | None:
+    """Prépare et enregistre les visualisations sur leur PROPRE transaction.
+
+    Hors de la transaction de clôture, délibérément (spec §5.1 revue) : les
+    rendus sont partagés par empreinte entre rapports, donc leur insertion peut
+    entrer en collision, et une collision à l'intérieur de la clôture faisait
+    tomber le débit ET le contenu d'un rapport abouti. Un échec ici ne coûte
+    que les viz : le rapport est archivé `termine` sans elles.
+    """
     from app.modules.viz import service as viz_service
 
+    # `preparer_sans_faute` garde son `try/except` (il avale déjà les erreurs
+    # de compilation) ; ce qu'il ne fait pas, c'est ranger la session après une
+    # erreur de BASE. C'est le rôle du rollback ci-dessous.
+    viz = viz_service.preparer_sans_faute(db, contenu)
+    try:
+        db.commit()
+    except Exception:  # noqa: BLE001 — course sur une empreinte, par exemple
+        logger.exception("Enregistrement des visualisations échoué — rapport "
+                         "archivé sans elles")
+        db.rollback()
+        return None
+    return viz
+
+
+def _cloturer(db, rapport, result: AnalysisResult, *, statut: str,
+              charged: int, viz: list[dict] | None = None) -> None:
+    """Écrit le terme du rapport dans la session courante, SANS committer le
+    débit séparément : `db.commit()` ici clôt les deux d'un coup.
+
+    `viz` est passé tout prêt par `_viz_hors_transaction` : rien de ce qui peut
+    échouer sur une course entre rapports n'entre dans cette transaction.
+    """
     cout = (result.metadata or {}).get("cout") or {}
     rapport.title = result.title or rapport.title
     rapport.content = result.content or ""
@@ -734,9 +829,10 @@ def _cloturer(db, rapport, result: AnalysisResult, *, statut: str,
     rapport.duree_secondes = cout.get("duree_secondes")
     rapport.cout_recherche_micro_eur = cout.get("cout_recherche_micro_eur")
     rapport.appels_recherche = cout.get("appels_recherche")
-    # Visualisations : préparées une fois ici, réutilisées par l'app et le PDF.
-    # Tolérant : un échec ne remet en cause ni la facturation ni l'archive.
-    rapport.viz = viz_service.preparer_sans_faute(db, result.content or "")
+    # Visualisations : préparées une fois, en amont (`_viz_hors_transaction`),
+    # réutilisées par l'app et le PDF. Un échec ne remet en cause ni la
+    # facturation ni l'archive — la ligne porte simplement `viz = None`.
+    rapport.viz = viz
     rapport.statut = statut
     rapport.etape = "finalisation"
     rapport.progression = 100
@@ -790,7 +886,13 @@ def lancer_rapport(db, user_id: str, *, query: str, analysis_type: str,
     rapport_id = str(rapport.id)
     if attendre:
         _executer_rapport(rapport_id, **contexte)
-        db.expire_all()
+        # `rollback()` et pas `expire_all()` : le second vide le cache
+        # d'identité mais LAISSE la transaction de lecture ouverte — plusieurs
+        # minutes d'« idle in transaction » par appel, et sous une isolation
+        # plus stricte que READ COMMITTED la relecture rendrait la ligne encore
+        # `en_cours` (donc `offrir` concluant « non abouti » sur un rapport
+        # réussi). Un rollback clôt la transaction ET expire les objets.
+        db.rollback()
         return db.get(rm.Report, rapport.id)
 
     threading.Thread(target=_executer_rapport, args=(rapport_id,),
@@ -807,61 +909,117 @@ def _executer_rapport(rapport_id: str, *, user_id: str, query: str,
 
     La session de la requête HTTP meurt avec la réponse : ouvrir la sienne est
     la condition pour que la tâche puisse encore écrire quand le navigateur est
-    parti. Cette fonction ne lève jamais — tout se termine par un statut.
+    parti. Cette fonction ne lève jamais — tout se termine par un statut, y
+    compris quand c'est l'OUVERTURE de la session qui échoue (pool saturé, base
+    injoignable) : le thread mourait alors avant d'avoir pu écrire quoi que ce
+    soit et la ligne restait `en_cours` pour toujours.
+
+    C'est aussi le seul endroit qui prévient par email : `offrir` et
+    `POST /analysis/run` passent par ici, une notification par rapport abouti.
     """
     import uuid as _uuid
 
-    from app.db import SessionLocal
     from app.modules.reports import models as rm
 
-    with SessionLocal() as db:
-        rapport = db.get(rm.Report, _uuid.UUID(rapport_id))
-        if rapport is None:  # supprimé entre-temps : rien à écrire
-            logger.info("Rapport %s disparu avant exécution", rapport_id)
-            return
-        suivi = Suivi(db, rapport)
-        try:
-            resultat = run_analysis(
-                query=query, analysis_type=analysis_type, user_id=user_id,
-                title=title, top_k=top_k, company_context=company_context,
-                profile=profile, db_pour_notion=db, suivi=suivi,
-                elargir=elargir, forcer=forcer,
-            )
-        except AnnulationDemandee:
-            _ranger_annule(db, rapport, suivi.contenu_partiel)
-            return
-        except Exception as e:  # noqa: BLE001 — aucune panne ne laisse `en_cours`
-            logger.warning("Rapport %s en échec : %s", rapport_id, e, exc_info=True)
-            _ranger_echec(db, rapport, e)
-            return
+    try:
+        from app.db import SessionLocal
 
-        try:
-            # Dernière lecture du Stop : l'utilisateur a pu cliquer pendant la
-            # finalisation. Après le débit, il serait trop tard.
-            suivi.verifier()
-            suivi.etape("finalisation", 90, message="Finalisation…")
-            finalize(db, user_id, analysis_type, resultat, is_admin=is_admin,
-                     rapport=rapport)
-        except AnnulationDemandee:
-            _ranger_annule(db, rapport, suivi.contenu_partiel)
-            return
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Archivage du rapport %s en échec : %s", rapport_id, e,
-                           exc_info=True)
-            _ranger_echec(db, rapport, e)
-            return
+        with SessionLocal() as db:
+            rapport = db.get(rm.Report, _uuid.UUID(rapport_id))
+            if rapport is None:  # supprimé entre-temps : rien à écrire
+                logger.info("Rapport %s disparu avant exécution", rapport_id)
+                return
+            suivi = Suivi(db, rapport)
+            try:
+                resultat = run_analysis(
+                    query=query, analysis_type=analysis_type, user_id=user_id,
+                    title=title, top_k=top_k, company_context=company_context,
+                    profile=profile, db_pour_notion=db, suivi=suivi,
+                    elargir=elargir, forcer=forcer,
+                )
+            except AnnulationDemandee:
+                _ranger_annule(db, rapport, suivi.contenu_partiel)
+                return
+            except DelaiDepasse as e:
+                logger.warning("Rapport %s abandonné : échéance de %ds dépassée",
+                               rapport_id, _delai_max())
+                _ranger_echec(db, rapport, e, raison="delai_depasse")
+                return
+            except Exception as e:  # noqa: BLE001 — aucune panne ne laisse `en_cours`
+                logger.warning("Rapport %s en échec : %s", rapport_id, e, exc_info=True)
+                _ranger_echec(db, rapport, e)
+                return
 
-        if resultat.degraded:
-            return  # `finalize` a déjà rangé le rapport en degrade/sources_insuffisantes
-        # Prévenir depuis la tâche : c'est le seul endroit qui s'exécute que le
-        # navigateur soit encore là ou non.
-        try:
-            from app.modules.reports import notification
+            try:
+                # Dernière lecture du Stop et de l'échéance : l'utilisateur a pu
+                # cliquer pendant la finalisation. Après le débit, il serait trop tard.
+                suivi.verifier()
+                suivi.etape("finalisation", 90, message="Finalisation…")
+                finalize(db, user_id, analysis_type, resultat, is_admin=is_admin,
+                         rapport=rapport)
+            except AnnulationDemandee:
+                _ranger_annule(db, rapport, suivi.contenu_partiel)
+                return
+            except DelaiDepasse as e:
+                logger.warning("Rapport %s abandonné à la finalisation : échéance "
+                               "de %ds dépassée", rapport_id, _delai_max())
+                _ranger_echec(db, rapport, e, raison="delai_depasse")
+                return
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Archivage du rapport %s en échec : %s", rapport_id, e,
+                               exc_info=True)
+                _ranger_echec(db, rapport, e)
+                return
 
-            notification.prevenir(db, user_id, titre=resultat.title,
-                                  contenu=resultat.content, sources=resultat.sources)
-        except Exception as e:  # noqa: BLE001 — un email raté n'annule pas un rapport
-            logger.warning("Notification du rapport %s échouée : %s", rapport_id, e)
+            if resultat.degraded:
+                return  # `finalize` a déjà rangé le rapport en degrade/sources_insuffisantes
+            # Prévenir depuis la tâche : c'est le seul endroit qui s'exécute que le
+            # navigateur soit encore là ou non. UNE seule notification par rapport
+            # — les appelants (`offrir`, `/run`) n'en envoient pas de leur côté.
+            try:
+                from app.modules.reports import notification
+
+                notification.prevenir(db, user_id, titre=resultat.title,
+                                      contenu=resultat.content,
+                                      sources=resultat.sources)
+            except Exception as e:  # noqa: BLE001 — un email raté n'annule pas un rapport
+                logger.warning("Notification du rapport %s échouée : %s", rapport_id, e)
+    except Exception as e:  # noqa: BLE001 — y compris l'ouverture de la session
+        logger.warning("Rapport %s : le moteur n'a pas pu tourner (%s)",
+                       rapport_id, e, exc_info=True)
+        _ranger_echec_session_courte(rapport_id, e)
+
+
+def _delai_max() -> int:
+    from app import config as app_config
+
+    return app_config.DELAI_MAX_RAPPORT_SECONDES
+
+
+def _ranger_echec_session_courte(rapport_id: str, erreur: BaseException) -> None:
+    """Range la ligne en `echec` depuis une SECONDE session, très courte.
+
+    Dernier recours quand la session du moteur n'a pas pu s'ouvrir ou qu'elle
+    est morte en route : sans cela la ligne reste `en_cours` indéfiniment et
+    rien côté flux ne s'en aperçoit. Si même cette session échoue, on le
+    journalise — c'est tout ce qui reste, et le balayage des orphelins
+    (Task 3) prendra la suite.
+    """
+    import uuid as _uuid
+
+    from app.modules.reports import models as rm
+
+    try:
+        from app.db import SessionLocal
+
+        with SessionLocal() as db:
+            rapport = db.get(rm.Report, _uuid.UUID(rapport_id))
+            if rapport is None:
+                return
+            _ranger_echec(db, rapport, erreur)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Rapport %s laissé en_cours : impossible d'écrire l'échec "
+                     "(%s)", rapport_id, e)
 
 
 def _ranger_annule(db, rapport, partiel: str = "") -> None:
@@ -890,7 +1048,14 @@ def _ranger_annule(db, rapport, partiel: str = "") -> None:
     db.commit()
 
 
-def _ranger_echec(db, rapport, erreur: BaseException) -> None:
+def _ranger_echec(db, rapport, erreur: BaseException, *,
+                  raison: str = "echec_generation") -> None:
+    """`echec` : rien débité, la raison en clair dans `detail`.
+
+    `raison` — « delai_depasse » quand l'échéance globale a coupé la tâche :
+    le front (Task 4) doit pouvoir distinguer « ça a planté » de « ça a duré
+    trop longtemps », les deux ne se relancent pas dans le même état d'esprit.
+    """
     from app.modules.reports import models as rm
 
     db.rollback()
@@ -898,12 +1063,16 @@ def _ranger_echec(db, rapport, erreur: BaseException) -> None:
     if rapport is None:
         return
     detail = dict(rapport.detail or {})
-    detail["raison"] = "echec_generation"
+    detail["raison"] = raison
     # Une `AppError` porte un message déjà écrit pour l'utilisateur (« Crédits
     # insuffisants », par exemple, quand le solde a fondu ailleurs pendant les
     # minutes de rédaction) : le masquer derrière un message générique
     # laisserait la personne sans explication actionnable.
     message = getattr(erreur, "message", None) if isinstance(erreur, AppError) else None
+    if raison == "delai_depasse":
+        message = message or ("La génération a dépassé le délai maximal et a été "
+                              "arrêtée. Aucun crédit n'a été débité — vous pouvez "
+                              "la relancer.")
     detail["message"] = message or ("La génération a échoué. Aucun crédit n'a été "
                                     "débité — vous pouvez la relancer.")
     detail["erreur"] = type(erreur).__name__
@@ -948,16 +1117,34 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
                                  top_k=top_k, is_admin=is_admin,
                                  elargir=elargir, forcer=forcer)
     except AppError as e:
-        yield _sse({"step": "error", "done": True, "error": e.message, "code": e.code})
+        yield _sse({"step": "error", "done": True, "detail": {},
+                    "error": e.message, "code": e.code})
         return
 
     rapport_id = str(rapport.id)
+    # `detail` sur `start` comme sur les événements intermédiaires (vide ici :
+    # rien n'a encore été écrit) — Task 4 lit la même clé partout, elle n'a pas
+    # à traiter deux formes d'événement.
     yield _sse({"progress": 5, "step": "start", "etape": None,
-                "report_id": rapport_id, "message": "Démarrage de l'analyse…"})
+                "report_id": rapport_id, "detail": {},
+                "message": "Démarrage de l'analyse…"})
 
+    depart = _time.monotonic()
     dernier: tuple | None = None
     while True:
         _time.sleep(INTERVALLE_SUIVI_SECONDES)
+        # La boucle est BORNÉE par la même échéance que le moteur : sans elle,
+        # une tâche morte sans avoir pu écrire son statut (pool saturé) faisait
+        # tourner ce générateur indéfiniment en tenant une connexion — donc en
+        # aggravant la saturation qui l'avait causée.
+        if (_time.monotonic() - depart) > _delai_max():
+            yield _sse({"progress": 100, "step": "done", "done": True,
+                        "etape": None, "report_id": rapport_id,
+                        "code": "delai_depasse", "detail": {},
+                        "error": "Le suivi de la génération a dépassé le délai "
+                                 "maximal. Retrouvez l'état du rapport dans "
+                                 "votre liste de rapports."})
+            return
         # Clore la transaction de lecture PUIS vider le cache d'identité : la
         # ligne est écrite par une AUTRE session, et sans ces deux gestes le
         # flux relirait indéfiniment son propre instantané — la progression
@@ -966,7 +1153,7 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
         db.expire_all()
         ligne = db.get(rm.Report, rapport.id)
         if ligne is None:
-            yield _sse({"step": "error", "done": True,
+            yield _sse({"step": "error", "done": True, "detail": {},
                         "error": "Le rapport a été supprimé pendant sa génération."})
             return
         if ligne.statut != rm.EN_COURS:
@@ -987,6 +1174,9 @@ def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
     evenement = {
         "progress": 100, "step": "done", "done": True, "etape": ligne.etape,
         "report_id": rapport_id, "statut": ligne.statut,
+        # `detail` aussi sur `done` : la clé est présente sur TOUS les
+        # événements, éventuellement vide.
+        "detail": ligne.detail or {},
         "data": dict(detail, balance=_solde(db, user_id)),
     }
     if ligne.statut != rm.TERMINE:

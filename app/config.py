@@ -13,6 +13,15 @@ from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+# Échéance globale d'un rapport (secondes). Les délais des fournisseurs sont
+# des délais PAR LECTURE : un flux qui débite un morceau de temps en temps ne
+# les atteint jamais, et une génération suivie de trois reprises pouvait tenir
+# une connexion indéfiniment sans qu'aucune borne ne s'applique. 30 minutes :
+# largement au-dessus des 7 minutes d'un rapport de 32 000 tokens, assez bas
+# pour qu'une tâche partie en vrille libère sa connexion le jour même.
+DELAI_MAX_RAPPORT_SECONDES = 1800
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",

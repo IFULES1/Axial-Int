@@ -75,11 +75,16 @@ def profil_utilisable(db, user_id: str) -> dict | None:
 
 
 def offrir(db, user_id: str) -> str | None:
-    """Génère, archive et notifie. Retourne l'identifiant du rapport ou None."""
+    """Génère et archive le rapport offert. Retourne son identifiant ou None.
+
+    L'email est envoyé par le MOTEUR (`_executer_rapport`), pas ici : depuis
+    Task 2, tout rapport abouti est notifié une fois par la tâche qui l'a
+    produit. Notifier de nouveau ici envoyait deux fois « Votre rapport est
+    prêt » pour le seul rapport offert.
+    """
     from app.modules.analysis import service
     from app.modules.billing import service as billing
     from app.modules.reports import models as rm
-    from app.modules.reports import notification
 
     if deja_offert(db, user_id):
         return None
@@ -129,8 +134,8 @@ def offrir(db, user_id: str) -> str | None:
                        getattr(rapport, "statut", "introuvable"))
         return None
 
-    notification.prevenir(db, user_id, titre=rapport.title,
-                          contenu=rapport.content, sources=rapport.sources)
+    # Pas de `notification.prevenir` ici : le moteur l'a déjà fait (une seule
+    # notification par rapport).
     return str(rapport.id)
 
 

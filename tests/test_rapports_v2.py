@@ -591,13 +591,20 @@ def test_echec_darchivage_ne_debite_rien(base, monkeypatch):
     Jusqu'au 12/09, `consume_credits` clôturait sa transaction avant que
     `create_report` n'ouvre la sienne. Une panne entre les deux laissait le
     compte débité sans rapport. Ici l'archivage explose : rien ne doit bouger.
+
+    PORTÉE DU TEST — ce socle est SQLite, où `with_for_update()` est un no-op :
+    ce qui est prouvé ici est l'atomicité APPLICATIVE (débit et archivage dans
+    une seule transaction, un seul commit, un rollback qui emporte les deux),
+    pas le verrou de ligne concurrent de PostgreSQL. Deux débits réellement
+    simultanés sur la même ligne de solde ne sont pas exerçables ici et ne
+    doivent pas être lus comme couverts.
     """
     from app.modules.analysis import service
 
     _brancher_moteur(monkeypatch)
     uid = uuidlib.uuid4()
 
-    def _archivage_impossible(db, rapport, result, *, statut, charged):
+    def _archivage_impossible(db, rapport, result, *, statut, charged, viz=None):
         if statut == rm.TERMINE:
             raise RuntimeError("disque plein")
         return None
@@ -728,6 +735,11 @@ def test_evenements_sse_gardent_le_contrat_du_front(base, monkeypatch):
     assert evts[0]["step"] == "start" and evts[0]["report_id"]
     assert all("progress" in e and "step" in e for e in evts), evts
     assert all("etape" in e for e in evts), evts
+    # `detail` est présent partout, éventuellement vide : `start` et `done` le
+    # portaient aux seuls événements intermédiaires, et Task 4 devait traiter
+    # deux formes d'événement.
+    assert all("detail" in e for e in evts), evts
+    assert evts[0]["detail"] == {}
     etapes = [e["etape"] for e in evts if e.get("etape")]
     assert etapes[:3] == ["recherche", "selection", "redaction"], etapes
     # Anciens `step` conservés pour le front en production.
@@ -977,3 +989,373 @@ def test_routes_de_suivi_montees():
     # `/run` rend le même ReportDetail : une seule forme de rapport côté front.
     assert chemins["/analysis/run"]["post"]["responses"]["200"]["content"][
         "application/json"]["schema"]["$ref"] == ref
+
+
+# ===========================================================================
+# Task 2 — relecture, correctifs (notification unique, échéance globale,
+# viz hors transaction, reprise après troncature)
+# ===========================================================================
+
+def _compter_les_emails(monkeypatch) -> list[str]:
+    """Compte les `notification.prevenir` sans en déclencher aucun."""
+    from app.modules.reports import notification
+
+    envois: list[str] = []
+    monkeypatch.setattr(notification, "prevenir",
+                        lambda db, uid, *, titre, contenu, sources=None:
+                        envois.append(titre) or True)
+    return envois
+
+
+def test_un_seul_email_pour_le_rapport_offert(base, monkeypatch):
+    """Le moteur prévient ; `offrir` ne prévient plus.
+
+    `offrir` envoyait son propre email APRÈS que `_executer_rapport` ait déjà
+    envoyé le sien : le seul rapport dont on soigne l'arrivée partait en
+    double. La notification appartient au moteur — c'est le seul endroit qui
+    tourne que le navigateur soit là ou non.
+    """
+    from app.modules.analysis import onboarding
+
+    _brancher_moteur(monkeypatch)
+    envois = _compter_les_emails(monkeypatch)
+    uid = str(uuidlib.uuid4())
+    monkeypatch.setattr(onboarding, "deja_offert", lambda db, u: False)
+    monkeypatch.setattr(onboarding, "profil_utilisable",
+                        lambda db, u: {"company_name": "Axial", "sector": "SaaS",
+                                       "target_market": "France"})
+    with Session(base) as db:
+        rapport_id = onboarding.offrir(db, uid)
+
+    assert rapport_id, "le rapport offert doit aboutir"
+    assert _relire(base, uuidlib.UUID(rapport_id)).statut == rm.TERMINE
+    assert len(envois) == 1, f"{len(envois)} email(s) pour un rapport : {envois}"
+
+
+def test_un_seul_email_par_rapport_sur_le_chemin_run(base, monkeypatch):
+    """`/run` attend le terme, mais ne notifie pas de son côté."""
+    _brancher_moteur(monkeypatch)
+    envois = _compter_les_emails(monkeypatch)
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch)
+
+    assert rapport.statut == rm.TERMINE
+    assert len(envois) == 1, f"{len(envois)} email(s) pour un rapport : {envois}"
+
+
+def test_session_du_moteur_impossible_range_le_rapport_en_echec(base, monkeypatch):
+    """Pool saturé à l'ouverture : la ligne ne doit pas rester `en_cours`.
+
+    `with SessionLocal() as db` était hors de tout `try` : le thread mourait
+    avant d'avoir pu écrire un statut, et rien ne rangeait la ligne. Une
+    seconde session, très courte, s'en charge désormais.
+    """
+    import app.db as app_db
+
+    _brancher_moteur(monkeypatch)
+    fabrique = app_db.SessionLocal
+    ouvertures = {"n": 0}
+
+    def _premiere_ouverture_impossible():
+        ouvertures["n"] += 1
+        if ouvertures["n"] == 1:
+            raise RuntimeError("QueuePool limit of size 5 overflow 10 reached")
+        return fabrique()
+
+    monkeypatch.setattr(app_db, "SessionLocal", _premiere_ouverture_impossible)
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch)
+
+    assert rapport.statut == rm.ECHEC, "la ligne est restée en_cours"
+    assert rapport.detail["raison"] == "echec_generation"
+    assert ouvertures["n"] == 2, "la seconde session de secours n'a pas tourné"
+    assert _solde(base, uid) == 40 + 200
+
+
+def _echeance_depassee(monkeypatch, secondes=-1):
+    """Échéance globale déjà dépassée — une valeur négative expire au premier
+    contrôle, sans faire attendre le test une demi-heure."""
+    from app import config as app_config
+
+    monkeypatch.setattr(app_config, "DELAI_MAX_RAPPORT_SECONDES", secondes)
+
+
+def test_echeance_globale_entre_deux_etapes_range_en_echec(base, monkeypatch):
+    """Rien ne bornait la durée d'un rapport : les délais des fournisseurs
+    sont des délais par lecture, et une reprise peut enchaîner quatre appels
+    de 32 000 tokens. Le premier contrôle d'étape doit trancher."""
+    _brancher_moteur(monkeypatch)
+    _echeance_depassee(monkeypatch)
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch)
+
+    assert rapport.statut == rm.ECHEC
+    assert rapport.detail["raison"] == "delai_depasse"
+    assert "délai" in rapport.detail["message"]
+    assert rapport.content == ""
+    assert _solde(base, uid) == 40 + 200, "un rapport abandonné a été facturé"
+
+
+def test_echeance_globale_pendant_la_redaction_range_en_echec(base, monkeypatch):
+    """L'échéance est relue toutes les 20 portions, comme le Stop."""
+    from app import config as app_config
+
+    etapes_vues: list[str] = []
+    morceaux = ["## 1. Début\n"] + ["mot " for _ in range(200)]
+
+    def _vieillir(_chunk):
+        # Échéance franchie APRÈS le début de la rédaction : le contrôle des
+        # 20 portions est le seul à pouvoir l'attraper.
+        app_config.DELAI_MAX_RAPPORT_SECONDES = -1
+
+    monkeypatch.setattr(app_config, "DELAI_MAX_RAPPORT_SECONDES", 1800)
+    _brancher_moteur(monkeypatch, chunks=morceaux, avant_chunk=_vieillir)
+    vues = _etapes_observees(monkeypatch)
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch)
+    etapes_vues += [n for n, _, _ in vues]
+
+    assert "redaction" in etapes_vues, "la rédaction n'a pas commencé"
+    assert rapport.statut == rm.ECHEC
+    assert rapport.detail["raison"] == "delai_depasse"
+    assert _solde(base, uid) == 40 + 200
+
+
+def test_le_flux_sse_sarrete_quand_lecheance_passe(base, monkeypatch):
+    """La boucle de suivi ne tourne pas indéfiniment sur un rapport figé.
+
+    Le cas qui compte : la tâche est morte sans avoir pu écrire son statut. La
+    ligne reste `en_cours` pour toujours, et la boucle tenait une connexion —
+    en aggravant la saturation qui l'avait causée.
+    """
+    from app.modules.analysis import service
+    from app.modules.billing import service as billing
+    from app.modules.memory import service as memory
+
+    uid = uuidlib.uuid4()
+    monkeypatch.setattr(memory, "build_context", lambda db, u: "")
+    monkeypatch.setattr(service, "_profile_dict", lambda db, u: {})
+    monkeypatch.setattr(service, "INTERVALLE_SUIVI_SECONDES", 0.01)
+    # Tâche morte : la ligne ne quittera jamais `en_cours`.
+    monkeypatch.setattr(service, "_executer_rapport", lambda rid, **kw: None)
+    _echeance_depassee(monkeypatch)
+
+    with Session(base) as db:
+        billing.get_or_create_balance(db, str(uid))
+        evts = [json.loads(e.removeprefix("data: ").strip())
+                for e in service.stream_analysis(
+                    db=db, user_id=str(uid), is_admin=False, query="q",
+                    analysis_type="analyse_risques")]
+
+    fin = evts[-1]
+    assert fin["step"] == "done" and fin["done"] is True
+    assert fin["code"] == "delai_depasse"
+    assert "délai" in fin["error"]
+    assert "detail" in fin
+    # La ligne reste consultable : le flux abandonne le suivi, pas le rapport.
+    assert _relire(base, uuidlib.UUID(evts[0]["report_id"])).statut == rm.EN_COURS
+
+
+def _flux_par_appels(appels: list[dict], reponses):
+    """Bouchon de `stream_text` qui enregistre chaque appel et joue `reponses`
+    (liste de `(morceaux, stop_reason)`, la dernière rejouée indéfiniment)."""
+
+    def _flux(*, system, prompt, tier="chat", max_tokens=4000, history=None,
+              mesure=None, fournisseur=None, **kw):
+        appels.append({"prompt": prompt, "history": history,
+                       "fournisseur": fournisseur})
+        morceaux, raison = reponses[min(len(appels) - 1, len(reponses) - 1)]
+        if mesure is not None:
+            mesure.update({"model": "claude-test", "provider": "claude",
+                           "input_tokens": mesure.get("input_tokens", 0) + 100,
+                           "output_tokens": mesure.get("output_tokens", 0) + 200})
+        for m in morceaux:
+            yield m
+        return raison
+
+    return _flux
+
+
+def test_reprise_apres_troncature_recolle_et_epingle_le_fournisseur(base, monkeypatch):
+    """La panne du 24/08, sur le NOUVEAU chemin de rédaction.
+
+    Les tests de troncature existants portaient sur `claude.generate`, que la
+    production n'emprunte plus pour les rapports : la reprise de `_rediger`
+    (historique, plafond, cumul de la mesure) n'était couverte par rien.
+    """
+    from app.shared import llm_client
+    from app.shared.llm_client.claude import SUITE_CONSIGNE
+
+    _brancher_moteur(monkeypatch)
+    appels: list[dict] = []
+    monkeypatch.setattr(llm_client, "stream_text", _flux_par_appels(appels, [
+        (["## 1. Début\n", "coupé"], "max_tokens"),
+        (["## 2. Suite\n", "fin"], "end_turn"),
+    ]))
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch)
+
+    assert rapport.statut == rm.TERMINE
+    # Le texte des deux passes est RECOLLÉ, dans l'ordre, sans rien perdre.
+    assert rapport.content == "## 1. Début\ncoupé## 2. Suite\nfin"
+    assert len(appels) == 2, "une reprise et une seule : la 2e passe a conclu"
+
+    # Alternance de l'historique de reprise : user (prompt initial) / assistant
+    # (ce qui a été écrit) / user (la consigne de suite). Une alternance cassée
+    # est refusée par Claude et acceptée en silence par Gemini.
+    historique = appels[1]["history"]
+    assert [m["role"] for m in historique] + ["user"] == ["user", "assistant", "user"]
+    assert historique[0]["content"] == appels[0]["prompt"]
+    assert historique[1]["content"] == "## 1. Début\ncoupé"
+    assert appels[1]["prompt"] == SUITE_CONSIGNE
+
+    # Fournisseur épinglé sur celui qui a commencé : sans épingle, `stream_text`
+    # rejoue sa chaîne de repli et la fin du rapport peut être écrite par
+    # l'autre modèle — deux styles recollés dans un même document.
+    assert appels[0]["fournisseur"] is None
+    assert appels[1]["fournisseur"] == "claude"
+
+    # La mesure est cumulée d'un appel à l'autre : deux passes payées, deux
+    # passes comptées.
+    assert rapport.tokens_entree == 200 and rapport.tokens_sortie == 400
+
+
+def test_les_reprises_sont_plafonnees_et_le_rapport_nest_pas_facture(base, monkeypatch):
+    """Au-delà du plafond, aucune reprise supplémentaire n'est tentée."""
+    from app.modules.analysis import service
+    from app.shared import llm_client
+
+    _brancher_moteur(monkeypatch)
+    appels: list[dict] = []
+    monkeypatch.setattr(llm_client, "stream_text", _flux_par_appels(appels, [
+        (["## 1. Encore\n"], "max_tokens"),  # rejoué à chaque appel
+    ]))
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch)
+
+    assert len(appels) == service.REPRISES_REDACTION_MAX + 1 == 4, appels
+    # Une quatrième reprise (le 5e appel) n'est jamais tentée.
+    assert rapport.statut == rm.DEGRADE
+    assert rapport.detail["raison"] == "truncated_generation"
+    assert _solde(base, uid) == 40 + 200, "un rapport tronqué n'est pas facturé"
+    # Toutes les reprises restent chez le fournisseur de la première passe.
+    assert {a["fournisseur"] for a in appels[1:]} == {"claude"}
+
+
+def test_attendre_relit_la_ligne_sans_laisser_de_transaction_ouverte(base, monkeypatch):
+    """`attendre=True` faisait `expire_all()` sans `rollback()`.
+
+    `expire_all` vide le cache d'identité mais LAISSE la transaction de lecture
+    ouverte : plusieurs minutes d'« idle in transaction » par appel `/run`, et
+    sous une isolation plus stricte que READ COMMITTED la relecture rendait la
+    ligne encore `en_cours` — `offrir` concluait alors « non abouti » sur un
+    rapport réussi. Un rollback clôt la transaction ET expire les objets.
+    """
+    from app.modules.analysis import service
+    from app.modules.billing import service as billing
+
+    _brancher_moteur(monkeypatch)
+    uid = uuidlib.uuid4()
+    with Session(base) as db:
+        billing.get_or_create_balance(db, str(uid))
+        billing.grant_purchased(db, str(uid), 200)
+    with Session(base) as db:
+        gestes: list[str] = []
+        rollback_original, expire_original = db.rollback, db.expire_all
+        monkeypatch.setattr(db, "rollback",
+                            lambda: gestes.append("rollback") or rollback_original())
+        monkeypatch.setattr(db, "expire_all",
+                            lambda: gestes.append("expire_all") or expire_original())
+        rapport = service.lancer_rapport(db, str(uid), query="ma question",
+                                         analysis_type="analyse_risques",
+                                         attendre=True)
+        assert "rollback" in gestes, gestes
+        assert "expire_all" not in gestes, "expire_all seul laisse la transaction"
+        assert rapport.statut == rm.TERMINE, "relecture non rafraîchie"
+
+
+def test_get_or_create_balance_ne_commit_pas_sous_commit_false(base, monkeypatch):
+    """Un seul commit, celui de la clôture (invariant annoncé par `finalize`).
+
+    La création du solde committait toujours : inoffensif tant que rien
+    n'attendait dans la session, mais c'était un piège pour le prochain
+    appelant — le commit aurait emporté la moitié d'une transaction de clôture.
+    """
+    from app.modules.billing import service as billing
+
+    uid = str(uuidlib.uuid4())  # aucun solde en base : la création aura lieu
+    with Session(base) as db:
+        commits: list[int] = []
+        commit_original = db.commit
+        monkeypatch.setattr(db, "commit",
+                            lambda: commits.append(1) or commit_original())
+
+        res = billing.consume_credits(db, uid, "analyse_risques", commit=False)
+        assert res["charged"] == 25
+        assert commits == [], "un commit est parti avant la clôture"
+
+        db.commit()  # LA clôture, la seule
+        assert len(commits) == 1
+
+    # Le solde créé et le débit sont bien acquis par ce commit unique.
+    assert _solde(base, uid) == 40 - 25
+
+
+def test_une_course_sur_une_viz_ne_fait_pas_echouer_le_rapport(base, monkeypatch):
+    """Les `VizRendu` sont partagés par empreinte : deux rapports concurrents
+    peuvent produire la même. Dans la transaction de clôture, cette collision
+    laissait la session en `PendingRollbackError`, le commit explosait et un
+    rapport de 32 000 tokens entièrement produit partait en `echec`."""
+    from app.modules.viz import service as viz_service
+    from app.modules.viz.models import VizRendu
+
+    _brancher_moteur(monkeypatch)
+    with Session(base) as autre:  # l'empreinte est déjà prise par un AUTRE rapport
+        autre.add(VizRendu(empreinte="e" * 64, vl={"mark": "bar"}))
+        autre.commit()
+
+    def _preparer_en_course(db, markdown):
+        db.add(VizRendu(empreinte="e" * 64, vl={"mark": "line"}))
+        db.flush()  # IntegrityError : la clé primaire existe déjà
+        return []
+
+    monkeypatch.setattr(viz_service, "preparer", _preparer_en_course)
+    uid = uuidlib.uuid4()
+    rapport = _lancer(base, uid, monkeypatch)
+
+    assert rapport.statut == rm.TERMINE, "la course a fait échouer le rapport"
+    assert rapport.viz is None, "aucune viz, mais le rapport est là"
+    assert "# Titre" in rapport.content
+    assert rapport.detail["credits"] == 25
+    assert _solde(base, uid) == 40 + 200 - 25
+
+
+def test_run_transmet_elargir_et_forcer(base, monkeypatch):
+    """« Recherche élargie » et « Générer quand même » sur les DEUX chemins.
+
+    `AnalysisRequest` portait déjà les deux drapeaux et `/analysis/run` les
+    jetait : la reprise après « sources insuffisantes » ne marchait que par
+    `/stream` ou `/reports/{id}/relancer`.
+    """
+    from app.modules.analysis import router as analysis_router
+    from app.modules.analysis import service
+    from app.modules.analysis.schemas import AnalysisRequest
+    from app.modules.auth.schemas import AuthUser
+
+    vus: dict = {}
+    uid = uuidlib.uuid4()
+    with Session(base) as db:
+        ligne = _rapport(db, uid, statut=rm.TERMINE, content="corps",
+                         analysis_type="analyse_risques")
+        monkeypatch.setattr(service, "lancer_rapport",
+                            lambda db_, user_id, **kw: vus.update(kw) or ligne)
+        reponse = analysis_router.run(
+            AnalysisRequest(query="q", analysis_type="analyse_risques",
+                            elargir=True, forcer=True),
+            user=AuthUser(id=str(uid), email="fondateur@exemple.fr"), db=db)
+
+    assert vus["elargir"] is True and vus["forcer"] is True
+    assert vus["attendre"] is True
+    assert reponse.id == str(ligne.id)
+    # Même schéma que `/stream` : un seul contrat d'entrée pour les deux routes.
+    assert {"elargir", "forcer"} <= set(AnalysisRequest.model_fields)

@@ -56,7 +56,15 @@ def available_credits(balance: CreditBalance) -> int:
     return trial + balance.free_credits + balance.purchased_credits
 
 
-def get_or_create_balance(db: Session, user_id: str) -> CreditBalance:
+def get_or_create_balance(db: Session, user_id: str, *,
+                          commit: bool = True) -> CreditBalance:
+    """Le solde du compte, créé avec la dotation d'essai s'il n'existe pas.
+
+    `commit=False` — la création reste EN ATTENTE dans la session de
+    l'appelant. Indispensable sous `consume_credits(commit=False)` : un commit
+    ici clôrait la transaction de l'appelant (la ligne de rapport en cours, par
+    exemple) et casserait l'invariant « un seul commit » de `finalize`.
+    """
     uid = uuid.UUID(user_id)
     balance = db.get(CreditBalance, uid)
     if balance is None:
@@ -67,8 +75,13 @@ def get_or_create_balance(db: Session, user_id: str) -> CreditBalance:
         )
         db.add(balance)
         _log_event(db, user_id, FREE_BETA_CREDITS, "essai_bienvenue")
-        db.commit()
-        db.refresh(balance)
+        if commit:
+            db.commit()
+            db.refresh(balance)
+        else:
+            # `flush` seul : la ligne existe pour le `SELECT … FOR UPDATE` qui
+            # suit, sans que rien ne soit encore acquis en base.
+            db.flush()
     return balance
 
 
@@ -105,7 +118,9 @@ def consume_credits(db: Session, user_id: str, action: str,
         return {"charged": 0, "action": action, "bypass": True}
 
     uid = uuid.UUID(user_id)
-    get_or_create_balance(db, user_id)  # ensure row exists
+    # `commit` relayé : sous `commit=False`, créer le solde ne doit pas clore
+    # la transaction de l'appelant.
+    get_or_create_balance(db, user_id, commit=commit)  # ensure row exists
 
     # Lock the row for the duration of the debit.
     balance = db.execute(

@@ -98,7 +98,8 @@ def stream_text(*, system: str, prompt: str, tier: str = "chat",
                 max_tokens: int = 4000, mcp_servers: list | None = None,
                 mcp_tools: list | None = None,
                 history: list[dict] | None = None,
-                mesure: dict | None = None):
+                mesure: dict | None = None,
+                fournisseur: str | None = None):
     """Streaming counterpart of generate(): yields text chunks.
 
     Failover only applies BEFORE the first chunk — once text has reached the
@@ -113,6 +114,13 @@ def stream_text(*, system: str, prompt: str, tier: str = "chat",
     d'entrée et de sortie, cumulés d'un appel à l'autre) : c'est ce qui rend
     le coût d'une réponse en flux mesurable. `resultat_de_mesure` en fait un
     `LLMResult`.
+
+    `fournisseur` — ÉPINGLE la chaîne sur un seul fournisseur (« claude » ou
+    « gemini »). C'est ce qui permet de reprendre une réponse tronquée chez
+    celui qui l'a commencée : sans épingle, chaque appel rejoue la chaîne de
+    repli depuis le début et une panne entre deux reprises recolle deux styles
+    dans un même document. Épinglé et indisponible, on lève plutôt que de
+    basculer.
     """
     import logging
 
@@ -121,6 +129,8 @@ def stream_text(*, system: str, prompt: str, tier: str = "chat",
     logger = logging.getLogger("axial.llm")
     chain = ([("claude", claude), ("gemini", gemini)] if tier == "report"
              else [("gemini", gemini), ("claude", claude)])
+    if fournisseur:
+        chain = [(n, m) for n, m in chain if n == fournisseur]
 
     last_err: Exception | None = None
     for name, mod in chain:
@@ -166,6 +176,9 @@ def stream_text(*, system: str, prompt: str, tier: str = "chat",
                                    _sans_secret(fermeture))
     if last_err:
         raise last_err
+    if fournisseur:
+        raise ProviderUnavailable(
+            f"Fournisseur {fournisseur} indisponible — reprise impossible.")
     raise ProviderUnavailable("Aucun LLM de génération configuré (Gemini/Claude).")
 
 

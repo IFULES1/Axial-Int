@@ -41,10 +41,13 @@ def run(payload: AnalysisRequest, user: AuthUser = Depends(get_current_user),
     """
     from app.modules.reports import service as reports
 
+    # `elargir` / `forcer` transmis comme sur `/stream` : « Recherche élargie »
+    # et « Générer quand même » doivent marcher sur les deux chemins, sinon le
+    # repli du flux perd les deux boutons de la spec §2.
     rapport = service.lancer_rapport(
         db, user.id, query=payload.query, analysis_type=payload.analysis_type,
         title=payload.title, top_k=payload.top_k, is_admin=user.is_admin,
-        attendre=True,
+        elargir=payload.elargir, forcer=payload.forcer, attendre=True,
     )
     return ReportDetail(**reports.detail_dict(rapport))
 
