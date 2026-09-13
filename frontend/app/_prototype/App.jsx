@@ -8551,7 +8551,14 @@ function App() {
       axRapport(idEnCours).then((r) => {
         if (!actif) return;
         const etat = etatDepuisRapport(r);
-        if (estTerminal(etat.statut)) { rangerRapportTermine(r); return; }
+        if (estTerminal(etat.statut)) {
+          rangerRapportTermine(r);
+          // Le chemin de reprise (rechargement, polling) n'a pas de payload
+          // `done` porteur du solde : on le redemande — constaté en prod le
+          // 13/09, pastille figée à 187 pour un solde réel de 162.
+          axBalance().then((b) => setAxBal(b.available)).catch(() => {});
+          return;
+        }
         memoriserRapport(etat);
       }).catch((e) => {
         if (!actif) return;
