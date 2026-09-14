@@ -7463,8 +7463,8 @@ function DocsSurface() {
           </div>
           <div style={{ fontSize: 12.5, color: 'var(--fg-2)', lineHeight: 1.5 }}>
             {isFR
-              ? <>Écrivez à <a href="#" style={{ color: 'var(--v-bright)' }}>support@axial.intelligence</a>. Réponse sous 24h ouvrées.</>
-              : <>Reach <a href="#" style={{ color: 'var(--v-bright)' }}>support@axial.intelligence</a>. Reply within 24 business hours.</>}
+              ? <>Écrivez à <a href="mailto:support@axial-ia.fr" style={{ color: 'var(--v-bright)' }}>support@axial-ia.fr</a>. Réponse sous 24h ouvrées.</>
+              : <>Reach <a href="mailto:support@axial-ia.fr" style={{ color: 'var(--v-bright)' }}>support@axial-ia.fr</a>. Reply within 24 business hours.</>}
           </div>
         </div>
       </aside>
