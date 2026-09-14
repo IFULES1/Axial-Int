@@ -53,6 +53,12 @@ def rerank_indices(query: str, documents: list[str], top_k: int) -> list[tuple[i
         return pairs or identity
     except Exception as e:
         logger.warning("Cohere rerank failed, keeping heuristic order: %s", e)
+        try:
+            from app.shared.notifier import notifier_fournisseur
+            notifier_fournisseur(fournisseur="cohere", erreur=e,
+                                 fonction="rerank des sources", bascule=True)
+        except Exception:  # noqa: BLE001
+            pass
         return identity
 
 

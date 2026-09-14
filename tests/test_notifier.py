@@ -247,3 +247,65 @@ def test_le_masquage_en_echec_ne_leve_pas(monkeypatch):
     monkeypatch.setattr(notifier, "_valeurs_d_environnement",
                         lambda: (_ for _ in ()).throw(RuntimeError("env HS")))
     assert notifier._sans_secrets("clé=1234567890") == notifier.MASQUE
+
+
+# --- Alerte « fournisseur indisponible » (14/09) ----------------------------
+
+def _fournisseur(monkeypatch, envois, nom="exa", bascule=True, erreur=None):
+    monkeypatch.setattr(notifier, "envoyer_brut",
+                        lambda *a, **k: envois.append((a, k)) or (True, "id"))
+    notifier.notifier_fournisseur(
+        fournisseur=nom, erreur=erreur or RuntimeError("503 Service Unavailable key=abc123secret"),
+        fonction="recherche web", bascule=bascule)
+
+
+def test_fournisseur_un_email_par_fournisseur_et_par_heure(monkeypatch):
+    _active(monkeypatch)
+    envois = []
+    _fournisseur(monkeypatch, envois, "exa")
+    _fournisseur(monkeypatch, envois, "exa")
+    _fournisseur(monkeypatch, envois, "tavily")
+    assert len(envois) == 2
+    sujets = [a[1] for a, _ in envois]
+    assert "exa" in sujets[0] and "tavily" in sujets[1]
+    assert "recherche web" in sujets[0]
+
+
+def test_fournisseur_le_corps_dit_si_un_repli_a_pris_le_relais(monkeypatch):
+    _active(monkeypatch)
+    envois = []
+    _fournisseur(monkeypatch, envois, "gemini", bascule=True)
+    _fournisseur(monkeypatch, envois, "llm", bascule=False)
+    assert "repli actif" in envois[0][0][2]
+    assert "ÉCHEC" in envois[1][0][2]
+
+
+def test_fournisseur_masque_les_secrets_et_respecte_le_drapeau(monkeypatch):
+    _active(monkeypatch)
+    envois = []
+    _fournisseur(monkeypatch, envois, "exa")
+    assert "abc123secret" not in envois[0][0][2]
+    notifier._reinitialiser()
+    _desactive(monkeypatch)
+    _fournisseur(monkeypatch, envois, "linkup")
+    assert len(envois) == 1
+
+
+def test_les_fournisseurs_de_recherche_alertent_sur_exception(monkeypatch):
+    """Exa/Tavily/Linkup : l'échec d'un appel remonte au notifier avec le bon nom."""
+    from app.shared.search import providers as P
+    for var in ("EXA_API_KEY", "TAVILY_API_KEY", "LINKUP_API_KEY"):
+        monkeypatch.setenv(var, "cle-de-test")
+    get_settings.cache_clear()
+    appels = []
+    monkeypatch.setattr(notifier, "notifier_fournisseur",
+                        lambda **k: appels.append(k))
+    def _casse(*a, **k):
+        raise RuntimeError("503")
+    monkeypatch.setattr(P.httpx, "post", _casse)
+    for cls in (P.ExaProvider, P.TavilyProvider, P.LinkupProvider):
+        inst = cls.__new__(cls)
+        inst.api_key = "x"
+        assert inst.search("q", 3) == []
+    assert sorted(a["fournisseur"] for a in appels) == ["exa", "linkup", "tavily"]
+    assert all(a["bascule"] for a in appels)

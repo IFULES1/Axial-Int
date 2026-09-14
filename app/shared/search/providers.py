@@ -16,6 +16,18 @@ logger = logging.getLogger("axial.search")
 TIMEOUT = 20.0
 
 
+def _alerte_fournisseur(nom: str, erreur: BaseException) -> None:
+    """Email « fournisseur indisponible » : les autres fournisseurs de la
+    recherche continuent (repli actif), l'alerte sert à recharger ou à
+    surveiller un incident. Import paresseux pour éviter un cycle."""
+    try:
+        from app.shared.notifier import notifier_fournisseur
+        notifier_fournisseur(fournisseur=nom, erreur=erreur,
+                             fonction="recherche web", bascule=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class ExaProvider:
     name = "exa"
 
@@ -48,6 +60,7 @@ class ExaProvider:
             return out
         except Exception as e:
             logger.warning("Exa search failed: %s", e)
+            _alerte_fournisseur("exa", e)
             return []
 
 
@@ -82,6 +95,7 @@ class TavilyProvider:
             return out
         except Exception as e:
             logger.warning("Tavily search failed: %s", e)
+            _alerte_fournisseur("tavily", e)
             return []
 
 
@@ -115,6 +129,7 @@ class LinkupProvider:
             return out
         except Exception as e:
             logger.warning("Linkup search failed: %s", e)
+            _alerte_fournisseur("linkup", e)
             return []
 
 

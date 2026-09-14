@@ -178,3 +178,58 @@ def notifier_erreur(*, titre: str, route: str, methode: str,
         # Jamais d'exception hors de cette fonction : c'est déjà le chemin
         # d'erreur, un échec ici ne doit rien casser de plus.
         logger.warning("notifier_erreur a échoué : %s", e)
+
+
+def notifier_fournisseur(*, fournisseur: str, erreur: BaseException | str,
+                         fonction: str, bascule: bool) -> None:
+    """Email « fournisseur indisponible » (demande de Miradie du 14/09).
+
+    `fournisseur` : nom court (exa, tavily, linkup, gemini, claude, cohere…).
+    `fonction` : ce que le produit faisait (recherche web, génération de
+    rapport, réponse de conversation, rerank).
+    `bascule` : vrai si un repli a pris le relais (l'utilisateur n'a rien vu),
+    faux si la fonction a échoué pour de bon.
+
+    Même dédoublonnage que `notifier_erreur`, par fournisseur et type
+    d'erreur, sur une heure : une panne de deux heures donne deux emails, pas
+    deux cents. N'échoue jamais.
+    """
+    try:
+        settings = get_settings()
+        if not settings.erreurs_notif_actives:
+            return
+        type_erreur = type(erreur).__name__ if isinstance(erreur, BaseException) else "str"
+        signature = hashlib.sha1(
+            f"fournisseur:{fournisseur}:{type_erreur}".encode("utf-8")).hexdigest()
+        if _deja_notifie_recemment(signature):
+            return
+
+        horodatage = dt.datetime.now(dt.timezone.utc).isoformat()
+        detail = _sans_secrets(str(erreur))[:800]
+        gravite = "repli actif, aucun impact utilisateur" if bascule else "ÉCHEC — fonction indisponible"
+        sujet = _sans_secrets(f"[Axial] Fournisseur indisponible : {fournisseur} ({fonction})")
+        texte = _sans_secrets(
+            f"Le fournisseur « {fournisseur} » a échoué pendant : {fonction}.\n"
+            f"Gravité : {gravite}.\n"
+            f"Horodatage (UTC) : {horodatage}\n\n"
+            f"Erreur : {type_erreur} — {detail}\n\n"
+            "Action suggérée : vérifier le tableau de bord du fournisseur (quota, "
+            "crédits, incident en cours). Un nouvel email ne partira pas avant une "
+            "heure pour ce fournisseur et ce type d'erreur."
+        )
+        _derniers_envois[signature] = dt.datetime.now(dt.timezone.utc).timestamp()
+        destinataire = settings.erreurs_notif_destinataire
+
+        def _envoyer() -> None:
+            try:
+                envoye, motif = envoyer_brut(destinataire, sujet, texte)
+                if not envoye:
+                    _derniers_envois.pop(signature, None)
+                    logger.warning("Alerte fournisseur non envoyée (%s) : %s", fournisseur, motif)
+            except Exception as e:  # noqa: BLE001
+                _derniers_envois.pop(signature, None)
+                logger.warning("Alerte fournisseur : envoi échoué (%s)", e)
+
+        _lancer(_envoyer)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("notifier_fournisseur a échoué : %s", e)

@@ -26,6 +26,18 @@ _enrich = ClaudeProvider()
 _SECRET_DANS_URL = re.compile(r"([?&](?:key|api_key|apikey|token)=)[^&'\"\s]+", re.IGNORECASE)
 
 
+def _alerte_fournisseur(nom: str, erreur: BaseException, tier: str, bascule: bool) -> None:
+    """Email « fournisseur indisponible ». `bascule=True` : un autre LLM a
+    répondu ; `bascule=False` : toute la chaîne a échoué, la fonction est
+    tombée. Import paresseux (le notifier importe l'emailing)."""
+    try:
+        from app.shared.notifier import notifier_fournisseur
+        fonction = "génération de rapport" if tier == "report" else "réponse de conversation"
+        notifier_fournisseur(fournisseur=nom, erreur=erreur, fonction=fonction, bascule=bascule)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _sans_secret(err: BaseException | str) -> str:
     """Masque la clé d'API d'une URL dans un message d'erreur OU un texte.
 
@@ -89,7 +101,9 @@ def generate(*, system: str, prompt: str, tier: str = "chat",
         except Exception as e:  # noqa: BLE001 — try the next provider, whatever the cause
             last_err = e
             logger.warning("LLM %s a échoué, bascule sur le suivant : %s", name, _sans_secret(e))
+            _alerte_fournisseur(name, e, tier, bascule=True)
     if last_err:
+        _alerte_fournisseur("llm", last_err, tier, bascule=False)
         raise last_err
     raise ProviderUnavailable("Aucun LLM de génération configuré (Gemini/Claude).")
 
@@ -159,6 +173,7 @@ def stream_text(*, system: str, prompt: str, tier: str = "chat",
                 raise
             last_err = e
             logger.warning("LLM %s a échoué avant le 1er mot, bascule : %s", name, _sans_secret(e))
+            _alerte_fournisseur(name, e, tier, bascule=True)
         finally:
             # Fermer le générateur du fournisseur dans un `finally`, et pas
             # seulement dans l'`except` : sur un Stop, c'est un `GeneratorExit`
@@ -175,6 +190,7 @@ def stream_text(*, system: str, prompt: str, tier: str = "chat",
                     logger.warning("Flux %s non refermé : %s", name,
                                    _sans_secret(fermeture))
     if last_err:
+        _alerte_fournisseur("llm", last_err, tier, bascule=False)
         raise last_err
     if fournisseur:
         raise ProviderUnavailable(
