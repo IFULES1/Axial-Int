@@ -6,7 +6,10 @@ so the orchestrator can merge, dedupe and rerank them uniformly.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from app.shared.search.contraintes import Contraintes
 
 
 @dataclass
@@ -34,4 +37,5 @@ class SearchProvider(Protocol):
 
     def available(self) -> bool: ...
 
-    def search(self, query: str, limit: int = 10) -> list[SearchResult]: ...
+    def search(self, query: str, limit: int = 10,
+               contraintes: "Contraintes | None" = None) -> list[SearchResult]: ...

@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     # Comma-separated list of enabled providers, in fan-out order.
     search_providers: str = "exa,tavily,linkup"
     search_topk: int = 10  # results kept after dedup + rerank
+    # Score reranker minimal (Cohere) sous lequel une source est écartée du
+    # contexte — sauf `Contraintes.seuil_pertinence` explicite, et toujours au
+    # moins `Contraintes.garde_minimale` sources conservées. Sans clé Cohere,
+    # aucun filtre ne s'applique (ordre heuristique inchangé).
+    seuil_pertinence_recherche: float = 0.30
 
     # --- Rerank + embeddings (Cohere) ------------------------------------
     cohere_api_key: str = ""

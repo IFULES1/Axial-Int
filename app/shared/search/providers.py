@@ -6,14 +6,27 @@ orchestrator can degrade gracefully when one provider is down or rate-limited.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
 from app.config import get_settings
 from app.shared.search.base import SearchResult
+from app.shared.search.contraintes import Contraintes
 
 logger = logging.getLogger("axial.search")
 TIMEOUT = 20.0
+
+
+def _iso_depuis(jours: int) -> str:
+    """Date ISO 8601 (Exa `startPublishedDate`), `jours` avant aujourd'hui."""
+    return (datetime.now(timezone.utc) - timedelta(days=jours)).strftime(
+        "%Y-%m-%dT00:00:00.000Z")
+
+
+def _date_depuis(jours: int) -> str:
+    """Date ISO courte (Linkup `fromDate`), `jours` avant aujourd'hui."""
+    return (datetime.now(timezone.utc) - timedelta(days=jours)).strftime("%Y-%m-%d")
 
 
 def _alerte_fournisseur(nom: str, erreur: BaseException) -> None:
@@ -34,16 +47,25 @@ class ExaProvider:
     def available(self) -> bool:
         return bool(get_settings().exa_api_key)
 
-    def search(self, query: str, limit: int = 10) -> list[SearchResult]:
+    def search(self, query: str, limit: int = 10,
+               contraintes: Contraintes | None = None) -> list[SearchResult]:
         key = get_settings().exa_api_key
         if not key:
             return []
+        body = {"query": query, "numResults": limit,
+                "contents": {"text": {"maxCharacters": 600}}}
+        if contraintes is not None:
+            if contraintes.fraicheur_jours is not None:
+                body["startPublishedDate"] = _iso_depuis(contraintes.fraicheur_jours)
+            if contraintes.domaines_inclus:
+                body["includeDomains"] = list(contraintes.domaines_inclus)
+            if contraintes.domaines_exclus:
+                body["excludeDomains"] = list(contraintes.domaines_exclus)
         try:
             r = httpx.post(
                 "https://api.exa.ai/search",
                 headers={"x-api-key": key, "Content-Type": "application/json"},
-                json={"query": query, "numResults": limit,
-                      "contents": {"text": {"maxCharacters": 600}}},
+                json=body,
                 timeout=TIMEOUT,
             )
             r.raise_for_status()
@@ -70,15 +92,27 @@ class TavilyProvider:
     def available(self) -> bool:
         return bool(get_settings().tavily_api_key)
 
-    def search(self, query: str, limit: int = 10) -> list[SearchResult]:
+    def search(self, query: str, limit: int = 10,
+               contraintes: Contraintes | None = None) -> list[SearchResult]:
         key = get_settings().tavily_api_key
         if not key:
             return []
+        body = {"api_key": key, "query": query, "max_results": limit,
+                "search_depth": "advanced"}
+        if contraintes is not None:
+            if contraintes.fraicheur_jours is not None:
+                if contraintes.fraicheur_jours <= 365:
+                    body["days"] = contraintes.fraicheur_jours
+                else:
+                    body["time_range"] = "year"
+            if contraintes.domaines_inclus:
+                body["include_domains"] = list(contraintes.domaines_inclus)
+            if contraintes.domaines_exclus:
+                body["exclude_domains"] = list(contraintes.domaines_exclus)
         try:
             r = httpx.post(
                 "https://api.tavily.com/search",
-                json={"api_key": key, "query": query, "max_results": limit,
-                      "search_depth": "advanced"},
+                json=body,
                 timeout=TIMEOUT,
             )
             r.raise_for_status()
@@ -105,15 +139,24 @@ class LinkupProvider:
     def available(self) -> bool:
         return bool(get_settings().linkup_api_key)
 
-    def search(self, query: str, limit: int = 10) -> list[SearchResult]:
+    def search(self, query: str, limit: int = 10,
+               contraintes: Contraintes | None = None) -> list[SearchResult]:
         key = get_settings().linkup_api_key
         if not key:
             return []
+        body = {"q": query, "depth": "standard", "outputType": "searchResults"}
+        if contraintes is not None:
+            if contraintes.fraicheur_jours is not None:
+                body["fromDate"] = _date_depuis(contraintes.fraicheur_jours)
+            if contraintes.domaines_inclus:
+                body["includeDomains"] = list(contraintes.domaines_inclus)
+            if contraintes.domaines_exclus:
+                body["excludeDomains"] = list(contraintes.domaines_exclus)
         try:
             r = httpx.post(
                 "https://api.linkup.so/v1/search",
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json={"q": query, "depth": "standard", "outputType": "searchResults"},
+                json=body,
                 timeout=TIMEOUT,
             )
             r.raise_for_status()
