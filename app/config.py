@@ -86,6 +86,11 @@ class Settings(BaseSettings):
     linkup_api_key: str = ""
     # Comma-separated list of enabled providers, in fan-out order.
     search_providers: str = "exa,tavily,linkup"
+    # Recherche à niveaux : niveaux séparés par `|`, fournisseurs par `,`.
+    # Niveau 1 interrogé en premier ; niveau 2 ajouté au pool seulement si le
+    # niveau 1 ne suffit pas (voir `orchestrator.search`). Vide → un seul
+    # niveau = `search_provider_list` (repli, comportement pré-cascade).
+    search_tiers: str = "perplexity,exa|tavily,linkup"
     search_topk: int = 10  # results kept after dedup + rerank
     # Score reranker minimal (Cohere) sous lequel une source est écartée du
     # contexte — sauf `Contraintes.seuil_pertinence` explicite, et toujours au
@@ -119,6 +124,22 @@ class Settings(BaseSettings):
     @property
     def search_provider_list(self) -> list[str]:
         return [p.strip() for p in self.search_providers.split(",") if p.strip()]
+
+    @property
+    def search_tier_list(self) -> list[list[str]]:
+        """Niveaux de recherche, chacun une liste de noms de fournisseurs.
+
+        Un niveau vide (ex. `"exa,|tavily"`) est sauté. `search_tiers` vide →
+        un seul niveau = `search_provider_list` (comportement pré-cascade).
+        """
+        if not self.search_tiers.strip():
+            return [self.search_provider_list]
+        niveaux = []
+        for niveau in self.search_tiers.split("|"):
+            noms = [n.strip() for n in niveau.split(",") if n.strip()]
+            if noms:
+                niveaux.append(noms)
+        return niveaux
     # Optional enrichers — absence simply disables them (graceful degradation).
     pappers_api_key: str = ""
     serper_api_key: str = ""
@@ -157,6 +178,7 @@ class Settings(BaseSettings):
     tarif_recherche_tavily_micro_eur: int = 7_400   # ~8 $ / 1000 (mode approfondi)
     tarif_recherche_linkup_micro_eur: int = 4_600
     tarif_recherche_serper_micro_eur: int = 920     # ~1 $ / 1000 recherches
+    tarif_recherche_perplexity_micro_eur: int = 5_000  # sonar, ~5 $ / 1000, à confirmer
     # Repli pour un fournisseur non listé : sur-estimer vaut mieux que
     # sous-estimer — un coût à zéro fait passer un poste pour gratuit.
     tarif_recherche_defaut_micro_eur: int = 4_600

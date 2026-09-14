@@ -79,24 +79,30 @@ def rerank_indices(query: str, documents: list[str], top_k: int) -> list[tuple[i
     return pairs
 
 
-def rerank(query: str, results: list[SearchResult], top_k: int,
-          contraintes: Contraintes | None = None,
-          compteur: dict[str, int] | None = None) -> list[SearchResult]:
-    """Reranke, puis écarte les résultats sous le seuil de pertinence.
+def rerank_avec_etat(query: str, results: list[SearchResult], top_k: int,
+                     contraintes: Contraintes | None = None,
+                     compteur: dict[str, int] | None = None,
+                     ) -> tuple[list[SearchResult], bool]:
+    """Comme `rerank`, mais indique aussi si les scores utilisés pour classer
+    (et, le cas échéant, filtrer) sont réels — la cascade à niveaux de
+    l'orchestrateur s'en sert pour savoir si « le nombre de résultats rendus »
+    peut être interprété comme « le nombre de résultats pertinents » (`reel`)
+    ou seulement comme « la taille du pool » (repli).
 
-    Le filtre ne s'applique que si Cohere a réellement noté les résultats —
-    pas seulement si une clé est configurée (`available()` ne dit rien de la
-    réussite de l'appel). Une panne Cohere (timeout, 429, 503) retombe sur
-    l'ordre heuristique à score 0.0 : sans ce garde-fou, `0.0 < seuil` pour
-    tout le monde et seule la garde minimale survivrait à un incident
-    fournisseur transitoire — exactement la dégradation silencieuse que « pas
-    de filtre sans Cohere » doit éviter. Filet de sécurité additionnel : si
-    tous les scores rendus valent exactement 0.0, on ne filtre pas non plus.
-    Au moins `garde_minimale` résultats (les mieux classés) sont toujours
-    conservés, même sous le seuil, pour ne jamais vider le contexte.
+    Le filtre de seuil ne s'applique que si Cohere a réellement noté les
+    résultats — pas seulement si une clé est configurée (`available()` ne dit
+    rien de la réussite de l'appel). Une panne Cohere (timeout, 429, 503)
+    retombe sur l'ordre heuristique à score 0.0 : sans ce garde-fou, `0.0 <
+    seuil` pour tout le monde et seule la garde minimale survivrait à un
+    incident fournisseur transitoire — exactement la dégradation silencieuse
+    que « pas de filtre sans Cohere » doit éviter. Filet de sécurité
+    additionnel : si tous les scores rendus valent exactement 0.0, on ne
+    filtre pas non plus. Au moins `garde_minimale` résultats (les mieux
+    classés) sont toujours conservés, même sous le seuil, pour ne jamais
+    vider le contexte.
     """
     if not results:
-        return []
+        return [], False
     documents = [f"{r.title}\n{r.snippet}" for r in results]
     pairs, reel = rerank_indices_avec_etat(query, documents, top_k)
     ranked = []
@@ -105,7 +111,7 @@ def rerank(query: str, results: list[SearchResult], top_k: int,
         ranked.append(results[idx])
 
     if not reel or all(r.score == 0.0 for r in ranked):
-        return ranked
+        return ranked, False
 
     settings = get_settings()
     seuil = (contraintes.seuil_pertinence if contraintes is not None
@@ -127,4 +133,18 @@ def rerank(query: str, results: list[SearchResult], top_k: int,
                     ecartes, seuil)
     if compteur is not None:
         compteur["ecartes"] = compteur.get("ecartes", 0) + ecartes
-    return filtres
+    return filtres, True
+
+
+def rerank(query: str, results: list[SearchResult], top_k: int,
+          contraintes: Contraintes | None = None,
+          compteur: dict[str, int] | None = None) -> list[SearchResult]:
+    """Reranke, puis écarte les résultats sous le seuil de pertinence.
+
+    Voir `rerank_avec_etat` pour le détail du comportement ; cette fonction
+    en jette l'indicateur `reel`, gardé par les seuls appelants qui en ont
+    besoin (la cascade à niveaux de l'orchestrateur).
+    """
+    ranked, _ = rerank_avec_etat(query, results, top_k,
+                                 contraintes=contraintes, compteur=compteur)
+    return ranked

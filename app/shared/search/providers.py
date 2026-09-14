@@ -1,4 +1,4 @@
-"""Concrete search adapters: Exa, Tavily, Linkup.
+"""Concrete search adapters: Perplexity, Exa, Tavily, Linkup.
 
 Each returns normalized `SearchResult`s and fails soft (empty list + log) so the
 orchestrator can degrade gracefully when one provider is down or rate-limited.
@@ -6,6 +6,7 @@ orchestrator can degrade gracefully when one provider is down or rate-limited.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -38,6 +39,43 @@ def _domaines(contraintes: Contraintes, cle_inclus: str, cle_exclus: str) -> dic
     if contraintes.domaines_exclus:
         return {cle_exclus: list(contraintes.domaines_exclus)}
     return {}
+
+
+def _tavily_time_range(jours: int) -> str:
+    """`time_range`, jamais `days` (validation prod du 14/09) : Tavily ignore
+    silencieusement `include_domains` quand `days` est envoyé dans le même
+    appel, mais le respecte avec `time_range`. `day`/`week`/`month` pour les
+    fraîcheurs courtes, `year` au-delà de 31 jours (y compris > 365, comme
+    avant)."""
+    if jours <= 1:
+        return "day"
+    if jours <= 7:
+        return "week"
+    if jours <= 31:
+        return "month"
+    return "year"
+
+
+def _domaines_perplexity(contraintes: Contraintes) -> list[str]:
+    """`search_domain_filter` : inclus, sinon exclus préfixés `-`, jamais les
+    deux, 10 domaines maximum (limite de l'API)."""
+    if contraintes.domaines_inclus:
+        return list(contraintes.domaines_inclus)[:10]
+    if contraintes.domaines_exclus:
+        return [f"-{d}" for d in contraintes.domaines_exclus][:10]
+    return []
+
+
+_MOTIF_PHRASE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _extrait_pour_citation(contenu: str, indice: int) -> str:
+    """Phrase(s) de la réponse Perplexity qui citent `[indice]`, sinon vide."""
+    marqueur = f"[{indice}]"
+    if not contenu or marqueur not in contenu:
+        return ""
+    phrases = [p.strip() for p in _MOTIF_PHRASE.split(contenu) if marqueur in p]
+    return " ".join(phrases).strip()
 
 
 def _alerte_fournisseur(nom: str, erreur: BaseException) -> None:
@@ -110,10 +148,7 @@ class TavilyProvider:
                     "search_depth": "advanced"}
             if contraintes is not None:
                 if contraintes.fraicheur_jours:
-                    if contraintes.fraicheur_jours <= 365:
-                        body["days"] = contraintes.fraicheur_jours
-                    else:
-                        body["time_range"] = "year"
+                    body["time_range"] = _tavily_time_range(contraintes.fraicheur_jours)
                 body.update(_domaines(contraintes, "include_domains", "exclude_domains"))
             r = httpx.post(
                 "https://api.tavily.com/search",
@@ -178,7 +213,86 @@ class LinkupProvider:
             return []
 
 
-_REGISTRY = {p.name: p for p in (ExaProvider(), TavilyProvider(), LinkupProvider())}
+class PerplexityProvider:
+    """Perplexity Sonar comme FOURNISSEUR DE RECHERCHE : rend des
+    `SearchResult`, pas une réponse générée — distinct du client
+    `app.shared.llm_client.perplexity` (génération/grounding)."""
+
+    name = "perplexity"
+
+    def available(self) -> bool:
+        return bool(get_settings().perplexity_api_key)
+
+    def search(self, query: str, limit: int = 10,
+               contraintes: Contraintes | None = None) -> list[SearchResult]:
+        settings = get_settings()
+        key = settings.perplexity_api_key
+        if not key:
+            return []
+        try:
+            body = {
+                "model": settings.perplexity_model_chat,
+                "messages": [
+                    {"role": "system", "content": (
+                        "Tu es un moteur de recherche. Réponds par une liste de "
+                        "faits sourcés, une phrase par fait, en citant [n].")},
+                    {"role": "user", "content": query},
+                ],
+                "return_related_questions": False,
+            }
+            if contraintes is not None:
+                if contraintes.fraicheur_jours:
+                    if contraintes.fraicheur_jours <= 31:
+                        body["search_recency_filter"] = "month"
+                    elif contraintes.fraicheur_jours <= 365:
+                        body["search_recency_filter"] = "year"
+                domaines = _domaines_perplexity(contraintes)
+                if domaines:
+                    body["search_domain_filter"] = domaines
+            r = httpx.post(
+                "https://api.perplexity.ai/chat/completions",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json=body,
+                timeout=TIMEOUT,
+            )
+            r.raise_for_status()
+            data = r.json()
+            message = ((data.get("choices") or [{}])[0].get("message") or {})
+            contenu = message.get("content") or ""
+            search_results = data.get("search_results") or []
+            out: list[SearchResult] = []
+            if search_results:
+                for i, it in enumerate(search_results, 1):
+                    url = it.get("url", "")
+                    titre = it.get("title") or url
+                    extrait = (it.get("snippet")
+                              or _extrait_pour_citation(contenu, i)
+                              or titre)
+                    out.append(SearchResult(
+                        title=titre,
+                        url=url,
+                        snippet=extrait.strip()[:600],
+                        provider=self.name,
+                        published_at=it.get("date"),
+                    ))
+            else:
+                for i, url in enumerate(data.get("citations") or [], 1):
+                    extrait = _extrait_pour_citation(contenu, i) or url
+                    out.append(SearchResult(
+                        title=url,
+                        url=url,
+                        snippet=extrait.strip()[:600],
+                        provider=self.name,
+                    ))
+            return out[:limit]
+        except Exception as e:
+            logger.warning("Perplexity search failed: %s", e)
+            _alerte_fournisseur("perplexity", e)
+            return []
+
+
+_REGISTRY = {p.name: p for p in (
+    PerplexityProvider(), ExaProvider(), TavilyProvider(), LinkupProvider())}
 
 
 def get_provider(name: str):

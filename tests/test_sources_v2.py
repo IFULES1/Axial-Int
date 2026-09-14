@@ -279,7 +279,10 @@ def test_propagation_exa_contraintes_none_comportement_actuel(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_propagation_tavily_days_si_fraicheur_inferieure_365(monkeypatch):
+def test_propagation_tavily_time_range_month_si_fraicheur_31j(monkeypatch):
+    """Décision du 14/09 (validation prod) : Tavily ignore `include_domains`
+    quand `days` est envoyé dans le même appel — `days` n'est donc plus
+    jamais utilisé, uniquement `time_range`."""
     monkeypatch.setenv("TAVILY_API_KEY", "cle-test")
     get_settings.cache_clear()
     captured = {}
@@ -297,12 +300,60 @@ def test_propagation_tavily_days_si_fraicheur_inferieure_365(monkeypatch):
 
     import app.shared.search.providers as P
     monkeypatch.setattr(P.httpx, "post", _fake_post)
-    TavilyProvider().search("marché IA", 10, contraintes=_contraintes_test(fraicheur_jours=90))
+    TavilyProvider().search("marché IA", 10, contraintes=_contraintes_test(fraicheur_jours=31))
     body = captured["json"]
-    assert body["days"] == 90
-    assert "time_range" not in body
+    assert body["time_range"] == "month"
+    assert "days" not in body
     assert body["include_domains"] == ["legifrance.gouv.fr"]
     assert "exclude_domains" not in body
+    get_settings.cache_clear()
+
+
+def test_propagation_tavily_time_range_day_si_fraicheur_1j(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+
+    def _fake_post(url, json=None, timeout=None):
+        captured["json"] = json
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"results": []}
+        return R()
+
+    import app.shared.search.providers as P
+    monkeypatch.setattr(P.httpx, "post", _fake_post)
+    TavilyProvider().search("marché IA", 10, contraintes=_contraintes_test(fraicheur_jours=1))
+    assert captured["json"]["time_range"] == "day"
+    assert "days" not in captured["json"]
+    get_settings.cache_clear()
+
+
+def test_propagation_tavily_time_range_week_si_fraicheur_7j(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+
+    def _fake_post(url, json=None, timeout=None):
+        captured["json"] = json
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"results": []}
+        return R()
+
+    import app.shared.search.providers as P
+    monkeypatch.setattr(P.httpx, "post", _fake_post)
+    TavilyProvider().search("marché IA", 10, contraintes=_contraintes_test(fraicheur_jours=7))
+    assert captured["json"]["time_range"] == "week"
+    assert "days" not in captured["json"]
     get_settings.cache_clear()
 
 
@@ -357,7 +408,7 @@ def test_propagation_tavily_time_range_year_si_fraicheur_superieure_365(monkeypa
     get_settings.cache_clear()
 
 
-def test_propagation_tavily_365_jours_utilise_days(monkeypatch):
+def test_propagation_tavily_time_range_year_si_fraicheur_365j(monkeypatch):
     monkeypatch.setenv("TAVILY_API_KEY", "cle-test")
     get_settings.cache_clear()
     captured = {}
@@ -376,7 +427,8 @@ def test_propagation_tavily_365_jours_utilise_days(monkeypatch):
     import app.shared.search.providers as P
     monkeypatch.setattr(P.httpx, "post", _fake_post)
     TavilyProvider().search("marché IA", 10, contraintes=_contraintes_test(fraicheur_jours=365))
-    assert captured["json"]["days"] == 365
+    assert captured["json"]["time_range"] == "year"
+    assert "days" not in captured["json"]
     get_settings.cache_clear()
 
 
@@ -804,3 +856,435 @@ def test_contraintes_pour_type_inconnu_aucun_filtre():
     c = contraintes_pour("question quelconque", "type_qui_n_existe_pas")
     assert c.fraicheur_jours is None
     assert c.domaines_inclus == ()
+
+
+# --- Task 2 : Perplexity et cascade à niveaux --------------------------------
+# Voir `docs/superpowers/specs/2026-09-14-sources-v2.md` §2 et
+# `.superpowers/sdd/2026-09-14-sources-v2/task-2-brief.md`.
+
+from app.shared.search.providers import PerplexityProvider
+
+
+# --- settings.search_tier_list -----------------------------------------------
+
+def test_tiers_defaut_deux_niveaux(monkeypatch):
+    monkeypatch.delenv("SEARCH_TIERS", raising=False)
+    get_settings.cache_clear()
+    s = get_settings()
+    assert s.search_tiers == "perplexity,exa|tavily,linkup"
+    assert s.search_tier_list == [["perplexity", "exa"], ["tavily", "linkup"]]
+    get_settings.cache_clear()
+
+
+def test_tiers_vide_replie_sur_search_providers(monkeypatch):
+    monkeypatch.setenv("SEARCH_TIERS", "")
+    monkeypatch.setenv("SEARCH_PROVIDERS", "exa,tavily")
+    get_settings.cache_clear()
+    assert get_settings().search_tier_list == [["exa", "tavily"]]
+    get_settings.cache_clear()
+
+
+def test_tiers_niveau_vide_saute(monkeypatch):
+    monkeypatch.setenv("SEARCH_TIERS", "exa,|tavily")
+    get_settings.cache_clear()
+    assert get_settings().search_tier_list == [["exa"], ["tavily"]]
+    get_settings.cache_clear()
+
+
+def test_tiers_un_seul_niveau(monkeypatch):
+    monkeypatch.setenv("SEARCH_TIERS", "exa,tavily,linkup")
+    get_settings.cache_clear()
+    assert get_settings().search_tier_list == [["exa", "tavily", "linkup"]]
+    get_settings.cache_clear()
+
+
+# --- Perplexity : requête -----------------------------------------------------
+
+def _fake_post_perplexity(monkeypatch, captured, data):
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["json"] = json
+        captured["timeout"] = timeout
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return data
+        return R()
+
+    import app.shared.search.providers as P
+    monkeypatch.setattr(P.httpx, "post", _fake_post)
+
+
+def test_perplexity_available_avec_cle(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    assert PerplexityProvider().available() is True
+    get_settings.cache_clear()
+
+
+def test_perplexity_available_sans_cle(monkeypatch):
+    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+    get_settings.cache_clear()
+    assert PerplexityProvider().available() is False
+    get_settings.cache_clear()
+
+
+def test_perplexity_transmet_modele_et_prompt(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+    _fake_post_perplexity(monkeypatch, captured, {"choices": [{"message": {"content": ""}}]})
+    PerplexityProvider().search("réglementation IA en France", 10)
+    body = captured["json"]
+    assert body["model"] == get_settings().perplexity_model_chat
+    assert body["messages"][0]["role"] == "system"
+    assert "moteur de recherche" in body["messages"][0]["content"]
+    assert body["messages"][1] == {"role": "user", "content": "réglementation IA en France"}
+    assert body["return_related_questions"] is False
+    assert captured["headers"]["Authorization"] == "Bearer cle-test"
+    assert captured["timeout"] == 20.0
+    assert captured["url"] == "https://api.perplexity.ai/chat/completions"
+    get_settings.cache_clear()
+
+
+def test_perplexity_recency_filter_month_si_fraicheur_31j(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+    _fake_post_perplexity(monkeypatch, captured, {"choices": [{"message": {"content": ""}}]})
+    PerplexityProvider().search("q", 10, contraintes=Contraintes(fraicheur_jours=31))
+    assert captured["json"]["search_recency_filter"] == "month"
+    get_settings.cache_clear()
+
+
+def test_perplexity_recency_filter_year_si_fraicheur_365j(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+    _fake_post_perplexity(monkeypatch, captured, {"choices": [{"message": {"content": ""}}]})
+    PerplexityProvider().search("q", 10, contraintes=Contraintes(fraicheur_jours=365))
+    assert captured["json"]["search_recency_filter"] == "year"
+    get_settings.cache_clear()
+
+
+def test_perplexity_recency_filter_absent_si_fraicheur_superieure_365j(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+    _fake_post_perplexity(monkeypatch, captured, {"choices": [{"message": {"content": ""}}]})
+    PerplexityProvider().search("q", 10, contraintes=Contraintes(fraicheur_jours=730))
+    assert "search_recency_filter" not in captured["json"]
+    get_settings.cache_clear()
+
+
+def test_perplexity_recency_filter_absent_sans_contraintes(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+    _fake_post_perplexity(monkeypatch, captured, {"choices": [{"message": {"content": ""}}]})
+    PerplexityProvider().search("q", 10)
+    assert "search_recency_filter" not in captured["json"]
+    assert "search_domain_filter" not in captured["json"]
+    get_settings.cache_clear()
+
+
+def test_perplexity_domain_filter_inclus(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+    _fake_post_perplexity(monkeypatch, captured, {"choices": [{"message": {"content": ""}}]})
+    c = Contraintes(domaines_inclus=("legifrance.gouv.fr",), domaines_exclus=("pinterest.com",))
+    PerplexityProvider().search("q", 10, contraintes=c)
+    assert captured["json"]["search_domain_filter"] == ["legifrance.gouv.fr"]
+    get_settings.cache_clear()
+
+
+def test_perplexity_domain_filter_exclus_prefixe_moins_sans_inclus(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+    _fake_post_perplexity(monkeypatch, captured, {"choices": [{"message": {"content": ""}}]})
+    c = Contraintes(domaines_exclus=("pinterest.com", "facebook.com"))
+    PerplexityProvider().search("q", 10, contraintes=c)
+    assert captured["json"]["search_domain_filter"] == ["-pinterest.com", "-facebook.com"]
+    get_settings.cache_clear()
+
+
+# --- Perplexity : réponse -----------------------------------------------------
+
+def test_perplexity_search_results_avec_snippet(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+    data = {
+        "choices": [{"message": {"content": "Sans rapport avec le snippet."}}],
+        "search_results": [
+            {"title": "T1", "url": "https://a.com", "snippet": "Résumé A", "date": "2026-01-01"},
+        ],
+    }
+    _fake_post_perplexity(monkeypatch, captured, data)
+    out = PerplexityProvider().search("q", 10)
+    assert len(out) == 1
+    assert out[0].title == "T1"
+    assert out[0].url == "https://a.com"
+    assert out[0].snippet == "Résumé A"
+    assert out[0].published_at == "2026-01-01"
+    assert out[0].provider == "perplexity"
+    get_settings.cache_clear()
+
+
+def test_perplexity_search_results_sans_snippet_utilise_citation(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+    data = {
+        "choices": [{"message": {"content":
+            "Le marché croît de 10% [1]. Autre phrase sans marqueur."}}],
+        "search_results": [{"title": "T1", "url": "https://a.com"}],
+    }
+    _fake_post_perplexity(monkeypatch, captured, data)
+    out = PerplexityProvider().search("q", 10)
+    assert out[0].snippet == "Le marché croît de 10% [1]."
+    get_settings.cache_clear()
+
+
+def test_perplexity_search_results_sans_snippet_ni_citation_utilise_titre(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+    data = {
+        "choices": [{"message": {"content": "Contenu sans marqueur de citation."}}],
+        "search_results": [{"title": "T1", "url": "https://a.com"}],
+    }
+    _fake_post_perplexity(monkeypatch, captured, data)
+    out = PerplexityProvider().search("q", 10)
+    assert out[0].snippet == "T1"
+    get_settings.cache_clear()
+
+
+def test_perplexity_fallback_citations_sans_search_results(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+    data = {
+        "choices": [{"message": {"content": "Fait un [1]. Fait deux [2]."}}],
+        "citations": ["https://a.com", "https://b.com"],
+    }
+    _fake_post_perplexity(monkeypatch, captured, data)
+    out = PerplexityProvider().search("q", 10)
+    assert len(out) == 2
+    assert out[0].url == "https://a.com"
+    assert out[0].snippet == "Fait un [1]."
+    assert out[1].snippet == "Fait deux [2]."
+    get_settings.cache_clear()
+
+
+def test_perplexity_limit_tronque_resultats(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+    data = {
+        "choices": [{"message": {"content": ""}}],
+        "search_results": [{"title": f"T{i}", "url": f"https://ex{i}.com"} for i in range(5)],
+    }
+    _fake_post_perplexity(monkeypatch, captured, data)
+    out = PerplexityProvider().search("q", 2)
+    assert len(out) == 2
+    get_settings.cache_clear()
+
+
+def test_perplexity_echec_renvoie_liste_vide(monkeypatch):
+    monkeypatch.setenv("PERPLEXITY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        raise RuntimeError("503 Service Unavailable")
+
+    import app.shared.search.providers as P
+    monkeypatch.setattr(P.httpx, "post", _fake_post)
+    out = PerplexityProvider().search("q", 10)
+    assert out == []
+    get_settings.cache_clear()
+
+
+def test_perplexity_sans_cle_renvoie_liste_vide(monkeypatch):
+    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+    get_settings.cache_clear()
+    assert PerplexityProvider().search("q", 10) == []
+    get_settings.cache_clear()
+
+
+# --- Cascade à niveaux (orchestrateur) ----------------------------------------
+
+def _cohere_scores_croissants(monkeypatch, seuil_ok=True):
+    """Bouchonne Cohere : tous les documents reçoivent un score au-dessus du
+    seuil par défaut (0.30), pour simuler « tout est pertinent »."""
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        docs = json["documents"]
+        n = min(json["top_n"], len(docs))
+        score = 0.9 if seuil_ok else 0.05
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"results": [{"index": i, "relevance_score": score}
+                                     for i in range(n)]}
+        return R()
+    monkeypatch.setattr(rerank.httpx, "post", _fake_post)
+
+
+def test_cascade_niveau1_suffit_pas_de_niveau2(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "cle-test")
+    monkeypatch.setenv("SEARCH_TIERS", "exa|tavily")
+    get_settings.cache_clear()
+    _cohere_scores_croissants(monkeypatch, seuil_ok=True)
+    exa = _FauxProvider("exa", [_resultats(3)])
+    tavily = _FauxProvider("tavily", [_resultats(3)])
+    monkeypatch.setattr(orchestrator, "get_provider",
+                        lambda n: {"exa": exa, "tavily": tavily}.get(n))
+    compteur = {}
+    out = orchestrator.search("q", top_k=2, compteur=compteur)
+    assert len(out) == 2
+    assert compteur["niveaux"] == 1
+    assert len(tavily.appels) == 0
+    get_settings.cache_clear()
+
+
+def test_cascade_niveau2_ajoute_si_niveau1_insuffisant(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "cle-test")
+    monkeypatch.setenv("SEARCH_TIERS", "exa|tavily")
+    get_settings.cache_clear()
+    _cohere_scores_croissants(monkeypatch, seuil_ok=True)
+    exa = _FauxProvider("exa", [_resultats(2)])
+    tavily_resultats = [SearchResult(title=f"t{i}", url=f"https://tav.com/{i}", snippet="s",
+                                     provider="tavily") for i in range(2)]
+    tavily = _FauxProvider("tavily", [tavily_resultats])
+    monkeypatch.setattr(orchestrator, "get_provider",
+                        lambda n: {"exa": exa, "tavily": tavily}.get(n))
+    compteur = {}
+    out = orchestrator.search("q", top_k=3, compteur=compteur)
+    assert compteur["niveaux"] == 2
+    assert len(tavily.appels) == 1
+    assert len(out) == 3
+    get_settings.cache_clear()
+
+
+def test_cascade_sans_cohere_arrete_niveau1_si_pool_atteint_top_k(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "")
+    monkeypatch.setenv("SEARCH_TIERS", "exa|tavily")
+    get_settings.cache_clear()
+    exa = _FauxProvider("exa", [_resultats(3)])
+    tavily = _FauxProvider("tavily", [_resultats(3)])
+    monkeypatch.setattr(orchestrator, "get_provider",
+                        lambda n: {"exa": exa, "tavily": tavily}.get(n))
+    compteur = {}
+    out = orchestrator.search("q", top_k=3, compteur=compteur)
+    assert compteur["niveaux"] == 1
+    assert len(tavily.appels) == 0
+    assert len(out) == 3
+    get_settings.cache_clear()
+
+
+def test_cascade_sans_cohere_continue_si_pool_insuffisant(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "")
+    monkeypatch.setenv("SEARCH_TIERS", "exa|tavily")
+    get_settings.cache_clear()
+    exa = _FauxProvider("exa", [_resultats(1)])
+    tavily_resultats = [SearchResult(title=f"t{i}", url=f"https://tav.com/{i}", snippet="s",
+                                     provider="tavily") for i in range(2)]
+    tavily = _FauxProvider("tavily", [tavily_resultats])
+    monkeypatch.setattr(orchestrator, "get_provider",
+                        lambda n: {"exa": exa, "tavily": tavily}.get(n))
+    compteur = {}
+    out = orchestrator.search("q", top_k=3, compteur=compteur)
+    assert compteur["niveaux"] == 2
+    assert len(tavily.appels) == 1
+    assert len(out) == 3
+    get_settings.cache_clear()
+
+
+def test_cascade_fournisseur_inconnu_ignore(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "")
+    monkeypatch.setenv("SEARCH_TIERS", "exa,fournisseur_fantome|tavily")
+    get_settings.cache_clear()
+    exa = _FauxProvider("exa", [_resultats(3)])
+    monkeypatch.setattr(orchestrator, "get_provider",
+                        lambda n: exa if n == "exa" else None)
+    compteur = {}
+    out = orchestrator.search("q", top_k=3, compteur=compteur)
+    assert len(out) == 3
+    assert compteur["niveaux"] == 1
+    get_settings.cache_clear()
+
+
+def test_cascade_niveau_vide_saute(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "")
+    monkeypatch.setenv("SEARCH_TIERS", "fournisseur_fantome|exa")
+    get_settings.cache_clear()
+    exa = _FauxProvider("exa", [_resultats(3)])
+    monkeypatch.setattr(orchestrator, "get_provider",
+                        lambda n: exa if n == "exa" else None)
+    compteur = {}
+    out = orchestrator.search("q", top_k=3, compteur=compteur)
+    assert len(out) == 3
+    # Un seul niveau non vide au total (le premier a été sauté).
+    assert compteur["niveaux"] == 1
+    assert len(exa.appels) == 1
+    get_settings.cache_clear()
+
+
+def test_cascade_tous_niveaux_epuises_sans_atteindre_top_k(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "")
+    monkeypatch.setenv("SEARCH_TIERS", "exa|tavily")
+    get_settings.cache_clear()
+    exa = _FauxProvider("exa", [_resultats(1)])
+    tavily = _FauxProvider("tavily", [[]])
+    monkeypatch.setattr(orchestrator, "get_provider",
+                        lambda n: {"exa": exa, "tavily": tavily}.get(n))
+    compteur = {}
+    out = orchestrator.search("q", top_k=5, compteur=compteur)
+    assert compteur["niveaux"] == 2
+    assert len(out) == 1
+    get_settings.cache_clear()
+
+
+def test_cascade_search_multi_interroge_tous_les_angles_par_niveau(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "")
+    monkeypatch.setenv("SEARCH_TIERS", "exa|tavily")
+    get_settings.cache_clear()
+    exa = _FauxProvider("exa", [_resultats(1), _resultats(1)])
+    tavily_r1 = [SearchResult(title="tA", url="https://tav.com/a", snippet="s",
+                              provider="tavily")]
+    tavily_r2 = [SearchResult(title="tB", url="https://tav.com/b", snippet="s",
+                              provider="tavily")]
+    tavily = _FauxProvider("tavily", [tavily_r1, tavily_r2])
+    monkeypatch.setattr(orchestrator, "get_provider",
+                        lambda n: {"exa": exa, "tavily": tavily}.get(n))
+    compteur = {}
+    out = orchestrator.search_multi(["angle1", "angle2"], top_k=3, compteur=compteur)
+    assert compteur["niveaux"] == 2
+    # Niveau 1 (exa) interrogé sur les 2 angles, niveau 2 (tavily) aussi.
+    assert len(exa.appels) == 2
+    assert len(tavily.appels) == 2
+    assert len(out) == 3
+    get_settings.cache_clear()
+
+
+# --- Tarif Perplexity (billing) -----------------------------------------------
+
+def test_tiers_tarif_recherche_perplexity(monkeypatch):
+    """Le tarif Perplexity vit dans `config.py`
+    (`tarif_recherche_perplexity_micro_eur`) et est lu génériquement par
+    `couts.cout_recherche_micro_eur`, comme pour exa/tavily/linkup/serper —
+    aucun ajout de code n'est nécessaire dans `couts.py` lui-même."""
+    from app.modules.billing.couts import cout_recherche_micro_eur
+    get_settings.cache_clear()
+    assert get_settings().tarif_recherche_perplexity_micro_eur == 5_000
+    assert cout_recherche_micro_eur({"perplexity": 2}) == 10_000
+    get_settings.cache_clear()

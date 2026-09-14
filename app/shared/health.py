@@ -30,7 +30,7 @@ class ProviderStatus:
 def provider_statuses() -> list[ProviderStatus]:
     """Static configuration view (no network calls). Cheap and safe to call often."""
     s = get_settings()
-    search_on = [p for p in ("exa", "tavily", "linkup")
+    search_on = [p for p in ("perplexity", "exa", "tavily", "linkup")
                  if getattr(s, f"{p}_api_key", "")]
     return [
         # --- Web search: multi-provider, need at least one ---
