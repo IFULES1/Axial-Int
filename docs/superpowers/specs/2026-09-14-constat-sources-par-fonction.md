@@ -7,14 +7,14 @@ matrice cible (à arbitrer avec Miradie).
 
 | Fonction | Web (Exa + Tavily + Linkup) | Rerank Cohere | Documents de l'utilisateur (RAG) | Base de connaissance Axial (kb) | Notion | Google Drive | Base investisseurs | Flux RSS |
 |---|---|---|---|---|---|---|---|---|
-| Conversations (3 agents) | oui (sauf message trivial), 6 résultats | oui | oui, 6 passages | lue mais **vide** | oui si connecté | non | non | non |
-| Étude de marché | oui, multi-angles, 40 sources | oui | oui | lue mais vide | oui si connecté | non | non | non |
-| Synthèse exécutive / étude personnalisée | oui, 40 | oui | oui | lue mais vide | oui si connecté | non | non | non |
-| Cartographie concurrentielle | oui, 30 | oui | oui | lue mais vide | oui si connecté | non | non | non |
-| Veille réglementaire | oui, 30 | oui | oui | lue mais vide | oui si connecté | non | non | non |
-| Analyse de risques | oui, 25 | oui | oui | lue mais vide | oui si connecté | non | non | non |
-| Veille technologique | oui, 25 | oui | oui | lue mais vide | oui si connecté | non | non | non |
-| Cartographie investisseurs | oui, 30 (angles secondaires) | oui | oui | lue mais vide | oui si connecté | non | **oui, obligatoire, interrogée en premier** | non |
+| Conversations (3 agents) | oui (sauf message trivial), 6 résultats | oui | oui, 6 passages | oui, ~250 docs | oui si connecté | non | non | non |
+| Étude de marché | oui, multi-angles, 40 sources | oui | oui | oui, ~250 docs | oui si connecté | non | non | non |
+| Synthèse exécutive / étude personnalisée | oui, 40 | oui | oui | oui, ~250 docs | oui si connecté | non | non | non |
+| Cartographie concurrentielle | oui, 30 | oui | oui | oui, ~250 docs | oui si connecté | non | non | non |
+| Veille réglementaire | oui, 30 | oui | oui | oui, ~250 docs | oui si connecté | non | non | non |
+| Analyse de risques | oui, 25 | oui | oui | oui, ~250 docs | oui si connecté | non | non | non |
+| Veille technologique | oui, 25 | oui | oui | oui, ~250 docs | oui si connecté | non | non | non |
+| Cartographie investisseurs | oui, 30 (angles secondaires) | oui | oui | oui, ~250 docs | oui si connecté | non | **oui, obligatoire, interrogée en premier** | non |
 | Agents de veille | oui, multi-angles, 12 | oui | **non** | non | **non** | non | non | oui (catalogue par catégorie) |
 | Livraison Notion / Drive | — | — | — | — | écriture | écriture | — | — |
 
@@ -32,8 +32,17 @@ matrice cible (à arbitrer avec Miradie).
 - **Les agents de veille ignorent les documents, Notion et la base
   investisseurs.** Leur pool de sources (`watches/engine.py:_format_sources`)
   est une copie de `grounding.assemble` au lieu de le réutiliser.
-- **La base de connaissance Axial (`knowledge_base` dans Qdrant) est lue à
-  chaque requête mais rien ne l'alimente** dans le dépôt : coquille vide.
+- **La base de connaissance Axial (`knowledge_base` dans Qdrant) est bien
+  alimentée** : 79 078 vecteurs, ~250 documents en 6 catégories
+  (macro-institutionnel, sectoriel, réglementaire, marché-benchmarks,
+  méthodologie, littérature stratégie), ingérés en août par
+  `scripts/ingest_knowledge_base.py` depuis `data/knowledge_base/` (1,5 Go
+  sur le serveur). Payload : `user_id="__kb__"`, `doc_id`, `title`,
+  `filename`, `category`, `source`, `sector`. Elle est lue à chaque requête et
+  répond (vérifié le 14/09). Ce qui manque : un écran admin pour y ajouter ou
+  retirer des documents sans passer par le script, et une étiquette
+  « base Axial » visible dans les citations. (Correction du constat initial,
+  qui la disait vide.)
 - **Google Drive n'est jamais une source**, seulement une destination.
 - **Perplexity, Pappers et Serper** sont déclarés dans la configuration (et un
   tarif Serper existe) mais aucun code ne les appelle : fournisseurs fantômes.
