@@ -69,8 +69,17 @@ def main() -> int:
         # Les vecteurs d'août ont été ingérés depuis un autre poste : leurs
         # doc_id ne correspondent plus aux chemins du serveur, et la seule
         # garde par doc_id a réindexé 14 documents en double le 14/09.
-        if (vector_store.has_document(doc_id, collection=vector_store.KB_COLLECTION)
-                or _fichier_deja_indexe(p.name)):
+        try:
+            deja = (vector_store.has_document(doc_id, collection=vector_store.KB_COLLECTION)
+                    or _fichier_deja_indexe(p.name))
+        except Exception as e:  # noqa: BLE001 — Qdrant lent : on retente une fois, puis on saute
+            print(f"  ⏳ Qdrant lent sur {p.name[:60]} : {str(e)[:60]} — nouvel essai")
+            try:
+                deja = _fichier_deja_indexe(p.name)
+            except Exception as e2:  # noqa: BLE001
+                print(f"  ❌ {p.name[:60]} : comptage impossible ({str(e2)[:60]}), ignoré")
+                continue
+        if deja:
             skipped += 1
             continue  # resume: already indexed
         try:
