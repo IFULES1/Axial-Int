@@ -158,6 +158,8 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
             "prioritaires, chacun développé. Inclure les signaux faibles s'ils "
             "révèlent une tendance. SWOT synthétique uniquement si le sujet s'y prête."
         ),
+        "sources": {"web": True, "rag": True, "notion": True,
+                    "investisseurs": False, "pappers": False},
     },
     "analyse_concurrentielle": {
         "target_words": "3000-4000",
@@ -176,6 +178,8 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
             "majeurs uniquement si les données le permettent. Conclure sur les angles "
             "de différenciation encore inoccupés."
         ),
+        "sources": {"web": True, "rag": True, "notion": True,
+                    "investisseurs": False, "pappers": True},
     },
     "veille_technologique": {
         "target_words": "2500-3500",
@@ -191,6 +195,8 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
             "Distinguer le signal du battage médiatique : pour chaque technologie, "
             "indiquer maturité, preuves d'adoption et horizon de pertinence."
         ),
+        "sources": {"web": True, "rag": True, "notion": True,
+                    "investisseurs": False, "pappers": False},
     },
     "analyse_risques": {
         "target_words": "2500-3000",
@@ -205,6 +211,8 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
             "Hiérarchiser par (probabilité × impact). Chaque risque majeur : signal "
             "d'alerte à surveiller + première action de mitigation."
         ),
+        "sources": {"web": True, "rag": True, "notion": True,
+                    "investisseurs": False, "pappers": False},
     },
     # L'écran Rapports propose « Veille réglementaire » depuis l'origine, mais
     # ce choix retombait sur analyse_risques : l'utilisateur demandait un
@@ -233,6 +241,8 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
             "Terminer par ce qui reste incertain plutôt que de trancher à la place "
             "du juriste : ce rapport prépare une décision, il ne remplace pas un avis."
         ),
+        "sources": {"web": True, "rag": True, "notion": True,
+                    "investisseurs": False, "pappers": False},
     },
     "cartographie_investisseurs": {
         "target_words": "2500-3500",
@@ -262,6 +272,8 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
             "liste couvre un périmètre voisin du sien. "
             "Ne JAMAIS inventer de fonds absent des sources fournies."
         ),
+        "sources": {"web": True, "rag": True, "notion": True,
+                    "investisseurs": True, "pappers": False},
     },
     "etude_marche": {
         # Porté au format long : à 40 crédits, l'étude de marché ne pouvait pas
@@ -283,6 +295,8 @@ ANALYSIS_DIRECTIVES: dict[str, dict] = {
             "sont signalées comme telles avec leur méthode. Conclure sur la fenêtre "
             "d'entrée et les conditions de succès."
         ),
+        "sources": {"web": True, "rag": True, "notion": True,
+                    "investisseurs": False, "pappers": True},
     },
 }
 
@@ -425,6 +439,27 @@ def sources_for(analysis_type: str) -> int:
     """
     d = ANALYSIS_DIRECTIVES.get(_canonical(analysis_type))
     return d["min_sources"] if d else 25
+
+
+# Défaut si le type est inconnu ou n'a pas encore de champ `sources` :
+# comportement identique à avant l'introduction du champ (tout sauf
+# investisseurs/Pappers, qui n'ont de sens que pour des directives précises).
+_SOURCES_DEFAUT: dict[str, bool] = {
+    "web": True, "rag": True, "notion": True,
+    "investisseurs": False, "pappers": False,
+}
+
+
+def sources_de(analysis_type: str) -> dict:
+    """Quelles sources interroger pour ce type de rapport (spec §7).
+
+    Une source à `False` n'est pas appelée par `run_analysis` — ni recherche
+    web, ni RAG, ni Notion, ni base investisseurs, ni Pappers. Toujours les
+    cinq clés, y compris pour un type inconnu (défaut ci-dessus).
+    """
+    d = ANALYSIS_DIRECTIVES.get(_canonical(analysis_type))
+    sources = d.get("sources") if d else None
+    return dict(sources) if sources else dict(_SOURCES_DEFAUT)
 
 
 def is_valid_type(analysis_type: str) -> bool:

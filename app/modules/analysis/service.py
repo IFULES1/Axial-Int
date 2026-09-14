@@ -29,6 +29,7 @@ from app.modules.analysis.prompts import (
     is_valid_type,
     angles_de_recherche,
     sources_for,
+    sources_de,
 )
 from app.errors import AppError
 from app.shared import llm_client
@@ -112,6 +113,60 @@ def _retrieve_context(query: str, user_id: str, top_k: int):
     except Exception as e:  # embeddings/qdrant unavailable → continue without RAG
         logger.warning("RAG retrieval skipped: %s", e)
         return "", []
+
+
+# Noms de sociétés françaises repérés dans la question et les résultats web
+# déjà collectés — alimente Pappers (spec §3). Le nom du profil est deviné
+# directement (`company_name`, fourni par l'utilisateur), le reste vient
+# d'une extraction par le modèle plutôt que d'une heuristique regex : les
+# noms propres échappent trop souvent à un motif fixe.
+_PROMPT_NOMS_SOCIETES = (
+    "Liste jusqu'à 8 noms d'entreprises françaises mentionnées dans ces "
+    "extraits (question + titres/extraits web). Réponds UNIQUEMENT par une "
+    "ligne par nom, sans commentaire."
+)
+
+
+def _noms_de_societes(query: str, profile: dict | None, web_results) -> list[str]:
+    """8 noms max, `company_name` du profil toujours en tête s'il existe.
+    Échec de l'extraction LLM → `[company_name]` ou `[]` (jamais d'exception)."""
+    noms: list[str] = []
+    vus: set[str] = set()
+    company_name = (profile or {}).get("company_name")
+    if company_name and company_name.strip():
+        noms.append(company_name.strip())
+        vus.add(company_name.strip().lower())
+
+    extraits = "\n".join(
+        f"- {r.title} : {r.snippet}" for r in (web_results or [])[:15]
+        if (r.title or r.snippet)
+    )
+    prompt = (
+        f"Question : {query}\n\nExtraits web :\n{extraits or 'Aucun.'}\n\n"
+        f"{_PROMPT_NOMS_SOCIETES}"
+    )
+    try:
+        res = llm_client.generate(
+            system="Tu extrais des noms d'entreprises françaises depuis du texte.",
+            prompt=prompt, tier="chat", max_tokens=200,
+        )
+        texte = getattr(res, "text", "") or ""
+    except Exception as e:  # noqa: BLE001 — extraction best-effort
+        logger.warning("Extraction des noms de sociétés indisponible : %s", e)
+        return noms
+
+    for ligne in texte.splitlines():
+        nom = ligne.strip(" \t-•*").strip()
+        if not nom:
+            continue
+        cle = nom.lower()
+        if cle in vus:
+            continue
+        vus.add(cle)
+        noms.append(nom)
+        if len(noms) >= 8:
+            break
+    return noms
 
 
 # --- Suivi de progression et Stop (spec §1) --------------------------------
@@ -475,6 +530,10 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
     # exécutive, 25 pour une veille) — la directive et le pipeline restent alignés.
     top_k = top_k or sources_for(analysis_type)
 
+    # Quelles sources interroger pour ce type de rapport (spec §7) : une
+    # source à `False` n'est pas appelée du tout.
+    sources_dir = sources_de(analysis_type)
+
     label_title = title or analysis_type.replace("_", " ").title()
 
     # Disponibilité du moteur de génération vérifiée AVANT la recherche : c'est
@@ -491,36 +550,60 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
 
     # 1. External grounding: multi-provider web search (Exa+Tavily+Linkup) + rerank.
     from app.shared import search as web_search
+    from app.shared.search.contraintes import contraintes_pour
 
-    if suivi:
-        suivi.verifier()
-        suivi.etape("recherche", 10, message="Recherche des sources…")
-    try:
-        # Recherche multi-angles : la question de l'utilisateur, plus un angle
-        # par axe de la directive. Une requête unique ne ramenait qu'une facette
-        # du sujet, et ce que la recherche ne trouvait pas finissait comblé par
-        # extrapolation dans le rapport.
-        angles = angles_de_recherche(analysis_type, query)
-        if elargir:
-            angles = angles + _angles_elargis(analysis_type, query, profile)
-        web_results = web_search.search_multi(angles, top_k=top_k,
-                                              requete_de_rang=query,
-                                              compteur=appels_recherche)
-    except ArretGeneration:
-        raise
-    except Exception as e:
-        logger.warning("Web search failed: %s", e)
-        angles, web_results = [query], []
-    if suivi:
-        suivi.etape("recherche", 20, angles=len(angles),
-                    sources_trouvees=len(web_results),
-                    message=f"{len(web_results)} source(s) trouvée(s) sur "
-                            f"{len(angles)} angle(s).")
+    contraintes = contraintes_pour(query, analysis_type)
+
+    angles: list[str] = [query]
+    web_results: list = []
+    if sources_dir["web"]:
+        if suivi:
+            suivi.verifier()
+            suivi.etape("recherche", 10, message="Recherche des sources…")
+        try:
+            # Recherche multi-angles : la question de l'utilisateur, plus un angle
+            # par axe de la directive. Une requête unique ne ramenait qu'une facette
+            # du sujet, et ce que la recherche ne trouvait pas finissait comblé par
+            # extrapolation dans le rapport.
+            angles = angles_de_recherche(analysis_type, query)
+            if elargir:
+                angles = angles + _angles_elargis(analysis_type, query, profile)
+            web_results = web_search.search_multi(angles, top_k=top_k,
+                                                  requete_de_rang=query,
+                                                  contraintes=contraintes,
+                                                  compteur=appels_recherche)
+        except ArretGeneration:
+            raise
+        except Exception as e:
+            logger.warning("Web search failed: %s", e)
+            angles, web_results = [query], []
+        if suivi:
+            suivi.etape("recherche", 20, angles=len(angles),
+                        sources_trouvees=len(web_results),
+                        message=f"{len(web_results)} source(s) trouvée(s) sur "
+                                f"{len(angles)} angle(s).")
+
+    # 1bis. Pappers (spec §3) : fiches des sociétés nommées dans la question ou
+    # repérées par le modèle dans les résultats web déjà collectés. Ajoutées au
+    # pool AVANT le rerank final — le reranker juge de leur place comme pour
+    # n'importe quelle autre source.
+    if sources_dir["pappers"]:
+        from app.shared.enrich import pappers
+
+        if pappers.disponible():
+            try:
+                noms = _noms_de_societes(query, profile, web_results)
+                pappers_results = pappers.sources_pappers(noms, compteur=appels_recherche)
+                web_results = list(web_results) + pappers_results
+            except Exception as e:  # noqa: BLE001 — enrichissement best-effort
+                logger.warning("Pappers indisponible : %s", e)
 
     # 2. Internal grounding: RAG over the user's documents. No arbitrary cap —
     # retrieval hands over everything it finds and the reranker below arbitrates,
     # so a user with rich documents gets all of their relevant material.
-    _, passages = _retrieve_context(query, user_id, top_k)
+    passages: list = []
+    if sources_dir["rag"]:
+        _, passages = _retrieve_context(query, user_id, top_k)
 
     # 3. ONE ranked, numbered pool: web and internal compete on relevance and the
     # [N] markers map 1:1 to the citations the reader sees (they used to be two
@@ -531,7 +614,7 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
     # verified data is the subject of the report; web results only add timing
     # context, and are numbered after so every [N] still maps to one citation.
     investor_context, investor_citations = "", []
-    if _canonical_type(analysis_type) == INVESTOR_MAPPING:
+    if sources_dir["investisseurs"]:
         from app.modules.investors import service as investors
 
         mapping = None
@@ -556,13 +639,14 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
             )
 
     # Espace Notion de l'utilisateur : ses pages rejoignent le pool de sources.
-    try:
-        from app.modules.integrations import notion_context
+    if sources_dir["notion"]:
+        try:
+            from app.modules.integrations import notion_context
 
-        passages = list(passages) + notion_context.passages_pour(db_pour_notion, user_id, query) \
-            if db_pour_notion is not None else list(passages)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Espace Notion indisponible : %s", e)
+            passages = list(passages) + notion_context.passages_pour(db_pour_notion, user_id, query) \
+                if db_pour_notion is not None else list(passages)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Espace Notion indisponible : %s", e)
 
     if suivi:
         suivi.verifier()

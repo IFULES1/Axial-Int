@@ -1440,3 +1440,562 @@ def test_rerank_avec_etat_pertinents_zero_sans_scores_reels(monkeypatch):
     assert reel is False
     assert pertinents == 0
     get_settings.cache_clear()
+
+
+# ============================================================
+# Task 3 — Pappers et sources par type de rapport
+# Voir docs/superpowers/specs/2026-09-14-sources-v2.md §3 et §7.
+# ============================================================
+
+from app.modules.analysis import prompts as analysis_prompts
+from app.modules.analysis import service as analysis_service
+from app.shared.enrich import pappers
+
+
+# --- sources_de : champ `sources` des directives ----------------------------
+
+def test_sources_directive_toutes_les_cinq_cles():
+    for cle in analysis_prompts.ANALYSIS_DIRECTIVES:
+        sources = analysis_prompts.sources_de(cle)
+        assert set(sources) == {"web", "rag", "notion", "investisseurs", "pappers"}, cle
+
+
+def test_sources_directive_etude_marche_pappers_true():
+    sources = analysis_prompts.sources_de("etude_marche")
+    assert sources["pappers"] is True
+    assert sources["web"] is True and sources["rag"] is True and sources["notion"] is True
+    assert sources["investisseurs"] is False
+
+
+def test_sources_directive_analyse_concurrentielle_pappers_true():
+    sources = analysis_prompts.sources_de("analyse_concurrentielle")
+    assert sources["pappers"] is True
+
+
+def test_sources_directive_cartographie_investisseurs_investisseurs_true():
+    sources = analysis_prompts.sources_de("cartographie_investisseurs")
+    assert sources["investisseurs"] is True
+    assert sources["pappers"] is False
+
+
+def test_sources_directive_autres_types_pappers_et_investisseurs_false():
+    for cle in ("synthese_executive", "veille_technologique",
+                "analyse_risques", "analyse_reglementaire"):
+        sources = analysis_prompts.sources_de(cle)
+        assert sources["pappers"] is False
+        assert sources["investisseurs"] is False
+        assert sources["web"] is True and sources["rag"] is True and sources["notion"] is True
+
+
+def test_sources_directive_alias_resolu():
+    # `market_study` est un alias legacy de `etude_marche` (_ALIASES) : même
+    # champ `sources` que le canonique, pas un défaut générique.
+    assert analysis_prompts.sources_de("market_study") == analysis_prompts.sources_de("etude_marche")
+
+
+def test_sources_directive_type_inconnu_defaut():
+    sources = analysis_prompts.sources_de("type_qui_nexiste_pas")
+    assert sources == {"web": True, "rag": True, "notion": True,
+                       "investisseurs": False, "pappers": False}
+
+
+def test_sources_directive_prompts_inchanges():
+    # Décision explicite : le champ `sources` s'ajoute, il ne touche à aucun
+    # autre champ des directives (objectif, angles, instructions, volumes).
+    d = analysis_prompts.ANALYSIS_DIRECTIVES["etude_marche"]
+    assert d["target_words"] == "8000-10000"
+    assert d["min_sources"] == 40
+    assert "Chiffrer tout ce qui peut l'être" in d["special_instructions"]
+
+
+# --- Pappers : disponible() -------------------------------------------------
+
+def test_pappers_disponible_sans_cle(monkeypatch):
+    monkeypatch.delenv("PAPPERS_API_KEY", raising=False)
+    get_settings.cache_clear()
+    assert pappers.disponible() is False
+    get_settings.cache_clear()
+
+
+def test_pappers_disponible_avec_cle(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    assert pappers.disponible() is True
+    get_settings.cache_clear()
+
+
+# --- Pappers : rechercher() --------------------------------------------------
+
+def test_pappers_rechercher_ok(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    appels = []
+
+    def _fake_get(url, params=None, timeout=None):
+        appels.append((url, params))
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"resultats": [{"siren": "123456789", "nom_entreprise": "Ma Société"}]}
+        return R()
+
+    monkeypatch.setattr(pappers.httpx, "get", _fake_get)
+    compteur = {}
+    trouve = pappers.rechercher("Ma Société", compteur=compteur)
+    assert trouve == {"siren": "123456789", "nom_entreprise": "Ma Société"}
+    assert appels[0][0] == "https://api.pappers.fr/v2/recherche"
+    assert appels[0][1] == {"q": "Ma Société", "api_token": "cle-test", "par_page": 3}
+    assert compteur["pappers"] == 1
+    get_settings.cache_clear()
+
+
+def test_pappers_rechercher_aucun_resultat(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+
+    def _fake_get(url, params=None, timeout=None):
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"resultats": []}
+        return R()
+
+    monkeypatch.setattr(pappers.httpx, "get", _fake_get)
+    assert pappers.rechercher("Société inconnue") is None
+    get_settings.cache_clear()
+
+
+def test_pappers_rechercher_sans_cle_retourne_none(monkeypatch):
+    monkeypatch.delenv("PAPPERS_API_KEY", raising=False)
+    get_settings.cache_clear()
+    assert pappers.rechercher("Ma Société") is None
+    get_settings.cache_clear()
+
+
+def test_pappers_rechercher_echec_httpx_retourne_none_et_alerte(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+
+    def _fake_get(url, params=None, timeout=None):
+        raise RuntimeError("panne réseau")
+
+    monkeypatch.setattr(pappers.httpx, "get", _fake_get)
+    alertes = []
+    import app.shared.notifier as notifier_mod
+    monkeypatch.setattr(notifier_mod, "notifier_fournisseur",
+                        lambda **kw: alertes.append(kw))
+    assert pappers.rechercher("Ma Société") is None
+    assert len(alertes) == 1
+    assert alertes[0]["fournisseur"] == "pappers"
+    assert alertes[0]["bascule"] is True
+    get_settings.cache_clear()
+
+
+# --- Pappers : fiche() et cache 24h -----------------------------------------
+
+def _fiche_brute():
+    return {
+        "nom_entreprise": "Ma Société",
+        "forme_juridique": "SAS",
+        "date_creation": "2019-03-01",
+        "code_naf": "62.01Z",
+        "libelle_code_naf": "Programmation informatique",
+        "effectif": 45,
+        "siege": {"ville": "Paris"},
+        "finances": [{"annee": 2024, "chiffre_affaires": 3_200_000, "resultat": 400_000}],
+        "representants": [{"nom_complet": "Jean Dupont", "qualite": "Président"}],
+    }
+
+
+def test_pappers_fiche_ok(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    pappers._cache.clear()
+    appels = []
+
+    def _fake_get(url, params=None, timeout=None):
+        appels.append((url, params))
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return _fiche_brute()
+        return R()
+
+    monkeypatch.setattr(pappers.httpx, "get", _fake_get)
+    compteur = {}
+    data = pappers.fiche("123456789", compteur=compteur)
+    assert data["nom_entreprise"] == "Ma Société"
+    assert appels[0][0] == "https://api.pappers.fr/v2/entreprise"
+    assert appels[0][1] == {"siren": "123456789", "api_token": "cle-test"}
+    assert compteur["pappers"] == 1
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+
+def test_pappers_fiche_cache_24h_evite_un_second_appel(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    pappers._cache.clear()
+    appels = []
+
+    def _fake_get(url, params=None, timeout=None):
+        appels.append(1)
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return _fiche_brute()
+        return R()
+
+    monkeypatch.setattr(pappers.httpx, "get", _fake_get)
+    horloge = {"t": 0.0}
+    monkeypatch.setattr(pappers, "_horloge", lambda: horloge["t"])
+
+    pappers.fiche("123456789")
+    horloge["t"] = 3600.0  # 1h plus tard, toujours dans le cache (< 24h)
+    pappers.fiche("123456789")
+    assert len(appels) == 1
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+
+def test_pappers_fiche_cache_expire_apres_24h(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    pappers._cache.clear()
+    appels = []
+
+    def _fake_get(url, params=None, timeout=None):
+        appels.append(1)
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return _fiche_brute()
+        return R()
+
+    monkeypatch.setattr(pappers.httpx, "get", _fake_get)
+    horloge = {"t": 0.0}
+    monkeypatch.setattr(pappers, "_horloge", lambda: horloge["t"])
+
+    pappers.fiche("123456789")
+    horloge["t"] = 24 * 3600.0 + 1.0  # juste après 24h
+    pappers.fiche("123456789")
+    assert len(appels) == 2
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+
+def test_pappers_fiche_echec_retourne_none_et_alerte(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+    def _fake_get(url, params=None, timeout=None):
+        raise RuntimeError("timeout")
+
+    monkeypatch.setattr(pappers.httpx, "get", _fake_get)
+    alertes = []
+    import app.shared.notifier as notifier_mod
+    monkeypatch.setattr(notifier_mod, "notifier_fournisseur",
+                        lambda **kw: alertes.append(kw))
+    assert pappers.fiche("123456789") is None
+    assert len(alertes) == 1
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+
+def test_pappers_fiche_sans_cle_retourne_none(monkeypatch):
+    monkeypatch.delenv("PAPPERS_API_KEY", raising=False)
+    get_settings.cache_clear()
+    pappers._cache.clear()
+    assert pappers.fiche("123456789") is None
+    get_settings.cache_clear()
+
+
+# --- Pappers : slug et snippet ----------------------------------------------
+
+def test_pappers_slug_retire_accents_et_ponctuation():
+    assert pappers._slug("Café & Cie S.A.S.") == "cafe-cie-s-a-s"
+
+
+def test_pappers_snippet_phrase_structuree_complete():
+    snippet = pappers._snippet(_fiche_brute())
+    assert "SAS créée en 2019" in snippet
+    assert "NAF 62.01Z" in snippet
+    assert "45 salariés" in snippet
+    assert "siège à Paris" in snippet
+    assert "CA 2024 3,2 M€" in snippet
+    assert "résultat 0,4 M€" in snippet
+    assert "Jean Dupont (Président)" in snippet
+
+
+def test_pappers_snippet_champs_absents_omis():
+    snippet = pappers._snippet({"forme_juridique": "SAS"})
+    assert snippet == "SAS."
+    assert "NAF" not in snippet
+    assert "CA" not in snippet
+
+
+# --- Pappers : sources_pappers() --------------------------------------------
+
+def test_pappers_sources_pappers_sans_cle_retourne_vide(monkeypatch):
+    monkeypatch.delenv("PAPPERS_API_KEY", raising=False)
+    get_settings.cache_clear()
+    assert pappers.sources_pappers(["Ma Société"]) == []
+    get_settings.cache_clear()
+
+
+def test_pappers_sources_pappers_url_et_provider(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+    monkeypatch.setattr(pappers, "rechercher",
+                        lambda nom, compteur=None: {"siren": "123456789",
+                                                     "nom_entreprise": "Ma Société"})
+    monkeypatch.setattr(pappers, "fiche",
+                        lambda siren, compteur=None: _fiche_brute())
+
+    resultats = pappers.sources_pappers(["Ma Société"])
+    assert len(resultats) == 1
+    r = resultats[0]
+    assert r.provider == "pappers"
+    assert r.url == "https://www.pappers.fr/entreprise/ma-societe-123456789"
+    assert r.title == "Ma Société"
+    assert "SAS créée en 2019" in r.snippet
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+
+def test_pappers_sources_pappers_max_huit(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+    def _rechercher(nom, compteur=None):
+        return {"siren": f"{abs(hash(nom)) % 900000000 + 100000000}", "nom_entreprise": nom}
+
+    monkeypatch.setattr(pappers, "rechercher", _rechercher)
+    monkeypatch.setattr(pappers, "fiche",
+                        lambda siren, compteur=None: {"nom_entreprise": "x"})
+
+    noms = [f"Société {i}" for i in range(12)]
+    resultats = pappers.sources_pappers(noms)
+    assert len(resultats) == 8
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+
+def test_pappers_sources_pappers_deduplique_insensible_a_la_casse(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    pappers._cache.clear()
+    appels = {"n": 0}
+
+    def _rechercher(nom, compteur=None):
+        appels["n"] += 1
+        return {"siren": "123456789", "nom_entreprise": "Ma Société"}
+
+    monkeypatch.setattr(pappers, "rechercher", _rechercher)
+    monkeypatch.setattr(pappers, "fiche",
+                        lambda siren, compteur=None: _fiche_brute())
+
+    pappers.sources_pappers(["Ma Société", "ma société", "MA SOCIÉTÉ"])
+    assert appels["n"] == 1
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+
+def test_pappers_sources_pappers_societe_non_trouvee_ignoree(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    pappers._cache.clear()
+    monkeypatch.setattr(pappers, "rechercher", lambda nom, compteur=None: None)
+    assert pappers.sources_pappers(["Société inconnue"]) == []
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+
+# --- run_analysis : lecture du champ `sources` ------------------------------
+
+def test_run_analysis_sources_toutes_a_faux_aucun_appel(monkeypatch):
+    """Une source à False n'est pas appelée du tout (méthode du brief Task 3)."""
+    monkeypatch.setattr(analysis_service.llm_client, "generation_available",
+                        lambda: True)
+    monkeypatch.setattr(analysis_service, "sources_de",
+                        lambda t: {"web": False, "rag": False, "notion": False,
+                                   "investisseurs": False, "pappers": False})
+    monkeypatch.setattr(analysis_service, "_evaluer_couverture", lambda q, c: "non")
+
+    def _explose(*a, **kw):
+        raise AssertionError("ne doit pas être appelé : source désactivée")
+
+    import app.shared.search as web_search_mod
+    monkeypatch.setattr(web_search_mod, "search_multi", _explose)
+    monkeypatch.setattr(analysis_service, "_retrieve_context", _explose)
+
+    import app.modules.integrations.notion_context as notion_context_mod
+    monkeypatch.setattr(notion_context_mod, "passages_pour", _explose)
+
+    import app.modules.investors.service as investors_mod
+    monkeypatch.setattr(investors_mod, "map_for_profile", _explose)
+
+    import app.shared.enrich.pappers as pappers_mod
+    monkeypatch.setattr(pappers_mod, "disponible", _explose)
+
+    resultat = analysis_service.run_analysis(
+        query="analyse marché X", analysis_type="etude_marche",
+        user_id="11111111-2222-3333-4444-555555555555",
+        db_pour_notion="db-factice",
+    )
+    assert resultat.degraded is True
+    assert resultat.sources == []
+
+
+def test_run_analysis_sources_web_true_les_autres_faux(monkeypatch):
+    """`web=True` seul : search_multi est appelé, RAG/Notion/investisseurs/
+    Pappers ne le sont pas."""
+    monkeypatch.setattr(analysis_service.llm_client, "generation_available",
+                        lambda: True)
+    monkeypatch.setattr(analysis_service, "sources_de",
+                        lambda t: {"web": True, "rag": False, "notion": False,
+                                   "investisseurs": False, "pappers": False})
+    monkeypatch.setattr(analysis_service, "_evaluer_couverture", lambda q, c: "non")
+
+    appels = {"search_multi": 0}
+
+    def _fake_search_multi(angles, top_k=None, requete_de_rang=None,
+                           contraintes=None, compteur=None):
+        appels["search_multi"] += 1
+        assert contraintes is not None  # Task 1 : contraintes transmises
+        return []
+
+    import app.shared.search as web_search_mod
+    monkeypatch.setattr(web_search_mod, "search_multi", _fake_search_multi)
+
+    def _explose(*a, **kw):
+        raise AssertionError("ne doit pas être appelé : source désactivée")
+
+    monkeypatch.setattr(analysis_service, "_retrieve_context", _explose)
+    import app.modules.investors.service as investors_mod
+    monkeypatch.setattr(investors_mod, "map_for_profile", _explose)
+    import app.shared.enrich.pappers as pappers_mod
+    monkeypatch.setattr(pappers_mod, "disponible", _explose)
+
+    analysis_service.run_analysis(
+        query="analyse marché X", analysis_type="etude_marche",
+        user_id="11111111-2222-3333-4444-555555555555",
+    )
+    assert appels["search_multi"] == 1
+
+
+def test_run_analysis_sources_investisseurs_true_appelle_la_base(monkeypatch):
+    monkeypatch.setattr(analysis_service.llm_client, "generation_available",
+                        lambda: True)
+    monkeypatch.setattr(analysis_service, "sources_de",
+                        lambda t: {"web": False, "rag": False, "notion": False,
+                                   "investisseurs": True, "pappers": False})
+
+    appels = {"map": 0}
+
+    import app.modules.investors.service as investors_mod
+
+    def _fake_map(profile, **kw):
+        appels["map"] += 1
+        return {"fonds": []}
+
+    monkeypatch.setattr(investors_mod, "map_for_profile", _fake_map)
+    monkeypatch.setattr(investors_mod, "format_context", lambda m: "")
+    monkeypatch.setattr(investors_mod, "citations", lambda m: [])
+
+    resultat = analysis_service.run_analysis(
+        query="qui pourrait investir", analysis_type="cartographie_investisseurs",
+        user_id="11111111-2222-3333-4444-555555555555", profile={},
+    )
+    assert appels["map"] == 1
+    # Sans citations investisseurs, le rapport n'est pas produit (spec) :
+    assert resultat.degraded is True
+    assert resultat.status_note == "investors_unavailable"
+
+
+# --- run_analysis : Pappers entre dans le pool AVANT le rerank final --------
+
+def test_run_analysis_pappers_entre_dans_le_pool_avant_rerank(monkeypatch):
+    monkeypatch.setattr(analysis_service.llm_client, "generation_available",
+                        lambda: True)
+    monkeypatch.setattr(analysis_service, "sources_de",
+                        lambda t: {"web": True, "rag": False, "notion": False,
+                                   "investisseurs": False, "pappers": True})
+    monkeypatch.setattr(analysis_service, "_evaluer_couverture", lambda q, c: "non")
+
+    web_resultat = SearchResult(title="Un article", url="https://presse.fr/a",
+                                snippet="Un extrait web.", provider="exa")
+
+    import app.shared.search as web_search_mod
+    monkeypatch.setattr(web_search_mod, "search_multi",
+                        lambda *a, **kw: [web_resultat])
+
+    monkeypatch.setattr(analysis_service, "_noms_de_societes",
+                        lambda q, profile, web_results: ["Ma Société"])
+
+    pappers_resultat = SearchResult(
+        title="Ma Société", url="https://www.pappers.fr/entreprise/ma-societe-123456789",
+        snippet="SAS créée en 2019.", provider="pappers",
+    )
+    appels_pappers = []
+
+    import app.shared.enrich.pappers as pappers_mod
+    monkeypatch.setattr(pappers_mod, "disponible", lambda: True)
+
+    def _fake_sources_pappers(noms, compteur=None):
+        appels_pappers.append(noms)
+        if compteur is not None:
+            compteur["pappers"] = compteur.get("pappers", 0) + 1
+        return [pappers_resultat]
+
+    monkeypatch.setattr(pappers_mod, "sources_pappers", _fake_sources_pappers)
+
+    resultat = analysis_service.run_analysis(
+        query="étude du marché X", analysis_type="etude_marche",
+        user_id="11111111-2222-3333-4444-555555555555",
+    )
+    assert appels_pappers == [["Ma Société"]]
+    urls = [c.get("url") for c in resultat.sources]
+    assert any(u and "pappers.fr" in u for u in urls)
+    # Les deux pools (web + Pappers) sont présents : le rerank a vu les deux.
+    assert any(u == "https://presse.fr/a" for u in urls)
+
+
+def test_run_analysis_pappers_desactive_pas_dappel(monkeypatch):
+    monkeypatch.setattr(analysis_service.llm_client, "generation_available",
+                        lambda: True)
+    monkeypatch.setattr(analysis_service, "sources_de",
+                        lambda t: {"web": False, "rag": False, "notion": False,
+                                   "investisseurs": False, "pappers": False})
+    monkeypatch.setattr(analysis_service, "_evaluer_couverture", lambda q, c: "non")
+
+    import app.shared.enrich.pappers as pappers_mod
+
+    def _explose():
+        raise AssertionError("pappers ne doit pas être consulté")
+
+    monkeypatch.setattr(pappers_mod, "disponible", _explose)
+
+    resultat = analysis_service.run_analysis(
+        query="étude du marché X", analysis_type="synthese_executive",
+        user_id="11111111-2222-3333-4444-555555555555",
+    )
+    assert resultat.degraded is True
