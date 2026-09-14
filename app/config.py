@@ -179,10 +179,11 @@ class Settings(BaseSettings):
     tarif_recherche_linkup_micro_eur: int = 4_600
     tarif_recherche_serper_micro_eur: int = 920     # ~1 $ / 1000 recherches
     tarif_recherche_perplexity_micro_eur: int = 5_000  # sonar, ~5 $ / 1000, à confirmer
-    # Pappers facture à la fiche, pas à la recherche — mais `couts.py` lit ce
-    # champ génériquement comme les autres fournisseurs (clé `pappers` du
-    # compteur d'appels), donc « appel » ici veut dire un appel HTTP Pappers
-    # (recherche ou fiche), pas une fiche complète.
+    # Pappers facture à la fiche (`/v2/entreprise`), pas à la recherche qui la
+    # précède (`/v2/recherche`, non comptée — tour de revue 1 du 14/09) ;
+    # `couts.py` lit ce champ génériquement comme les autres fournisseurs (clé
+    # `pappers` du compteur d'appels), donc « appel » ici veut dire « fiche
+    # obtenue ».
     tarif_recherche_pappers_micro_eur: int = 20_000  # ≈ 2 cts par fiche, à confirmer selon l'abonnement
     # Repli pour un fournisseur non listé : sur-estimer vaut mieux que
     # sous-estimer — un coût à zéro fait passer un poste pour gratuit.

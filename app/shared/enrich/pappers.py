@@ -6,8 +6,9 @@ le pool de sources web AVANT le rerank final, comme n'importe quel autre
 fournisseur. Même politique que les fournisseurs de recherche
 (`app/shared/search/providers.py`) : jamais d'exception hors du module,
 repli `None`/`[]` + `logger.warning` + `notifier_fournisseur(..., bascule=True)`,
-un compteur d'appels HTTP par requête réellement envoyée (clé `pappers`, lue
-génériquement par `billing/couts.py`).
+un compteur incrémenté par fiche réellement obtenue via `/v2/entreprise`
+(clé `pappers`, lue génériquement par `billing/couts.py`) — la recherche qui
+précède (`/v2/recherche`) n'est pas facturée, seule la fiche l'est.
 
 Cache mémoire 24 h par SIREN : une fiche ne change pas d'une requête à
 l'autre dans la même journée, et `/v2/entreprise` est l'appel le plus
@@ -24,6 +25,7 @@ import httpx
 
 from app.config import get_settings
 from app.shared.search.base import SearchResult
+from app.shared.secrets import sans_secret
 
 logger = logging.getLogger("axial.pappers")
 
@@ -60,16 +62,18 @@ def disponible() -> bool:
     return bool(get_settings().pappers_api_key)
 
 
-def rechercher(nom: str, compteur: dict[str, int] | None = None) -> dict | None:
-    """Première entreprise trouvée pour ce nom, ou `None`."""
+def rechercher(nom: str) -> dict | None:
+    """Première entreprise trouvée pour ce nom, ou `None`.
+
+    Ne compte pas dans `compteur["pappers"]` : la spec tarife la FICHE
+    (`/v2/entreprise`), pas la recherche qui la précède — voir `fiche()`.
+    """
     nom = (nom or "").strip()
     settings = get_settings()
     cle = settings.pappers_api_key
     if not nom or not cle:
         return None
     try:
-        if compteur is not None:
-            compteur["pappers"] = compteur.get("pappers", 0) + 1
         r = httpx.get(
             f"{BASE_URL}/recherche",
             params={"q": nom, "api_token": cle, "par_page": 3},
@@ -78,7 +82,7 @@ def rechercher(nom: str, compteur: dict[str, int] | None = None) -> dict | None:
         r.raise_for_status()
         data = r.json()
     except Exception as e:  # noqa: BLE001
-        logger.warning("Pappers recherche a échoué pour %r : %s", nom, e)
+        logger.warning("Pappers recherche a échoué pour %r : %s", nom, sans_secret(e))
         _alerte_fournisseur(e)
         return None
     for entreprise in data.get("resultats") or []:
@@ -88,7 +92,11 @@ def rechercher(nom: str, compteur: dict[str, int] | None = None) -> dict | None:
 
 
 def fiche(siren: str, compteur: dict[str, int] | None = None) -> dict | None:
-    """Fiche complète d'une entreprise par SIREN, avec cache 24 h."""
+    """Fiche complète d'une entreprise par SIREN, avec cache 24 h.
+
+    `compteur["pappers"]` n'est incrémenté que si l'appel HTTP à
+    `/v2/entreprise` part réellement — un coup de cache ne facture rien.
+    """
     siren = re.sub(r"\D", "", siren or "")
     if not siren:
         return None
@@ -114,7 +122,7 @@ def fiche(siren: str, compteur: dict[str, int] | None = None) -> dict | None:
         r.raise_for_status()
         data = r.json()
     except Exception as e:  # noqa: BLE001
-        logger.warning("Pappers fiche a échoué pour %s : %s", siren, e)
+        logger.warning("Pappers fiche a échoué pour %s : %s", siren, sans_secret(e))
         _alerte_fournisseur(e)
         return None
 
@@ -202,17 +210,25 @@ def sources_pappers(noms: list[str], compteur: dict[str, int] | None = None) -> 
         return []
 
     resultats: list[SearchResult] = []
-    vus: set[str] = set()
+    noms_vus: set[str] = set()
+    sirens_vus: set[str] = set()
     for nom in (noms or [])[:NOMS_MAX]:
         nom = (nom or "").strip()
-        if not nom or nom.lower() in vus:
+        if not nom or nom.lower() in noms_vus:
             continue
-        vus.add(nom.lower())
+        noms_vus.add(nom.lower())
 
-        trouve = rechercher(nom, compteur=compteur)
+        trouve = rechercher(nom)
         if not trouve or not trouve.get("siren"):
             continue
         siren = trouve["siren"]
+        # Deux noms peuvent désigner la même entreprise (« Doctolib » et
+        # « Doctolib SAS » côte à côte dans l'extraction du modèle) : une
+        # seule fiche par SIREN dans le pool, même si `rechercher` est
+        # relancé pour chaque nom.
+        if siren in sirens_vus:
+            continue
+        sirens_vus.add(siren)
 
         data = fiche(siren, compteur=compteur)
         if not data:

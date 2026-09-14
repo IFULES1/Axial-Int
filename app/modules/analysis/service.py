@@ -127,6 +127,28 @@ _PROMPT_NOMS_SOCIETES = (
 )
 
 
+# Puce (`-`, `•`, `*`) ou numéro (`1.`, `1)`) en tête de ligne, répétés
+# éventuellement (« 1. - Doctolib ») — le modèle mélange parfois les deux
+# styles dans la même réponse malgré la consigne « une ligne par nom ».
+_PUCE_OU_NUMERO = re.compile(r"^\s*(?:\d+[.)]\s*|[-•*]\s*)+")
+# Guillemets (droits ou typographiques FR/EN) en bordure de ligne.
+_GUILLEMETS_BORDURE = re.compile(r'^[\'"«»“”‘’\s]+|[\'"«»“”‘’\s]+$')
+LONGUEUR_NOM_MAX = 80
+
+
+def _nettoyer_nom_societe(ligne: str) -> str | None:
+    """Une ligne de la réponse LLM → un nom de société, ou `None` si ce n'est
+    manifestement pas un nom (ligne vide, trop longue, phrase d'amorce)."""
+    sans_puce = _PUCE_OU_NUMERO.sub("", ligne)
+    nom = _GUILLEMETS_BORDURE.sub("", sans_puce).strip()
+    if not nom or len(nom) > LONGUEUR_NOM_MAX:
+        return None
+    # « Voici les entreprises mentionnées : » — une phrase d'amorce, pas un nom.
+    if nom.endswith(":"):
+        return None
+    return nom
+
+
 def _noms_de_societes(query: str, profile: dict | None, web_results) -> list[str]:
     """8 noms max, `company_name` du profil toujours en tête s'il existe.
     Échec de l'extraction LLM → `[company_name]` ou `[]` (jamais d'exception)."""
@@ -156,7 +178,7 @@ def _noms_de_societes(query: str, profile: dict | None, web_results) -> list[str
         return noms
 
     for ligne in texte.splitlines():
-        nom = ligne.strip(" \t-•*").strip()
+        nom = _nettoyer_nom_societe(ligne)
         if not nom:
             continue
         cle = nom.lower()
@@ -591,12 +613,19 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
         from app.shared.enrich import pappers
 
         if pappers.disponible():
+            if suivi:
+                suivi.verifier()
+                suivi.etape("recherche", 22, message="Fiches registre (Pappers)…")
             try:
                 noms = _noms_de_societes(query, profile, web_results)
                 pappers_results = pappers.sources_pappers(noms, compteur=appels_recherche)
                 web_results = list(web_results) + pappers_results
+            except ArretGeneration:
+                raise
             except Exception as e:  # noqa: BLE001 — enrichissement best-effort
                 logger.warning("Pappers indisponible : %s", e)
+            if suivi:
+                suivi.verifier()
 
     # 2. Internal grounding: RAG over the user's documents. No arbitrary cap —
     # retrieval hands over everything it finds and the reranker below arbitrates,

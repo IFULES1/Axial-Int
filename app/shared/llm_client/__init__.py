@@ -5,8 +5,6 @@ Business code imports `web_search_provider()` / `enrich_provider()` and the
 """
 from __future__ import annotations
 
-import re
-
 from app.shared.llm_client.base import (
     EnrichProvider,
     LLMResult,
@@ -16,14 +14,10 @@ from app.shared.llm_client.base import (
 )
 from app.shared.llm_client.claude import ClaudeProvider
 from app.shared.llm_client.perplexity import PerplexityProvider
+from app.shared.secrets import SECRET_DANS_URL as _SECRET_DANS_URL, sans_secret as _sans_secret
 
 _web = PerplexityProvider()
 _enrich = ClaudeProvider()
-
-# httpx met l'URL complète dans le message d'erreur — clé d'API comprise quand
-# elle voyage en paramètre de requête (Gemini). Elle finissait en clair dans
-# le journal systemd à chaque bascule de fournisseur.
-_SECRET_DANS_URL = re.compile(r"([?&](?:key|api_key|apikey|token)=)[^&'\"\s]+", re.IGNORECASE)
 
 
 def _alerte_fournisseur(nom: str, erreur: BaseException, tier: str, bascule: bool) -> None:
@@ -36,16 +30,6 @@ def _alerte_fournisseur(nom: str, erreur: BaseException, tier: str, bascule: boo
         notifier_fournisseur(fournisseur=nom, erreur=erreur, fonction=fonction, bascule=bascule)
     except Exception:  # noqa: BLE001
         pass
-
-
-def _sans_secret(err: BaseException | str) -> str:
-    """Masque la clé d'API d'une URL dans un message d'erreur OU un texte.
-
-    Accepte aussi une chaîne : `app.shared.notifier` passe le traceback complet
-    d'un incident avant de l'envoyer par email, et il n'y a aucune raison d'en
-    tenir une deuxième copie du motif.
-    """
-    return _SECRET_DANS_URL.sub(r"\1<masqué>", str(err))
 
 
 def web_search_provider() -> WebSearchProvider:

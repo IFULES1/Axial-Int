@@ -1543,12 +1543,10 @@ def test_pappers_rechercher_ok(monkeypatch):
         return R()
 
     monkeypatch.setattr(pappers.httpx, "get", _fake_get)
-    compteur = {}
-    trouve = pappers.rechercher("Ma Société", compteur=compteur)
+    trouve = pappers.rechercher("Ma Société")
     assert trouve == {"siren": "123456789", "nom_entreprise": "Ma Société"}
     assert appels[0][0] == "https://api.pappers.fr/v2/recherche"
     assert appels[0][1] == {"q": "Ma Société", "api_token": "cle-test", "par_page": 3}
-    assert compteur["pappers"] == 1
     get_settings.cache_clear()
 
 
@@ -1999,3 +1997,283 @@ def test_run_analysis_pappers_desactive_pas_dappel(monkeypatch):
         user_id="11111111-2222-3333-4444-555555555555",
     )
     assert resultat.degraded is True
+
+
+# ============================================================
+# Task 3 — Tour de correction 1 (14/09)
+# Secrets masqués, parse des noms LLM, dédup SIREN, compteur par fiche,
+# reprise de main (Stop) autour de l'enrichissement Pappers.
+# ============================================================
+
+import inspect
+
+from app.shared.secrets import sans_secret
+
+
+# --- Secrets : masquage partagé ---------------------------------------------
+
+def test_sans_secret_masque_api_token():
+    msg = "https://api.pappers.fr/v2/recherche?q=Doctolib&api_token=abc123&par_page=3"
+    assert "abc123" not in sans_secret(msg)
+    assert "api_token=<masqué>" in sans_secret(msg)
+
+
+def test_sans_secret_masque_api_key_et_token_generique():
+    assert "s3cr3t" not in sans_secret("https://x/y?api_key=s3cr3t")
+    assert "s3cr3t" not in sans_secret("https://x/y?token=s3cr3t")
+    assert "s3cr3t" not in sans_secret("https://x/y?key=s3cr3t")
+
+
+def test_llm_client_sans_secret_reste_importable():
+    # `app.shared.notifier` importe `_sans_secret` depuis `app.shared.llm_client`
+    # (import paresseux) — la fonction doit rester exposée sous ce nom après le
+    # déplacement vers `app.shared.secrets`.
+    from app.shared.llm_client import _sans_secret
+
+    assert "abc123" not in _sans_secret("https://x/y?api_token=abc123")
+
+
+def test_pappers_masque_le_jeton_dans_le_journal_recherche(monkeypatch, caplog):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+
+    def _fake_get(url, params=None, timeout=None):
+        raise RuntimeError(
+            "Client error '401 Unauthorized' for url "
+            "'https://api.pappers.fr/v2/recherche?q=Doctolib&api_token=abc123&par_page=3'"
+        )
+
+    monkeypatch.setattr(pappers.httpx, "get", _fake_get)
+    import app.shared.notifier as notifier_mod
+    monkeypatch.setattr(notifier_mod, "notifier_fournisseur", lambda **kw: None)
+    with caplog.at_level("WARNING", logger="axial.pappers"):
+        assert pappers.rechercher("Doctolib") is None
+    assert "abc123" not in caplog.text
+    get_settings.cache_clear()
+
+
+def test_pappers_masque_le_jeton_dans_le_journal_fiche(monkeypatch, caplog):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+    def _fake_get(url, params=None, timeout=None):
+        raise RuntimeError(
+            "Client error '401 Unauthorized' for url "
+            "'https://api.pappers.fr/v2/entreprise?siren=123456789&api_token=abc123'"
+        )
+
+    monkeypatch.setattr(pappers.httpx, "get", _fake_get)
+    import app.shared.notifier as notifier_mod
+    monkeypatch.setattr(notifier_mod, "notifier_fournisseur", lambda **kw: None)
+    with caplog.at_level("WARNING", logger="axial.pappers"):
+        assert pappers.fiche("123456789") is None
+    assert "abc123" not in caplog.text
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+
+# --- Parse des noms LLM : _noms_de_societes ---------------------------------
+
+class _ReponseLLM:
+    def __init__(self, texte):
+        self.text = texte
+
+
+def test_noms_de_societes_reponse_numerotee(monkeypatch):
+    monkeypatch.setattr(analysis_service.llm_client, "generate",
+                        lambda **kw: _ReponseLLM("1. Doctolib\n2. Alan\n3. Qonto"))
+    noms = analysis_service._noms_de_societes("qui investit dans la santé", None, [])
+    assert noms == ["Doctolib", "Alan", "Qonto"]
+
+
+def test_noms_de_societes_reponse_a_puces(monkeypatch):
+    monkeypatch.setattr(analysis_service.llm_client, "generate",
+                        lambda **kw: _ReponseLLM("- Doctolib\n• Alan\n* Qonto"))
+    noms = analysis_service._noms_de_societes("qui investit dans la santé", None, [])
+    assert noms == ["Doctolib", "Alan", "Qonto"]
+
+
+def test_noms_de_societes_numerotation_parenthese_et_guillemets(monkeypatch):
+    monkeypatch.setattr(analysis_service.llm_client, "generate",
+                        lambda **kw: _ReponseLLM('1) "Doctolib"\n2) « Alan »'))
+    noms = analysis_service._noms_de_societes("qui investit dans la santé", None, [])
+    assert noms == ["Doctolib", "Alan"]
+
+
+def test_noms_de_societes_company_name_en_tete_et_deduplique(monkeypatch):
+    monkeypatch.setattr(analysis_service.llm_client, "generate",
+                        lambda **kw: _ReponseLLM("1. Doctolib\n2. doctolib\n3. Alan"))
+    noms = analysis_service._noms_de_societes(
+        "étude du marché", {"company_name": "Doctolib"}, [])
+    assert noms == ["Doctolib", "Alan"]
+
+
+def test_noms_de_societes_llm_echec_replie_sur_company_name(monkeypatch):
+    def _explose(**kw):
+        raise RuntimeError("panne")
+
+    monkeypatch.setattr(analysis_service.llm_client, "generate", _explose)
+    noms = analysis_service._noms_de_societes(
+        "étude du marché", {"company_name": "Doctolib"}, [])
+    assert noms == ["Doctolib"]
+
+
+def test_noms_de_societes_llm_echec_et_profil_vide_retourne_liste_vide(monkeypatch):
+    def _explose(**kw):
+        raise RuntimeError("panne")
+
+    monkeypatch.setattr(analysis_service.llm_client, "generate", _explose)
+    assert analysis_service._noms_de_societes("étude du marché", None, []) == []
+    assert analysis_service._noms_de_societes("étude du marché", {}, []) == []
+
+
+def test_noms_de_societes_plafond_huit(monkeypatch):
+    lignes = "\n".join(f"{i}. Société {i}" for i in range(1, 15))
+    monkeypatch.setattr(analysis_service.llm_client, "generate",
+                        lambda **kw: _ReponseLLM(lignes))
+    noms = analysis_service._noms_de_societes("étude du marché", None, [])
+    assert len(noms) == 8
+    assert noms[0] == "Société 1"
+
+
+def test_noms_de_societes_ignore_lignes_vides_et_trop_longues(monkeypatch):
+    ligne_longue = "Une raison sociale improbablement longue " * 3  # > 80 caractères
+    texte = f"1. Doctolib\n\n2. {ligne_longue}\n3. Alan"
+    monkeypatch.setattr(analysis_service.llm_client, "generate",
+                        lambda **kw: _ReponseLLM(texte))
+    noms = analysis_service._noms_de_societes("étude du marché", None, [])
+    assert noms == ["Doctolib", "Alan"]
+
+
+def test_nettoyer_nom_societe_ignore_phrase_damorce():
+    assert analysis_service._nettoyer_nom_societe("Voici les entreprises mentionnées :") is None
+
+
+def test_nettoyer_nom_societe_retire_guillemets_et_numerotation():
+    assert analysis_service._nettoyer_nom_societe('1. "Doctolib"') == "Doctolib"
+    assert analysis_service._nettoyer_nom_societe("2) « Alan »") == "Alan"
+    assert analysis_service._nettoyer_nom_societe("- Qonto") == "Qonto"
+
+
+# --- Pappers : compteur par fiche, pas par recherche ------------------------
+
+def test_pappers_rechercher_naccepte_plus_de_compteur():
+    assert "compteur" not in inspect.signature(pappers.rechercher).parameters
+
+
+def test_pappers_sources_pappers_compteur_egal_au_nombre_de_fiches(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+    sirens = {"Société A": "111111111", "Société B": "222222222"}
+    monkeypatch.setattr(pappers, "rechercher",
+                        lambda nom: {"siren": sirens[nom], "nom_entreprise": nom})
+
+    def _fake_get(url, params=None, timeout=None):
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"nom_entreprise": "x"}
+        return R()
+
+    monkeypatch.setattr(pappers.httpx, "get", _fake_get)
+
+    compteur = {}
+    resultats = pappers.sources_pappers(["Société A", "Société B"], compteur=compteur)
+    assert len(resultats) == 2
+    assert compteur["pappers"] == 2  # une fiche par société, la recherche n'est pas comptée
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+
+# --- Pappers : dédup par SIREN -----------------------------------------------
+
+def test_pappers_sources_pappers_deduplique_par_siren(monkeypatch):
+    monkeypatch.setenv("PAPPERS_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+    # Deux noms distincts, mais le même SIREN (le LLM a listé le nom usuel et
+    # la raison sociale complète).
+    monkeypatch.setattr(pappers, "rechercher",
+                        lambda nom: {"siren": "123456789", "nom_entreprise": "Doctolib"})
+    appels_fiche = {"n": 0}
+
+    def _fiche(siren, compteur=None):
+        appels_fiche["n"] += 1
+        if compteur is not None:
+            compteur["pappers"] = compteur.get("pappers", 0) + 1
+        return _fiche_brute()
+
+    monkeypatch.setattr(pappers, "fiche", _fiche)
+
+    compteur = {}
+    resultats = pappers.sources_pappers(["Doctolib", "Doctolib SAS"], compteur=compteur)
+    assert len(resultats) == 1
+    assert appels_fiche["n"] == 1
+    assert compteur["pappers"] == 1
+    get_settings.cache_clear()
+    pappers._cache.clear()
+
+
+# --- run_analysis : Stop autour de l'enrichissement Pappers -----------------
+
+class _SuiviFactice:
+    def __init__(self):
+        self.appels = []
+
+    def verifier(self):
+        self.appels.append("verifier")
+
+    def etape(self, nom, progression, **detail):
+        self.appels.append(("etape", nom, progression))
+
+
+def test_run_analysis_suivi_verifie_avant_et_apres_pappers(monkeypatch):
+    monkeypatch.setattr(analysis_service.llm_client, "generation_available",
+                        lambda: True)
+    monkeypatch.setattr(analysis_service, "sources_de",
+                        lambda t: {"web": True, "rag": False, "notion": False,
+                                   "investisseurs": False, "pappers": True})
+    monkeypatch.setattr(analysis_service, "_evaluer_couverture", lambda q, c: "non")
+
+    import app.shared.search as web_search_mod
+    monkeypatch.setattr(web_search_mod, "search_multi", lambda *a, **kw: [])
+
+    import app.shared.enrich.pappers as pappers_mod
+    monkeypatch.setattr(pappers_mod, "disponible", lambda: True)
+    monkeypatch.setattr(pappers_mod, "sources_pappers", lambda noms, compteur=None: [])
+    monkeypatch.setattr(analysis_service, "_noms_de_societes", lambda q, p, w: [])
+
+    suivi = _SuiviFactice()
+    analysis_service.run_analysis(
+        query="étude du marché X", analysis_type="etude_marche",
+        user_id="11111111-2222-3333-4444-555555555555", suivi=suivi,
+    )
+    idx = suivi.appels.index(("etape", "recherche", 22))
+    assert suivi.appels[idx - 1] == "verifier"
+    assert suivi.appels[idx + 1] == "verifier"
+
+
+def test_run_analysis_pappers_desactive_aucun_appel_de_suivi_dedie(monkeypatch):
+    """Sans Pappers actif, pas d'étape « recherche/22 » (celle du bloc 1bis)."""
+    monkeypatch.setattr(analysis_service.llm_client, "generation_available",
+                        lambda: True)
+    monkeypatch.setattr(analysis_service, "sources_de",
+                        lambda t: {"web": True, "rag": False, "notion": False,
+                                   "investisseurs": False, "pappers": False})
+    monkeypatch.setattr(analysis_service, "_evaluer_couverture", lambda q, c: "non")
+
+    import app.shared.search as web_search_mod
+    monkeypatch.setattr(web_search_mod, "search_multi", lambda *a, **kw: [])
+
+    suivi = _SuiviFactice()
+    analysis_service.run_analysis(
+        query="synthèse X", analysis_type="synthese_executive",
+        user_id="11111111-2222-3333-4444-555555555555", suivi=suivi,
+    )
+    assert ("etape", "recherche", 22) not in suivi.appels
