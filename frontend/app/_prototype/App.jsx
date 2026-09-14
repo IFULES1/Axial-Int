@@ -3074,9 +3074,10 @@ function surlignerExtrait(texte, terme) {
    qu'en panneau flottant : le panneau des conversations défile et est étroit,
    un second niveau positionné en absolu sortirait de l'écran.
 
-   `onMouseDown` est stoppé sur le conteneur : la fermeture au clic extérieur
-   écoute `mousedown` sur le document, et sans ce garde le menu se démonterait
-   AVANT que le `click` d'un de ses propres éléments n'ait pu partir. */
+   Le menu porte `data-ax-menu` : la fermeture au clic extérieur écoute
+   `mousedown` sur le document et ignore les cibles sous cet attribut ; sans
+   ce garde le menu se démonterait AVANT que le `click` d'un de ses propres
+   éléments n'ait pu partir. */
 function MenuConversation({ ouvert, onBasculer, actions, aide }) {
   const [sousOuvert, setSousOuvert] = React.useState(null);
   React.useEffect(() => { if (!ouvert) setSousOuvert(null); }, [ouvert]);
@@ -3093,7 +3094,12 @@ function MenuConversation({ ouvert, onBasculer, actions, aide }) {
         <Icon name="dots" size={14} />
       </button>
       {ouvert && (
-        <div className="ax-menu" role="menu" onMouseDown={(e) => e.stopPropagation()}>
+        {/* `data-ax-menu` sur le MENU aussi : Next monte React sur `document`,
+            l'écouteur `mousedown` de fermeture y est lui aussi — un
+            `stopPropagation` React n'empêche pas un autre écouteur du même
+            nœud, le menu se démontait avant le `click` de ses éléments
+            (« les boutons ne fonctionnent pas », 14/09). */}
+        <div className="ax-menu" role="menu" data-ax-menu="1">
           {actions.filter(Boolean).map((a) => (a.sousMenu ? (
             <div key={a.cle}>
               <button className="ax-menu-item" role="menuitem" aria-expanded={sousOuvert === a.cle}
@@ -5692,8 +5698,7 @@ function MenuBouton({ libelleBouton, icone, actions, occupe, aide }) {
         <Icon name={ouvert ? 'chevron-up' : 'chevron-down'} size={12} />
       </button>
       {ouvert && (
-        <div className="ax-menu ax-menu-droite" role="menu"
-          onMouseDown={(e) => e.stopPropagation()}>
+        <div className="ax-menu ax-menu-droite" role="menu" data-ax-menu="1">
           {utiles.map((a) => (
             <button key={a.cle} role="menuitem" className="ax-menu-item"
               onClick={(e) => { e.stopPropagation(); setOuvert(false); a.onClick(); }}>
