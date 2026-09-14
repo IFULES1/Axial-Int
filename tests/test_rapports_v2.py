@@ -1476,10 +1476,14 @@ def test_liste_en_cours_puis_epingles_puis_date(http):
                                  pinned_at=maintenant).id),
                     str(_minutes(20, title="En cours", statut=rm.EN_COURS,
                                  progression=62).id)}
-    page = _client(engine, uid).get("/reports").json()
+    page = _client(engine, uid).get("/reports?limit=20").json()
     assert [i["title"] for i in page["items"]] == [
         "En cours", "Épinglé", "Récent", "Vieux"]
     assert page["has_more"] is False
+    # Forme héritée : sans `limit`, un tableau (onglet ouvert avant v2).
+    herite = _client(engine, uid).get("/reports").json()
+    assert isinstance(herite, list)
+    assert [i["title"] for i in herite] == ["En cours", "Épinglé", "Récent", "Vieux"]
     # Un rapport en cours reste en tête MÊME s'il n'est pas le plus récent :
     # c'est celui que l'utilisateur cherche à rouvrir.
     assert page["items"][0]["progression"] == 62
@@ -1534,10 +1538,10 @@ def test_curseur_sur_un_rapport_supprime_repart_du_debut(http):
         disparu = str(_rapport(db, uid, title="Disparu", statut=rm.TERMINE).id)
         _rapport(db, uid, title="Restant", statut=rm.TERMINE)
     client = _client(engine, uid)
-    entier = client.get("/reports").json()["items"]
+    entier = client.get("/reports?limit=20").json()["items"]
 
     assert client.delete(f"/reports/{disparu}").status_code == 204
-    page = client.get(f"/reports?before={disparu}")
+    page = client.get(f"/reports?limit=20&before={disparu}")
     assert page.status_code == 200
     assert [i["id"] for i in page.json()["items"]] == [i["id"] for i in entier
                                                         if i["id"] != disparu]
@@ -1562,8 +1566,8 @@ def test_liste_ecarte_les_archives_sauf_demande_explicite(http):
         _datee(db, uid, 2, title="Rangé", statut=rm.TERMINE,
                archived_at=dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc))
     client = _client(engine, uid)
-    assert [i["title"] for i in client.get("/reports").json()["items"]] == ["Actif"]
-    page = client.get("/reports?inclure_archives=true").json()
+    assert [i["title"] for i in client.get("/reports?limit=20").json()["items"]] == ["Actif"]
+    page = client.get("/reports?limit=20&inclure_archives=true").json()
     assert [i["title"] for i in page["items"]] == ["Actif", "Rangé"]
     assert page["items"][1]["archived_at"] is not None
 
@@ -1580,7 +1584,7 @@ def test_la_liste_porte_le_cout_paye_et_le_dossier_sans_le_contenu(http):
                  project_id=projet.id, tokens_entree=31000, tokens_sortie=9000,
                  detail={"credits": 25})
         pid = str(projet.id)
-    item = _client(engine, uid).get("/reports").json()["items"][0]
+    item = _client(engine, uid).get("/reports?limit=20").json()["items"][0]
     assert item["credits"] == 25 and item["tokens_entree"] == 31000
     assert item["tokens_sortie"] == 9000 and item["project_id"] == pid
     assert item["statut"] == rm.TERMINE
@@ -2467,7 +2471,11 @@ def test_routes_de_gestion_des_rapports_montees():
     # La liste rend un objet paginé et non un tableau : le front doit lire
     # `items` / `has_more` (Task 4).
     liste = chemins["/reports"]["get"]["responses"]["200"]["content"]
-    assert liste["application/json"]["schema"]["$ref"].endswith("ReportPage")
+    # La liste répond une page (`ReportPage`) OU, sans `limit`, le tableau
+    # hérité : le schéma est donc un `anyOf` qui contient la page.
+    schema_liste = liste["application/json"]["schema"]
+    refs = [b.get("$ref", "") for b in schema_liste.get("anyOf", [schema_liste])]
+    assert any(r.endswith("ReportPage") for r in refs), schema_liste
 
 
 def test_les_sources_internes_reelles_sont_masquees_sur_la_page_publique():
@@ -3000,7 +3008,7 @@ def test_f6_la_liste_balaye_les_orphelins_du_compte(http):
         frais = _rapport(db, uid, statut=rm.EN_COURS,
                          created_at=dt.datetime.now(dt.timezone.utc)).id
 
-    page = _client(engine, uid).get("/reports").json()["items"]
+    page = _client(engine, uid).get("/reports?limit=20").json()["items"]
     par_id = {i["id"]: i for i in page}
     assert par_id[str(vieux)]["statut"] == rm.ECHEC
     assert par_id[str(frais)]["statut"] == rm.EN_COURS

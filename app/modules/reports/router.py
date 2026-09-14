@@ -149,14 +149,20 @@ def create(payload: ReportIn, user: AuthUser = Depends(get_current_admin),
     return ReportDetail(**service.detail_dict(r, is_admin=user.is_admin))
 
 
-@router.get("", response_model=ReportPage)
-def list_all(limit: int = Query(default=service.LISTE_LIMITE_DEFAUT, ge=1,
-                                le=service.LISTE_LIMITE_MAX),
+@router.get("", response_model=ReportPage | list[ReportOut])
+def list_all(limit: int | None = Query(default=None, ge=1,
+                                       le=service.LISTE_LIMITE_MAX),
              before: str | None = Query(default=None),
              inclure_archives: bool = Query(default=False),
              user: AuthUser = Depends(get_current_user),
-             db: Session = Depends(get_db)) -> ReportPage:
-    """En cours d'abord, puis épinglés, puis par date décroissante."""
+             db: Session = Depends(get_db)) -> ReportPage | list[ReportOut]:
+    """En cours d'abord, puis épinglés, puis par date décroissante.
+
+    Sans `limit`, la réponse garde la FORME HÉRITÉE (un tableau) : un onglet
+    ouvert avant Rapports v2 appelle encore `GET /reports` nu et lit une
+    liste — servi une page `{items, has_more}`, il affichait « aucun
+    rapport » (constaté le 13/09). Le front actuel passe toujours `limit`.
+    """
     # Balayage des orphelins de CE compte avant de lister (revue finale, F6) :
     # c'est l'écran où une ligne figée à « 62 % » se voit, et le balayage de
     # démarrage ne repasse jamais sur une API qui reste debout des semaines.
@@ -166,11 +172,14 @@ def list_all(limit: int = Query(default=service.LISTE_LIMITE_DEFAUT, ge=1,
     except Exception as e:  # noqa: BLE001
         logger.warning("Balayage des orphelins de %s impossible : %s", user.id, e)
         db.rollback()
+    forme_heritee = limit is None
     items, has_more = service.list_reports(
-        db, user.id, limit=limit, before=before,
-        inclure_archives=inclure_archives)
-    return ReportPage(items=[ReportOut(**service.resume_dict(r)) for r in items],
-                      has_more=has_more)
+        db, user.id, limit=service.LISTE_LIMITE_MAX if forme_heritee else limit,
+        before=before, inclure_archives=inclure_archives)
+    sortie = [ReportOut(**service.resume_dict(r)) for r in items]
+    if forme_heritee:
+        return sortie
+    return ReportPage(items=sortie, has_more=has_more)
 
 
 # `search` est déclaré AVANT `/{report_id}` : FastAPI résout dans l'ordre de

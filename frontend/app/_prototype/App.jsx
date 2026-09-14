@@ -13,6 +13,7 @@ import {
 } from "./rapports_etat";
 import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument } from "./bridge";
 import { parserMarkdown } from "./markdown";
+import { creerVeilleVersion, lireVersionServie } from "./version";
 
 
 /* data.js */
@@ -174,6 +175,8 @@ const STRINGS = {
     // common
     'common.continue': 'Continuer',
     'common.back': 'Retour',
+    'version.nouvelle': 'Une nouvelle version d\u2019Axial est disponible.',
+    'version.recharger': 'Recharger',
     'common.cancel': 'Annuler',
     'common.save': 'Enregistrer',
     'common.send': 'Envoyer',
@@ -628,6 +631,8 @@ const STRINGS = {
   en: {
     'common.continue': 'Continue',
     'common.back': 'Back',
+    'version.nouvelle': 'A new version of Axial is available.',
+    'version.recharger': 'Reload',
     'common.cancel': 'Cancel',
     'common.save': 'Save',
     'common.send': 'Send',
@@ -5898,7 +5903,7 @@ function ReportsEditor({ data, onBack, estAdmin, onModifierRelancer, onRegenerer
       </div>
 
       <div className="editor-head rep-actions">
-        <button className="btn btn-ghost btn-sm" onClick={onBack}><Icon name="arrow-left" size={14} /></button>
+        <button className="btn btn-ghost btn-sm" onClick={onBack} aria-label={t('common.back')} title={t('common.back')}><Icon name="arrow-left" size={14} /></button>
         <div className="rep-actions-groupe">
           {cout && (
             <span className="chip rep-cout mono" title={t('reports.cout.pastille')}>
@@ -6619,7 +6624,7 @@ function AgentSession({ agent, onBack }) {
     <div className="surface" style={{ paddingTop: 20, paddingBottom: 16, maxWidth: 1480 }}>
       <div className="surface-head" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-          <button className="btn btn-ghost btn-sm" onClick={onBack}><Icon name="arrow-left" size={14} /></button>
+          <button className="btn btn-ghost btn-sm" onClick={onBack} aria-label={t('common.back')} title={t('common.back')}><Icon name="arrow-left" size={14} /></button>
           <div className="agent-card-mark"><Icon name={meta.icon} size={20} /></div>
           <div>
             <h1 style={{ fontSize: 22, marginBottom: 4 }}>{agent.name}</h1>
@@ -8262,6 +8267,18 @@ function App() {
   // Real credit balance from the backend (fetched when entering the app).
   const [axBal, setAxBal] = useState(null);
   const [axUser, setAxUser] = useState(null);
+
+  // Veille de version : un onglet chargé avant un déploiement parle à une API
+  // qui a changé de contrat (menus « inopérants », historique « disparu » le
+  // 13/09). Quand `GET /version` sert un autre build que celui du bundle, un
+  // bandeau propose de recharger. Jamais de rechargement automatique : une
+  // réponse en cours de flux serait coupée sans prévenir.
+  const [nouvelleVersion, setNouvelleVersion] = useState(false);
+  useEffect(() => creerVeilleVersion({
+    locale: process.env.NEXT_PUBLIC_BUILD_ID,
+    lire: () => lireVersionServie(),
+    onNouvelle: () => setNouvelleVersion(true),
+  }), []);
   // Expose l'enregistrement de langue au sélecteur, qui vit hors de React.
   React.useEffect(() => {
     // Le sélecteur FR/EN existe aussi sur la page d'accueil, où personne n'est
@@ -9803,19 +9820,32 @@ function App() {
   };
 
   /* ---- Render top-level routes ---- */
+  // Le bandeau « nouvelle version » précède TOUTES les sorties de ce
+  // composant : un onglet périmé peut aussi bien dormir sur la landing ou
+  // l'onboarding que dans l'app.
+  const bandeauVersion = nouvelleVersion ? (
+    <div className="ax-bandeau-version" role="status" aria-live="polite">
+      <span>{t('version.nouvelle')}</span>
+      <button className="btn btn-sm" onClick={() => window.location.reload()}>
+        {t('version.recharger')}
+      </button>
+    </div>
+  ) : null;
+  const avecBandeau = (ecran) => (bandeauVersion ? <>{bandeauVersion}{ecran}</> : ecran);
+
   if (route === 'landing') {
-    return <LandingPage
+    return avecBandeau(<LandingPage
       onCTAStart={() => { setAuthMode('signup'); go('auth'); }}
       onCTASignIn={() => { setAuthMode('login'); go('auth'); }}
-    />;
+    />);
   }
 
   if (route === 'reset') {
-    return <ResetPasswordPage token={resetToken}
-      onDone={() => { setResetToken(''); go('app'); }} />;
+    return avecBandeau(<ResetPasswordPage token={resetToken}
+      onDone={() => { setResetToken(''); go('app'); }} />);
   }
   if (route === 'auth') {
-    return <AuthPage
+    return avecBandeau(<AuthPage
       initialMode={authMode}
       notice={authNotice}
       onBack={() => go('landing')}
@@ -9832,18 +9862,18 @@ function App() {
           } catch (e) { go('app'); }
         }
       }}
-    />;
+    />);
   }
 
   if (route === 'onb1') {
-    return <OnbStep1
+    return avecBandeau(<OnbStep1
       value={onbCtx}
       onChange={setOnbCtx}
       onNext={() => go('onb2')}
-    />;
+    />);
   }
   if (route === 'onb2') {
-    return <OnbStep2 ctx={onbCtx} onBack={() => go('onb1')} onNext={async () => {
+    return avecBandeau(<OnbStep2 ctx={onbCtx} onBack={() => go('onb1')} onNext={async () => {
       // Le profil est sauvegardé AVANT l'étape carte (redirection Stripe),
       // pour que la mémoire soit complète quoi qu'il arrive ensuite.
       try {
@@ -9863,10 +9893,10 @@ function App() {
         });
       } catch (e) { /* non bloquant */ }
       go('onb4');
-    }} />;
+    }} />);
   }
   if (route === 'onb3') {
-    return <OnbStep3
+    return avecBandeau(<OnbStep3
       ctx={onbCtx}
       onLaunch={(seedQ) => {
         // Jamais de lancement automatique : la question suggérée PRÉ-REMPLIT
@@ -9877,15 +9907,15 @@ function App() {
         } catch (e) {}
         go('app');
       }}
-    />;
+    />);
   }
   if (route === 'onb4') {
     // Chemin d'inscription : après la carte vient la première analyse.
-    return <OnbStep4 onBack={() => go('onb2')} onSkip={() => go('onb3')} />;
+    return avecBandeau(<OnbStep4 onBack={() => go('onb2')} onSkip={() => go('onb3')} />);
   }
   if (route === 'carte') {
     // Chemin de connexion : la sortie mène directement à l'app.
-    return <OnbStep4 onSkip={() => go('app')} />;
+    return avecBandeau(<OnbStep4 onSkip={() => go('app')} />);
   }
 
   // ---- main app ----
@@ -9920,6 +9950,7 @@ function App() {
 
   return (
     <>
+      {bandeauVersion}
       <AppShell
         user={axUser || { name: '', email: '', initials: '·' }}
         onLogout={deconnecter}

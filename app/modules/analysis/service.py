@@ -154,7 +154,11 @@ class Suivi:
     # Toutes les N portions de texte, on relit le drapeau d'annulation. 20 :
     # assez pour ne pas faire une requête par mot, assez peu pour que « Stop »
     # réponde en moins d'une seconde.
-    CHUNKS_PAR_VERIFICATION = 20
+    # Relecture du Stop toutes les 5 portions : à 20, un Stop mettait près
+    # d'une minute à être vu (constaté en prod le 13/09). Le balayage des
+    # titres, plus coûteux (findall sur tout le texte), garde son propre pas.
+    CHUNKS_PAR_VERIFICATION = 5
+    CHUNKS_PAR_BALAYAGE_TITRES = 20
 
     def __init__(self, db, rapport):
         import time as _time
@@ -201,7 +205,7 @@ class Suivi:
         """Relit le drapeau depuis la BASE (et non l'objet en mémoire) : il est
         posé par une autre requête, sur une autre session. Vérifie du même
         geste l'échéance globale — les deux motifs d'arrêt sont relus aux mêmes
-        instants (entre les étapes, toutes les 20 portions)."""
+        instants (entre les étapes, toutes les 5 portions)."""
         self.db.refresh(self.rapport)
         if self.rapport.annulation_demandee:
             raise AnnulationDemandee()
@@ -397,7 +401,7 @@ def _rediger(*, system: str, prompt: str, tier: str, max_tokens: int,
                 # portion : « ## Titre » arrive régulièrement à cheval sur
                 # deux portions. Le re-balayage est espacé — un `findall` sur
                 # tout le texte à chaque portion serait quadratique.
-                if len(morceaux) % Suivi.CHUNKS_PAR_VERIFICATION:
+                if len(morceaux) % Suivi.CHUNKS_PAR_BALAYAGE_TITRES:
                     continue
                 vues = len(_TITRE_SECTION.findall("".join(morceaux)))
                 if vues == sections_vues:

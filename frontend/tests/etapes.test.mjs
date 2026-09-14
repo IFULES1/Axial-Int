@@ -324,7 +324,9 @@ test('15 — le front a bien basculé sur le contrat de Task 3', () => {
   assert.equal(CLE_STOCKAGE, 'axial_rapport_en_cours');
   assert.match(app, /RAPPORT_CLE_STOCKAGE/);
   // Polling 3 s et arrêt sur statut terminal.
-  assert.match(app, /setInterval\([\s\S]{0,400}?axRapport\(idEnCours\)[\s\S]{0,900}?\}, 3000\)/);
+  // Fenêtre élargie : le corps du polling a grossi (rangement du rapport
+  // terminé + solde rafraîchi, commit 75e53fb) et dépassait 900 caractères.
+  assert.match(app, /setInterval\([\s\S]{0,400}?axRapport\(idEnCours\)[\s\S]{0,2000}?\}, 3000\)/);
   // Stop branché sur la route d'annulation.
   assert.match(bridge, /reports\/\$\{id\}\/annuler/);
   assert.match(bridge, /reports\/\$\{id\}\/relancer/);
