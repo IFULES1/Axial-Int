@@ -34,6 +34,15 @@ def load_manifest() -> dict[str, dict]:
     return out
 
 
+def _fichier_deja_indexe(nom: str) -> bool:
+    from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+    res = vector_store._client().count(
+        collection_name=vector_store.KB_COLLECTION, exact=True,
+        count_filter=Filter(must=[FieldCondition(key="filename", match=MatchValue(value=nom))]))
+    return res.count > 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0, help="max files scanned (0 = all)")
@@ -56,7 +65,12 @@ def main() -> int:
         category = next((part for part in p.parts if part[:2].isdigit()), "00")
         meta_row = manifest.get(p.name, {})
         doc_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(p)))
-        if vector_store.has_document(doc_id, collection=vector_store.KB_COLLECTION):
+        # Deux gardes : l'identifiant (dérivé du CHEMIN) ET le nom de fichier.
+        # Les vecteurs d'août ont été ingérés depuis un autre poste : leurs
+        # doc_id ne correspondent plus aux chemins du serveur, et la seule
+        # garde par doc_id a réindexé 14 documents en double le 14/09.
+        if (vector_store.has_document(doc_id, collection=vector_store.KB_COLLECTION)
+                or _fichier_deja_indexe(p.name)):
             skipped += 1
             continue  # resume: already indexed
         try:
