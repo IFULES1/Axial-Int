@@ -12,7 +12,13 @@ function identifiantDeBuild() {
     sha = execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] })
       .toString().trim();
   } catch { /* hors dépôt git (serveur de prod) : l'horodatage suffit */ }
-  return `${Date.now().toString(36)}${sha ? "-" + sha : ""}`;
+  // `next build` évalue cette config dans PLUSIEURS processus : un
+  // `Date.now()` pris ici donnerait un identifiant différent au `buildId` et
+  // au bundle client (constaté le 14/09). L'horodatage vient donc du script
+  // `npm run build` (AXIAL_BUILD_ID), identique pour tous les processus ;
+  // `next dev` (un seul processus) se contente du repli.
+  const horodatage = process.env.AXIAL_BUILD_ID || Date.now().toString(36);
+  return `${horodatage}${sha ? "-" + sha : ""}`;
 }
 const BUILD_ID = identifiantDeBuild();
 
