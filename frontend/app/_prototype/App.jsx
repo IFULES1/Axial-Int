@@ -3078,6 +3078,10 @@ function surlignerExtrait(texte, terme) {
    `mousedown` sur le document et ignore les cibles sous cet attribut ; sans
    ce garde le menu se démonterait AVANT que le `click` d'un de ses propres
    éléments n'ait pu partir. */
+// `data-ax-menu` sur le MENU aussi : Next monte React sur `document`, où vit
+// aussi l'écouteur `mousedown` de fermeture — un `stopPropagation` React
+// n'empêche pas un autre écouteur du même nœud, et le menu se démontait avant
+// le `click` de ses éléments (« les boutons ne fonctionnent pas », 14/09).
 function MenuConversation({ ouvert, onBasculer, actions, aide }) {
   const [sousOuvert, setSousOuvert] = React.useState(null);
   React.useEffect(() => { if (!ouvert) setSousOuvert(null); }, [ouvert]);
@@ -3094,11 +3098,6 @@ function MenuConversation({ ouvert, onBasculer, actions, aide }) {
         <Icon name="dots" size={14} />
       </button>
       {ouvert && (
-        {/* `data-ax-menu` sur le MENU aussi : Next monte React sur `document`,
-            l'écouteur `mousedown` de fermeture y est lui aussi — un
-            `stopPropagation` React n'empêche pas un autre écouteur du même
-            nœud, le menu se démontait avant le `click` de ses éléments
-            (« les boutons ne fonctionnent pas », 14/09). */}
         <div className="ax-menu" role="menu" data-ax-menu="1">
           {actions.filter(Boolean).map((a) => (a.sousMenu ? (
             <div key={a.cle}>
