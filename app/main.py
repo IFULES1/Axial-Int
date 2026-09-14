@@ -51,6 +51,11 @@ async def lifespan(_: FastAPI):
     yield
 
 
+# httpx journalise chaque requête sortante en INFO, URL complète comprise :
+# la clé Gemini passe en paramètre de requête et se retrouvait dans le journal
+# systemd (constaté le 14/09). Au niveau WARNING, seuls les échecs restent.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
 app = FastAPI(
     title="Axial Intelligence API",
     version="1.0.0",

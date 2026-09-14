@@ -3903,18 +3903,17 @@ function libelleCredits(n) {
   return texteI18n((Math.abs(Number(n) || 0) === 1) ? 'conv.credits.one' : 'conv.credits.other');
 }
 
-/* Pastille de coût, partagée entre la bulle (coût du tour) et l'en-tête du fil
-   (total). Le € n'apparaît que pour un admin ET quand le backend l'a renseigné
-   (`cout_micro_eur` est `None` pour tout le monde sauf les admins). */
-function texteCout({ credits, tokens, coutMicroEur, admin }) {
-  const parts = [
+/* Pastille de coût, partagée entre la bulle (coût du tour), l'en-tête du fil
+   (total) et l'en-tête d'un rapport. Crédits et tokens seulement : le prix de
+   revient en euros ne s'affiche plus dans l'interface, même pour un admin
+   (demande de Miradie du 14/09) — il reste lisible dans Pilotage. Les
+   paramètres `coutMicroEur` / `admin` sont acceptés et ignorés pour ne pas
+   toucher les appelants. */
+function texteCout({ credits, tokens }) {
+  return [
     `${credits} ${libelleCredits(credits)}`,
     `${formaterTokens(tokens)} ${texteI18n('conv.cout.tokens')}`,
-  ];
-  if (admin && typeof coutMicroEur === 'number') {
-    parts.push(`${(coutMicroEur / 1e6).toFixed(3)} €`);
-  }
-  return parts.join(' · ');
+  ].join(' · ');
 }
 
 /* Bandeau d'étapes du flux, alimenté par les événements SSE `etape`. Il porte
