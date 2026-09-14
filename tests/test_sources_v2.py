@@ -3,7 +3,10 @@ pertinence. Voir `docs/superpowers/specs/2026-09-14-sources-v2.md` §1.
 """
 from __future__ import annotations
 
+import dataclasses
 import re
+
+import pytest
 
 from app.config import get_settings
 from app.shared.search.contraintes import (
@@ -31,11 +34,8 @@ def test_contraintes_dataclass_defauts():
 
 def test_contraintes_dataclass_est_immuable():
     c = Contraintes()
-    try:
+    with pytest.raises(dataclasses.FrozenInstanceError):
         c.fraicheur_jours = 90  # type: ignore[misc]
-        assert False, "devait lever FrozenInstanceError"
-    except Exception:
-        pass
 
 
 # --- contraintes_pour : défauts par type de rapport --------------------------
@@ -123,12 +123,28 @@ def test_contraintes_pour_mot_historique_seul_aucun_filtre():
     assert c.fraicheur_jours is None
 
 
-def test_contraintes_pour_regle_plus_restrictive_gagne_entre_mots():
+def test_contraintes_pour_mot_historique_annule_le_defaut_du_type():
+    # « historique » doit neutraliser la fraîcheur même quand le type de
+    # rapport en pose une par défaut (etude_marche → 730 j sinon).
+    c = contraintes_pour(
+        "Quelle est l'évolution sur ce marché depuis 2015 ?", "etude_marche")
+    assert c.fraicheur_jours is None
+
+
+def test_contraintes_pour_mot_historique_annule_le_defaut_reglementaire():
+    c = contraintes_pour("Historique du secteur", "analyse_reglementaire")
+    assert c.fraicheur_jours is None
+    # Les domaines officiels restent posés par le type — seule la fraîcheur
+    # est neutralisée.
+    assert set(DOMAINES_OFFICIELS_FR_UE) <= set(c.domaines_inclus)
+
+
+def test_contraintes_pour_mot_historique_gagne_sur_les_autres_mots():
     # « récente » (90j) et « évolution sur » (aucun filtre) matchent tous
-    # les deux : la règle la plus restrictive (90j) l'emporte.
+    # les deux : historique l'emporte sur les autres règles de mots.
     c = contraintes_pour(
         "Quelle est l'actualité récente et l'évolution sur ce marché ?", None)
-    assert c.fraicheur_jours == 90
+    assert c.fraicheur_jours is None
 
 
 def test_contraintes_pour_regle_plus_restrictive_gagne_type_vs_mot():
@@ -183,6 +199,34 @@ def test_propagation_exa_transmet_fraicheur_et_domaines(monkeypatch):
     assert "startPublishedDate" in body
     assert re.match(r"\d{4}-\d{2}-\d{2}T00:00:00\.000Z", body["startPublishedDate"])
     assert body["includeDomains"] == ["legifrance.gouv.fr"]
+    # domaines_inclus posé : l'exclusion n'est pas envoyée (certains
+    # fournisseurs refusent la combinaison des deux listes).
+    assert "excludeDomains" not in body
+    get_settings.cache_clear()
+
+
+def test_propagation_exa_exclut_seulement_sans_domaines_inclus(monkeypatch):
+    monkeypatch.setenv("EXA_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        captured["json"] = json
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"results": []}
+        return R()
+
+    import app.shared.search.providers as P
+    monkeypatch.setattr(P.httpx, "post", _fake_post)
+    ExaProvider().search("marché IA", 10,
+                         contraintes=_contraintes_test(domaines_inclus=()))
+    body = captured["json"]
+    assert "includeDomains" not in body
     assert body["excludeDomains"] == ["pinterest.com"]
     get_settings.cache_clear()
 
@@ -258,6 +302,32 @@ def test_propagation_tavily_days_si_fraicheur_inferieure_365(monkeypatch):
     assert body["days"] == 90
     assert "time_range" not in body
     assert body["include_domains"] == ["legifrance.gouv.fr"]
+    assert "exclude_domains" not in body
+    get_settings.cache_clear()
+
+
+def test_propagation_tavily_exclut_seulement_sans_domaines_inclus(monkeypatch):
+    monkeypatch.setenv("TAVILY_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+
+    def _fake_post(url, json=None, timeout=None):
+        captured["json"] = json
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"results": []}
+        return R()
+
+    import app.shared.search.providers as P
+    monkeypatch.setattr(P.httpx, "post", _fake_post)
+    TavilyProvider().search("marché IA", 10,
+                            contraintes=_contraintes_test(domaines_inclus=()))
+    body = captured["json"]
+    assert "include_domains" not in body
     assert body["exclude_domains"] == ["pinterest.com"]
     get_settings.cache_clear()
 
@@ -332,6 +402,32 @@ def test_propagation_linkup_fromdate_et_domaines(monkeypatch):
     body = captured["json"]
     assert re.match(r"\d{4}-\d{2}-\d{2}$", body["fromDate"])
     assert body["includeDomains"] == ["legifrance.gouv.fr"]
+    assert "excludeDomains" not in body
+    get_settings.cache_clear()
+
+
+def test_propagation_linkup_exclut_seulement_sans_domaines_inclus(monkeypatch):
+    monkeypatch.setenv("LINKUP_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    captured = {}
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        captured["json"] = json
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"results": []}
+        return R()
+
+    import app.shared.search.providers as P
+    monkeypatch.setattr(P.httpx, "post", _fake_post)
+    LinkupProvider().search("marché IA", 10,
+                            contraintes=_contraintes_test(domaines_inclus=()))
+    body = captured["json"]
+    assert "includeDomains" not in body
     assert body["excludeDomains"] == ["pinterest.com"]
     get_settings.cache_clear()
 
@@ -445,6 +541,48 @@ def test_pertinence_sans_cohere_aucun_filtre(monkeypatch):
     out = rerank.rerank("q", results, top_k=5, compteur=compteur)
     assert len(out) == 5
     assert compteur.get("ecartes", 0) == 0
+    get_settings.cache_clear()
+
+
+def test_pertinence_panne_cohere_aucun_filtre_malgre_la_cle(monkeypatch):
+    """Clé Cohere posée mais appel en échec (timeout/429/503) : repli
+    identité, scores à 0.0 — ne doit PAS être traité comme « tout est sous le
+    seuil ». Les 10 résultats doivent survivre, pas seulement la garde
+    minimale."""
+    monkeypatch.setenv("COHERE_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    results = _resultats(10)
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        raise RuntimeError("503 Service Unavailable")
+
+    monkeypatch.setattr(rerank.httpx, "post", _fake_post)
+    compteur = {}
+    out = rerank.rerank("q", results, top_k=10, compteur=compteur)
+    assert len(out) == 10
+    assert compteur.get("ecartes", 0) == 0
+    get_settings.cache_clear()
+
+
+def test_pertinence_cohere_sans_resultat_exploitable_aucun_filtre(monkeypatch):
+    """Appel Cohere réussi mais `results` vide dans la réponse : pas de score
+    réel non plus, même comportement que le repli."""
+    monkeypatch.setenv("COHERE_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    results = _resultats(5)
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"results": []}
+        return R()
+
+    monkeypatch.setattr(rerank.httpx, "post", _fake_post)
+    out = rerank.rerank("q", results, top_k=5)
+    assert len(out) == 5
     get_settings.cache_clear()
 
 
@@ -631,3 +769,38 @@ def test_propagation_compteur_ecartes_rempli_par_orchestrateur(monkeypatch):
     orchestrator.search("q", top_k=5, compteur=compteur)
     assert compteur["ecartes"] == 2
     get_settings.cache_clear()
+
+
+# --- Cas limites (R9, revue tour 1) ------------------------------------------
+
+def test_pertinence_top_k_inferieur_a_la_garde_minimale(monkeypatch):
+    monkeypatch.setenv("COHERE_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    results = _resultats(5)
+    scores = [0.01, 0.01]
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"results": [{"index": i, "relevance_score": s}
+                                     for i, s in enumerate(scores)]}
+        return R()
+
+    monkeypatch.setattr(rerank.httpx, "post", _fake_post)
+    out = rerank.rerank("q", results, top_k=2)  # top_k < garde_minimale (3)
+    assert len(out) == 2
+    get_settings.cache_clear()
+
+
+def test_contraintes_pour_domaines_exclus_vide_si_override():
+    c = Contraintes(domaines_exclus=())
+    assert c.domaines_exclus == ()
+
+
+def test_contraintes_pour_type_inconnu_aucun_filtre():
+    c = contraintes_pour("question quelconque", "type_qui_n_existe_pas")
+    assert c.fraicheur_jours is None
+    assert c.domaines_inclus == ()

@@ -29,6 +29,17 @@ def _date_depuis(jours: int) -> str:
     return (datetime.now(timezone.utc) - timedelta(days=jours)).strftime("%Y-%m-%d")
 
 
+def _domaines(contraintes: Contraintes, cle_inclus: str, cle_exclus: str) -> dict:
+    """`domaines_inclus` privilégie sans exclure : plusieurs fournisseurs
+    refusent la combinaison inclusion + exclusion (400). Les deux listes ne
+    sont donc jamais envoyées ensemble — l'inclusion suffit à elle seule."""
+    if contraintes.domaines_inclus:
+        return {cle_inclus: list(contraintes.domaines_inclus)}
+    if contraintes.domaines_exclus:
+        return {cle_exclus: list(contraintes.domaines_exclus)}
+    return {}
+
+
 def _alerte_fournisseur(nom: str, erreur: BaseException) -> None:
     """Email « fournisseur indisponible » : les autres fournisseurs de la
     recherche continuent (repli actif), l'alerte sert à recharger ou à
@@ -52,16 +63,13 @@ class ExaProvider:
         key = get_settings().exa_api_key
         if not key:
             return []
-        body = {"query": query, "numResults": limit,
-                "contents": {"text": {"maxCharacters": 600}}}
-        if contraintes is not None:
-            if contraintes.fraicheur_jours is not None:
-                body["startPublishedDate"] = _iso_depuis(contraintes.fraicheur_jours)
-            if contraintes.domaines_inclus:
-                body["includeDomains"] = list(contraintes.domaines_inclus)
-            if contraintes.domaines_exclus:
-                body["excludeDomains"] = list(contraintes.domaines_exclus)
         try:
+            body = {"query": query, "numResults": limit,
+                    "contents": {"text": {"maxCharacters": 600}}}
+            if contraintes is not None:
+                if contraintes.fraicheur_jours:
+                    body["startPublishedDate"] = _iso_depuis(contraintes.fraicheur_jours)
+                body.update(_domaines(contraintes, "includeDomains", "excludeDomains"))
             r = httpx.post(
                 "https://api.exa.ai/search",
                 headers={"x-api-key": key, "Content-Type": "application/json"},
@@ -97,19 +105,16 @@ class TavilyProvider:
         key = get_settings().tavily_api_key
         if not key:
             return []
-        body = {"api_key": key, "query": query, "max_results": limit,
-                "search_depth": "advanced"}
-        if contraintes is not None:
-            if contraintes.fraicheur_jours is not None:
-                if contraintes.fraicheur_jours <= 365:
-                    body["days"] = contraintes.fraicheur_jours
-                else:
-                    body["time_range"] = "year"
-            if contraintes.domaines_inclus:
-                body["include_domains"] = list(contraintes.domaines_inclus)
-            if contraintes.domaines_exclus:
-                body["exclude_domains"] = list(contraintes.domaines_exclus)
         try:
+            body = {"api_key": key, "query": query, "max_results": limit,
+                    "search_depth": "advanced"}
+            if contraintes is not None:
+                if contraintes.fraicheur_jours:
+                    if contraintes.fraicheur_jours <= 365:
+                        body["days"] = contraintes.fraicheur_jours
+                    else:
+                        body["time_range"] = "year"
+                body.update(_domaines(contraintes, "include_domains", "exclude_domains"))
             r = httpx.post(
                 "https://api.tavily.com/search",
                 json=body,
@@ -144,15 +149,12 @@ class LinkupProvider:
         key = get_settings().linkup_api_key
         if not key:
             return []
-        body = {"q": query, "depth": "standard", "outputType": "searchResults"}
-        if contraintes is not None:
-            if contraintes.fraicheur_jours is not None:
-                body["fromDate"] = _date_depuis(contraintes.fraicheur_jours)
-            if contraintes.domaines_inclus:
-                body["includeDomains"] = list(contraintes.domaines_inclus)
-            if contraintes.domaines_exclus:
-                body["excludeDomains"] = list(contraintes.domaines_exclus)
         try:
+            body = {"q": query, "depth": "standard", "outputType": "searchResults"}
+            if contraintes is not None:
+                if contraintes.fraicheur_jours:
+                    body["fromDate"] = _date_depuis(contraintes.fraicheur_jours)
+                body.update(_domaines(contraintes, "includeDomains", "excludeDomains"))
             r = httpx.post(
                 "https://api.linkup.so/v1/search",
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},

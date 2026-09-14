@@ -21,19 +21,22 @@ def available() -> bool:
     return bool(get_settings().cohere_api_key)
 
 
-def rerank_indices(query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
-    """Rerank arbitrary text documents against the query.
+def rerank_indices_avec_etat(
+    query: str, documents: list[str], top_k: int,
+) -> tuple[list[tuple[int, float]], bool]:
+    """Comme `rerank_indices`, mais indique aussi si les scores sont réels.
 
-    Returns (original_index, relevance_score) pairs, best-first. Fails soft to
-    identity order (first `top_k`) if Cohere is unavailable or errors. This is
-    the shared primitive behind both web-only and combined web+internal ranking.
+    `reel=False` (repli identité — pas de clé, timeout, panne, ou réponse
+    sans résultat exploitable) : tous les scores valent 0.0 et ne doivent
+    jamais fonder un filtre de pertinence — un score à 0.0 par repli n'a rien
+    à voir avec « ce résultat n'est pas pertinent ».
     """
     settings = get_settings()
     if not documents:
-        return []
+        return [], False
     identity = [(i, 0.0) for i in range(min(top_k, len(documents)))]
     if not settings.cohere_api_key:
-        return identity
+        return identity, False
     try:
         r = httpx.post(
             "https://api.cohere.com/v2/rerank",
@@ -51,7 +54,9 @@ def rerank_indices(query: str, documents: list[str], top_k: int) -> list[tuple[i
             if idx is None or idx >= len(documents):
                 continue
             pairs.append((idx, float(item.get("relevance_score") or 0.0)))
-        return pairs or identity
+        if not pairs:
+            return identity, False
+        return pairs, True
     except Exception as e:
         logger.warning("Cohere rerank failed, keeping heuristic order: %s", e)
         try:
@@ -60,7 +65,18 @@ def rerank_indices(query: str, documents: list[str], top_k: int) -> list[tuple[i
                                  fonction="rerank des sources", bascule=True)
         except Exception:  # noqa: BLE001
             pass
-        return identity
+        return identity, False
+
+
+def rerank_indices(query: str, documents: list[str], top_k: int) -> list[tuple[int, float]]:
+    """Rerank arbitrary text documents against the query.
+
+    Returns (original_index, relevance_score) pairs, best-first. Fails soft to
+    identity order (first `top_k`) if Cohere is unavailable or errors. This is
+    the shared primitive behind both web-only and combined web+internal ranking.
+    """
+    pairs, _ = rerank_indices_avec_etat(query, documents, top_k)
+    return pairs
 
 
 def rerank(query: str, results: list[SearchResult], top_k: int,
@@ -68,28 +84,35 @@ def rerank(query: str, results: list[SearchResult], top_k: int,
           compteur: dict[str, int] | None = None) -> list[SearchResult]:
     """Reranke, puis écarte les résultats sous le seuil de pertinence.
 
-    Le filtre ne s'applique que si Cohere a réellement noté les résultats
-    (`available()`) — sans clé, l'ordre heuristique est conservé tel quel,
-    aucun résultat n'est écarté. Au moins `garde_minimale` résultats (les
-    mieux classés) sont toujours conservés, même sous le seuil, pour ne
-    jamais vider le contexte.
+    Le filtre ne s'applique que si Cohere a réellement noté les résultats —
+    pas seulement si une clé est configurée (`available()` ne dit rien de la
+    réussite de l'appel). Une panne Cohere (timeout, 429, 503) retombe sur
+    l'ordre heuristique à score 0.0 : sans ce garde-fou, `0.0 < seuil` pour
+    tout le monde et seule la garde minimale survivrait à un incident
+    fournisseur transitoire — exactement la dégradation silencieuse que « pas
+    de filtre sans Cohere » doit éviter. Filet de sécurité additionnel : si
+    tous les scores rendus valent exactement 0.0, on ne filtre pas non plus.
+    Au moins `garde_minimale` résultats (les mieux classés) sont toujours
+    conservés, même sous le seuil, pour ne jamais vider le contexte.
     """
     if not results:
         return []
     documents = [f"{r.title}\n{r.snippet}" for r in results]
+    pairs, reel = rerank_indices_avec_etat(query, documents, top_k)
     ranked = []
-    for idx, score in rerank_indices(query, documents, top_k):
+    for idx, score in pairs:
         results[idx].score = score
         ranked.append(results[idx])
 
-    if not available():
+    if not reel or all(r.score == 0.0 for r in ranked):
         return ranked
 
     settings = get_settings()
     seuil = (contraintes.seuil_pertinence if contraintes is not None
              and contraintes.seuil_pertinence is not None
              else settings.seuil_pertinence_recherche)
-    garde_minimale = contraintes.garde_minimale if contraintes is not None else 3
+    garde_minimale = (contraintes.garde_minimale if contraintes is not None
+                      else Contraintes().garde_minimale)
 
     filtres = []
     ecartes = 0

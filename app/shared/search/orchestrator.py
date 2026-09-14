@@ -43,7 +43,10 @@ def _dedupe(results: list[SearchResult]) -> list[SearchResult]:
     return list(seen.values())
 
 
-def _sans_domaines_inclus(contraintes: Contraintes | None) -> Contraintes | None:
+def _repli_sans_domaines_inclus(contraintes: Contraintes | None) -> Contraintes | None:
+    """Contraintes de relance (domaines inclus retirés), ou `None` si aucune
+    relance n'est pertinente (pas de contraintes, ou pas de domaines inclus
+    posés — le `None` sert alors de garde « pas de relance » à l'appelant)."""
     if contraintes is None or not contraintes.domaines_inclus:
         return None
     return replace(contraintes, domaines_inclus=())
@@ -93,7 +96,7 @@ def search(query: str, top_k: int | None = None,
     merged = _fan_out(providers, query, top_k, contraintes, compteur)
     deduped = _dedupe(merged)
 
-    repli = _sans_domaines_inclus(contraintes)
+    repli = _repli_sans_domaines_inclus(contraintes)
     if not deduped and repli is not None:
         logger.info("Search: pool vide avec domaines inclus, relance sans eux.")
         merged = _fan_out(providers, query, top_k, repli, compteur)
@@ -162,7 +165,7 @@ def search_multi(queries: list[str], top_k: int | None = None,
     merged = _fan_out_multi(providers, angles, par_angle, contraintes, compteur)
     deduped = _dedupe(merged)
 
-    repli = _sans_domaines_inclus(contraintes)
+    repli = _repli_sans_domaines_inclus(contraintes)
     if not deduped and repli is not None:
         logger.info("Recherche multi-angles : pool vide avec domaines inclus, relance sans eux.")
         merged = _fan_out_multi(providers, angles, par_angle, repli, compteur)

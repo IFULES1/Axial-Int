@@ -9,7 +9,8 @@ mots de la question — voir `docs/superpowers/specs/2026-09-14-sources-v2.md`
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import date
 
 
 @dataclass(frozen=True)
@@ -48,20 +49,29 @@ _DEFAUTS_PAR_TYPE: dict[str | None, tuple[int | None, tuple[str, ...]]] = {
     None: (None, ()),
 }
 
-# Mots-clés de la question → (fraicheur_jours ou None, domaines inclus additionnels).
-# Insensibles à la casse, testés en FR et EN. `None` en fraicheur signifie
-# « aucun filtre » (le moins restrictif) : il ne gagne que si aucune autre
-# règle plus restrictive ne s'applique par ailleurs.
-_MOTS_FRAICHEUR: tuple[tuple[re.Pattern, int | None, tuple[str, ...]], ...] = (
-    (re.compile(r"\b(actualit\w*|r[ée]cent\w*|dernier\w*|derni[èe]res?|cette semaine|"
-                r"ce mois|this week|latest|news)\b", re.IGNORECASE), 90, ()),
-    (re.compile(r"\b(2026|cette ann[ée]e|this year)\b", re.IGNORECASE), 365, ()),
-    (re.compile(r"\b(loi|d[ée]cret|r[èe]glement\w*|directive|rgpd|dsa|dma|"
-                r"ai act|r[ée]glementation|regulation|compliance)\b", re.IGNORECASE),
-     365, DOMAINES_OFFICIELS_FR_UE),
-    (re.compile(r"\b(historique|depuis\s+20\d{2}|[ée]volution sur)\b", re.IGNORECASE),
-     None, ()),
-)
+# « historique / depuis 20xx / évolution sur » neutralise toute fraîcheur —
+# y compris le défaut du type de rapport — et l'emporte sur les autres règles
+# de mots (décision Miradie, tour de revue 1 du 14/09). Vérifiée à part, avant
+# les autres règles, plutôt que comme une candidate parmi d'autres du `min()`.
+_MOT_HISTORIQUE = re.compile(r"\b(historique|depuis\s+20\d{2}|[ée]volution sur)\b",
+                             re.IGNORECASE)
+
+
+def _regles_mots(annee: int) -> tuple[tuple[re.Pattern, int, tuple[str, ...]], ...]:
+    """Mots-clés de la question → (fraicheur_jours, domaines inclus additionnels).
+
+    Insensibles à la casse, testés en FR et EN. `annee` est l'année courante,
+    recalculée à chaque appel pour que le motif « année en cours » ne devienne
+    pas faux au changement d'année.
+    """
+    return (
+        (re.compile(r"\b(actualit\w*|r[ée]cent\w*|dernier\w*|derni[èe]res?|cette semaine|"
+                    r"ce mois|this week|latest|news)\b", re.IGNORECASE), 90, ()),
+        (re.compile(rf"\b({annee}|cette ann[ée]e|this year)\b", re.IGNORECASE), 365, ()),
+        (re.compile(r"\b(loi|d[ée]cret|r[èe]glement\w*|directive|rgpd|dsa|dma|"
+                    r"ai act|r[ée]glementation|regulation|compliance)\b", re.IGNORECASE),
+         365, DOMAINES_OFFICIELS_FR_UE),
+    )
 
 
 def _fusion_domaines(*groupes: tuple[str, ...]) -> tuple[str, ...]:
@@ -76,34 +86,30 @@ def contraintes_pour(question: str, analysis_type: str | None = None) -> Contrai
     """Dérive les contraintes de recherche d'une question et d'un type de rapport.
 
     Fonction pure : le défaut du type de rapport est le point de départ, les
-    mots de la question l'affinent. La règle la plus restrictive gagne — un
-    `fraicheur_jours` plus petit est plus restrictif ; `None` (aucun filtre)
-    ne l'emporte que si rien de plus restrictif n'a été détecté par ailleurs.
+    mots de la question l'affinent. « historique / depuis 20xx / évolution
+    sur » neutralise la fraîcheur inconditionnellement (y compris le défaut du
+    type). Sinon, la règle la plus restrictive gagne entre le défaut du type
+    et les mots de la question — un `fraicheur_jours` plus petit est plus
+    restrictif.
     """
     question = question or ""
     fraicheur_defaut, domaines_defaut = _DEFAUTS_PAR_TYPE.get(
         analysis_type, (None, ()))
+    historique = bool(_MOT_HISTORIQUE.search(question))
 
     candidats_fraicheur: list[int] = []
-    if fraicheur_defaut is not None:
+    if not historique and fraicheur_defaut is not None:
         candidats_fraicheur.append(fraicheur_defaut)
 
     domaines_mots: tuple[str, ...] = ()
-    correspondance_trouvee = False
-    for motif, fraicheur, domaines in _MOTS_FRAICHEUR:
+    for motif, fraicheur, domaines in _regles_mots(date.today().year):
         if motif.search(question):
-            correspondance_trouvee = True
-            if fraicheur is not None:
+            if not historique:
                 candidats_fraicheur.append(fraicheur)
             domaines_mots = _fusion_domaines(domaines_mots, domaines)
 
-    if candidats_fraicheur:
-        fraicheur = min(candidats_fraicheur)
-    elif correspondance_trouvee:
-        # Seule une règle « aucun filtre » (ex. historique) a matché.
-        fraicheur = None
-    else:
-        fraicheur = fraicheur_defaut
+    fraicheur = None if historique else (
+        min(candidats_fraicheur) if candidats_fraicheur else fraicheur_defaut)
 
     domaines_inclus = _fusion_domaines(domaines_defaut, domaines_mots)
 
