@@ -36,6 +36,27 @@ Limite : les onglets chargés avant le 14/09 n'ont pas la veille ; la forme
 héritée de `GET /reports` et de `GET …/messages` les remet d'aplomb, mais un
 rechargement manuel reste le geste sûr.
 
+## 2 bis. Menus ⋯ / Exporter / Livrer : les éléments ne répondaient pas (commits 9b0b755, ced3baa)
+
+Reproduit en prod à 07:30 avec le compte QA : le clic sur « Désépingler »
+ne partait jamais. Cause : Next monte React sur `document`, où vit aussi
+l'écouteur `mousedown` de fermeture au clic extérieur ; le
+`onMouseDown={stopPropagation}` du menu n'empêche pas un autre écouteur du
+même nœud, et le menu se démontait au `mousedown`, avant le `click`. Les deux
+menus (`MenuConversation`, `MenuBouton`) portent désormais `data-ax-menu`, que
+l'écouteur ignore. Vérifié en prod : PATCH sur « Désépingler », champ de
+renommage d'un dossier, export Markdown depuis « Exporter » (même composant
+que « Livrer »). Test Node `menus.test.mjs`.
+
+Leçon : l'inventaire statique (§3) avait jugé ces boutons « branchés » — le
+handler existait et appelait la bonne route. Un bouton se vérifie en
+cliquant dessus, pas en lisant son `onClick`.
+
+Incident : le premier déploiement de ce correctif a cassé le build prod
+(commentaire JSX dans une expression `&&`) → 502 pendant ~3 minutes, le temps
+de corriger et de rebâtir. À retenir : vérifier la compilation locale avant
+`npm run build` sur le serveur.
+
 ## 3. Inventaire des boutons (`2026-09-14-inventaire-boutons.md`)
 
 Environ 165 éléments cliquables recensés, chaque `axXxx()` appelé existe dans
@@ -54,7 +75,7 @@ Environ 165 éléments cliquables recensés, chaque `axXxx()` appelé existe dan
 | Tiphanie admin + 200 crédits | fait le 11/09 |
 | Conversations (crédits, contexte, documents, mémoire de fil, animation, solde, gestion, régénérer / éditer / stop, coût, mobile, markdown, erreurs, EN) et dette C.1–C.7 | en prod le 11/09 |
 | Rapports v2 (suivi par id, Stop, sources insuffisantes, gestion, partage, comparaison, exports, dette 10–18, `/analysis/run`, Drive côté backend) | en prod le 13/09 |
-| Onglets périmés, liste héritée, Stop réactif | en prod le 14/09 |
+| Onglets périmés, liste héritée, Stop réactif, menus ⋯ / Exporter / Livrer réparés | en prod le 14/09 |
 | Lien support de la Documentation | ouvert (Miradie) |
 | Wording, prompts des rapports (tableaux / graphiques obligatoires sur les parties chiffrées), ressources CCI / INPI / Pépites | en attente de Miradie ; diff + OK avant déploiement |
 | Sources de données par fonction (matrice type de rapport → fournisseurs / corpus) | à arbitrer avec Miradie |

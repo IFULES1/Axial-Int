@@ -18,7 +18,15 @@ de la Documentation (gardé ouvert).
   i18n Google mortes. Détail : `docs/superpowers/specs/2026-09-14-inventaire-boutons.md`.
 - Récap : `docs/superpowers/specs/2026-09-14-correctifs-onglets-perimes.md`.
 
+- Menus ⋯ / Exporter / Livrer : les éléments ne répondaient pas (menu fermé au
+  `mousedown` par l'écouteur du `document`, où Next monte React) → attribut
+  `data-ax-menu` sur les menus, test `menus.test.mjs`, vérifié en prod.
+
 ## Pièges appris
+- Un `stopPropagation` React ne bloque pas un écouteur natif posé sur
+  `document` : sous Next (racine = `document`), garder les gardes par attribut.
+- Vérifier la compilation locale avant tout `npm run build` en prod : un
+  commentaire JSX mal placé a donné 3 minutes de 502.
 - `next start` ré-évalue `next.config.mjs` ; `next build` l'évalue dans
   plusieurs processus : l'identifiant de build doit venir de l'environnement
   et le serveur doit lire `.next/BUILD_ID`. Vérifier la parité après build.
