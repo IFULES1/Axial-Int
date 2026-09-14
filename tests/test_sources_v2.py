@@ -534,7 +534,7 @@ def test_pertinence_filtre_sous_seuil_avec_cohere(monkeypatch):
     compteur = {}
     out = rerank.rerank("q", results, top_k=5, compteur=compteur)
     assert [r.score for r in out] == [0.9, 0.8, 0.5]
-    assert compteur["ecartes"] == 2
+    assert compteur["_ecartes"] == 2
     get_settings.cache_clear()
 
 
@@ -558,7 +558,7 @@ def test_pertinence_garde_minimale_meme_sous_seuil(monkeypatch):
     compteur = {}
     out = rerank.rerank("q", results, top_k=5, compteur=compteur)
     assert len(out) == 3  # garde_minimale par défaut
-    assert compteur["ecartes"] == 2
+    assert compteur["_ecartes"] == 2
     get_settings.cache_clear()
 
 
@@ -592,7 +592,7 @@ def test_pertinence_sans_cohere_aucun_filtre(monkeypatch):
     compteur = {}
     out = rerank.rerank("q", results, top_k=5, compteur=compteur)
     assert len(out) == 5
-    assert compteur.get("ecartes", 0) == 0
+    assert compteur.get("_ecartes", 0) == 0
     get_settings.cache_clear()
 
 
@@ -612,7 +612,7 @@ def test_pertinence_panne_cohere_aucun_filtre_malgre_la_cle(monkeypatch):
     compteur = {}
     out = rerank.rerank("q", results, top_k=10, compteur=compteur)
     assert len(out) == 10
-    assert compteur.get("ecartes", 0) == 0
+    assert compteur.get("_ecartes", 0) == 0
     get_settings.cache_clear()
 
 
@@ -819,7 +819,7 @@ def test_propagation_compteur_ecartes_rempli_par_orchestrateur(monkeypatch):
     monkeypatch.setattr(rerank.httpx, "post", _fake_post)
     compteur = {}
     orchestrator.search("q", top_k=5, compteur=compteur)
-    assert compteur["ecartes"] == 2
+    assert compteur["_ecartes"] == 2
     get_settings.cache_clear()
 
 
@@ -1151,7 +1151,7 @@ def test_cascade_niveau1_suffit_pas_de_niveau2(monkeypatch):
     compteur = {}
     out = orchestrator.search("q", top_k=2, compteur=compteur)
     assert len(out) == 2
-    assert compteur["niveaux"] == 1
+    assert compteur["_niveaux"] == 1
     assert len(tavily.appels) == 0
     get_settings.cache_clear()
 
@@ -1169,7 +1169,7 @@ def test_cascade_niveau2_ajoute_si_niveau1_insuffisant(monkeypatch):
                         lambda n: {"exa": exa, "tavily": tavily}.get(n))
     compteur = {}
     out = orchestrator.search("q", top_k=3, compteur=compteur)
-    assert compteur["niveaux"] == 2
+    assert compteur["_niveaux"] == 2
     assert len(tavily.appels) == 1
     assert len(out) == 3
     get_settings.cache_clear()
@@ -1185,7 +1185,7 @@ def test_cascade_sans_cohere_arrete_niveau1_si_pool_atteint_top_k(monkeypatch):
                         lambda n: {"exa": exa, "tavily": tavily}.get(n))
     compteur = {}
     out = orchestrator.search("q", top_k=3, compteur=compteur)
-    assert compteur["niveaux"] == 1
+    assert compteur["_niveaux"] == 1
     assert len(tavily.appels) == 0
     assert len(out) == 3
     get_settings.cache_clear()
@@ -1203,7 +1203,7 @@ def test_cascade_sans_cohere_continue_si_pool_insuffisant(monkeypatch):
                         lambda n: {"exa": exa, "tavily": tavily}.get(n))
     compteur = {}
     out = orchestrator.search("q", top_k=3, compteur=compteur)
-    assert compteur["niveaux"] == 2
+    assert compteur["_niveaux"] == 2
     assert len(tavily.appels) == 1
     assert len(out) == 3
     get_settings.cache_clear()
@@ -1219,7 +1219,7 @@ def test_cascade_fournisseur_inconnu_ignore(monkeypatch):
     compteur = {}
     out = orchestrator.search("q", top_k=3, compteur=compteur)
     assert len(out) == 3
-    assert compteur["niveaux"] == 1
+    assert compteur["_niveaux"] == 1
     get_settings.cache_clear()
 
 
@@ -1234,7 +1234,7 @@ def test_cascade_niveau_vide_saute(monkeypatch):
     out = orchestrator.search("q", top_k=3, compteur=compteur)
     assert len(out) == 3
     # Un seul niveau non vide au total (le premier a été sauté).
-    assert compteur["niveaux"] == 1
+    assert compteur["_niveaux"] == 1
     assert len(exa.appels) == 1
     get_settings.cache_clear()
 
@@ -1249,7 +1249,7 @@ def test_cascade_tous_niveaux_epuises_sans_atteindre_top_k(monkeypatch):
                         lambda n: {"exa": exa, "tavily": tavily}.get(n))
     compteur = {}
     out = orchestrator.search("q", top_k=5, compteur=compteur)
-    assert compteur["niveaux"] == 2
+    assert compteur["_niveaux"] == 2
     assert len(out) == 1
     get_settings.cache_clear()
 
@@ -1268,7 +1268,7 @@ def test_cascade_search_multi_interroge_tous_les_angles_par_niveau(monkeypatch):
                         lambda n: {"exa": exa, "tavily": tavily}.get(n))
     compteur = {}
     out = orchestrator.search_multi(["angle1", "angle2"], top_k=3, compteur=compteur)
-    assert compteur["niveaux"] == 2
+    assert compteur["_niveaux"] == 2
     # Niveau 1 (exa) interrogé sur les 2 angles, niveau 2 (tavily) aussi.
     assert len(exa.appels) == 2
     assert len(tavily.appels) == 2
@@ -1287,4 +1287,156 @@ def test_tiers_tarif_recherche_perplexity(monkeypatch):
     get_settings.cache_clear()
     assert get_settings().tarif_recherche_perplexity_micro_eur == 5_000
     assert cout_recherche_micro_eur({"perplexity": 2}) == 10_000
+    get_settings.cache_clear()
+
+
+# --- Tour 1 (revue) : pertinents réels (C1), clés de compteur (Q1/Q2) --------
+
+def test_cascade_c1_pertinents_reels_pas_la_garde_minimale(monkeypatch):
+    """Revue Task 2, constat C1 : niveau 1 rend 10 sources toutes notées
+    0.05, bien sous le seuil (0.30 par défaut). Avant le correctif, la
+    condition d'arrêt comptait `len(resultats)` (3, la garde minimale) — ce
+    qui arrêtait la cascade alors qu'AUCUNE source n'est réellement
+    pertinente. Après correctif (compte des scores ≥ seuil, hors garde), le
+    niveau 2 doit être appelé."""
+    monkeypatch.setenv("COHERE_API_KEY", "cle-test")
+    monkeypatch.setenv("SEARCH_TIERS", "exa|tavily")
+    get_settings.cache_clear()
+    _cohere_scores_croissants(monkeypatch, seuil_ok=False)  # tout à 0.05
+    exa = _FauxProvider("exa", [_resultats(10)])
+    tavily_resultats = [SearchResult(title=f"t{i}", url=f"https://tav.com/{i}", snippet="s",
+                                     provider="tavily") for i in range(3)]
+    tavily = _FauxProvider("tavily", [tavily_resultats])
+    monkeypatch.setattr(orchestrator, "get_provider",
+                        lambda n: {"exa": exa, "tavily": tavily}.get(n))
+    compteur = {}
+    orchestrator.search("q", top_k=3, compteur=compteur)
+    assert len(tavily.appels) == 1  # niveau 2 appelé malgré 3 résultats rendus au niveau 1
+    assert compteur["_niveaux"] == 2
+    get_settings.cache_clear()
+
+
+def test_cascade_search_multi_niveau1_suffit_pas_de_niveau2(monkeypatch):
+    """Symétrique de `test_cascade_niveau1_suffit_pas_de_niveau2` pour
+    `search_multi` — signalé manquant par la revue."""
+    monkeypatch.setenv("COHERE_API_KEY", "cle-test")
+    monkeypatch.setenv("SEARCH_TIERS", "exa|tavily")
+    get_settings.cache_clear()
+    _cohere_scores_croissants(monkeypatch, seuil_ok=True)
+    exa = _FauxProvider("exa", [_resultats(3), _resultats(3)])
+    tavily = _FauxProvider("tavily", [_resultats(3), _resultats(3)])
+    monkeypatch.setattr(orchestrator, "get_provider",
+                        lambda n: {"exa": exa, "tavily": tavily}.get(n))
+    compteur = {}
+    out = orchestrator.search_multi(["angle1", "angle2"], top_k=2, compteur=compteur)
+    assert compteur["_niveaux"] == 1
+    assert len(tavily.appels) == 0
+    assert len(out) == 2
+    get_settings.cache_clear()
+
+
+def test_q1_cle_meta_non_facturee_par_couts(monkeypatch):
+    """Revue Task 2, constat Q1 : un compteur `{"exa": 4, "_niveaux": 2,
+    "_ecartes": 12}` coûte exactement 4 appels Exa — les clés de métadonnées
+    (préfixe `_`) ne sont pas facturées au tarif de repli comme un
+    fournisseur inconnu."""
+    from app.modules.billing.couts import cout_recherche_micro_eur
+    get_settings.cache_clear()
+    compteur = {"exa": 4, "_niveaux": 2, "_ecartes": 12}
+    attendu = get_settings().tarif_recherche_exa_micro_eur * 4
+    assert cout_recherche_micro_eur(compteur) == attendu
+    # Non-régression explicite : même montant qu'un compteur sans les clés
+    # méta, ce qui est le comportement attendu (elles ne doivent rien changer).
+    assert cout_recherche_micro_eur(compteur) == cout_recherche_micro_eur({"exa": 4})
+    get_settings.cache_clear()
+
+
+def test_q1_cle_meta_non_comptee_appels_intelligence():
+    """Même correctif côté `intelligence.service._appels` (compteur d'appels
+    affiché/persisté par tour de conversation) — grep `compteur` demandé par
+    la revue."""
+    from app.modules.intelligence.service import _appels
+    compteur = {"exa": 4, "_niveaux": 2, "_ecartes": 12}
+    assert _appels(compteur) == 4
+
+
+def test_cascade_q2_ecartes_final_seulement_pas_accumule(monkeypatch):
+    """Revue Task 2, constat Q2 : `_ecartes` doit refléter le rerank FINAL
+    sur le pool cumulé (niveau 2), pas la somme des écartés de chaque niveau
+    (7 au niveau 1 + 3 au niveau 2 ne doit jamais donner 10)."""
+    monkeypatch.setenv("COHERE_API_KEY", "cle-test")
+    monkeypatch.setenv("SEARCH_TIERS", "exa|tavily")
+    get_settings.cache_clear()
+
+    appel = {"n": 0}
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        appel["n"] += 1
+        n = appel["n"]
+
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                if n == 1:
+                    # Niveau 1 : 10 docs, 2 pertinents (rangs 0-1), 7 écartés
+                    # (rangs 3-9 ; rangs 0-2 protégés par la garde minimale).
+                    scores = [0.9, 0.8] + [0.05] * 8
+                else:
+                    # Niveau 2 (pool cumulé, rerank final) : 7 pertinents,
+                    # 3 écartés (rangs 7-9).
+                    scores = [0.9] * 7 + [0.05] * 3
+                return {"results": [{"index": i, "relevance_score": s}
+                                     for i, s in enumerate(scores)]}
+        return R()
+
+    monkeypatch.setattr(rerank.httpx, "post", _fake_post)
+    exa = _FauxProvider("exa", [_resultats(10)])
+    tavily_resultats = [SearchResult(title=f"t{i}", url=f"https://tav.com/{i}", snippet="s",
+                                     provider="tavily") for i in range(10)]
+    tavily = _FauxProvider("tavily", [tavily_resultats])
+    monkeypatch.setattr(orchestrator, "get_provider",
+                        lambda n: {"exa": exa, "tavily": tavily}.get(n))
+    compteur = {}
+    orchestrator.search("q", top_k=10, compteur=compteur)
+    assert compteur["_niveaux"] == 2
+    assert compteur["_ecartes"] == 3  # pas 7 + 3 = 10
+    get_settings.cache_clear()
+
+
+def test_rerank_avec_etat_expose_pertinents(monkeypatch):
+    """`rerank_avec_etat` doit exposer le nombre de résultats réellement
+    pertinents (score ≥ seuil), distinct de `len(résultats rendus)` qui
+    inclut la garde minimale même à score nul."""
+    monkeypatch.setenv("COHERE_API_KEY", "cle-test")
+    get_settings.cache_clear()
+    results = _resultats(5)
+    scores = [0.9, 0.8, 0.05, 0.05, 0.05]  # 2 pertinents, garde=3 protège l'indice 2
+
+    def _fake_post(url, headers=None, json=None, timeout=None):
+        class R:
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"results": [{"index": i, "relevance_score": s}
+                                     for i, s in enumerate(scores)]}
+        return R()
+
+    monkeypatch.setattr(rerank.httpx, "post", _fake_post)
+    resultats, reel, pertinents = rerank.rerank_avec_etat("q", results, top_k=5)
+    assert reel is True
+    assert pertinents == 2
+    assert len(resultats) == 3  # garde minimale : 2 pertinents + 1 protégé
+    get_settings.cache_clear()
+
+
+def test_rerank_avec_etat_pertinents_zero_sans_scores_reels(monkeypatch):
+    monkeypatch.delenv("COHERE_API_KEY", raising=False)
+    get_settings.cache_clear()
+    results = _resultats(5)
+    resultats, reel, pertinents = rerank.rerank_avec_etat("q", results, top_k=5)
+    assert reel is False
+    assert pertinents == 0
     get_settings.cache_clear()

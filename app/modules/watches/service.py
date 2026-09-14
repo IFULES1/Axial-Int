@@ -214,7 +214,8 @@ def run_watch(db: Session, watch: Watch) -> bool:
             tokens_entree=entree or None, tokens_sortie=sortie or None,
             modele=modele,
             cout_micro_eur=(cout_micro_eur(modele, entree, sortie) if modele else None) or None,
-            appels_recherche=sum(appels_recherche.values()) or None,
+            appels_recherche=sum(v for k, v in appels_recherche.items()
+                                 if not k.startswith("_")) or None,
             cout_recherche_micro_eur=cout_recherche_micro_eur(appels_recherche) or None,
             delta_content=veille.get("delta") or "",
             full_content=veille.get("full_report") or "",

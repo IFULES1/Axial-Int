@@ -83,74 +83,6 @@ def _fan_out(providers: list, query: str, top_k: int,
     return merged
 
 
-def search(query: str, top_k: int | None = None,
-           contraintes: Contraintes | None = None,
-           compteur: dict[str, int] | None = None) -> list[SearchResult]:
-    """Run enabled providers by tier, merge, dedupe, rerank; return top-K results.
-
-    Recherche à niveaux (`settings.search_tier_list`) : le niveau 1 est
-    interrogé seul, dédupliqué et reranké. Si le nombre de sources pertinentes
-    (score réel ≥ seuil) est inférieur à `top_k`, le niveau 2 est ajouté au
-    pool (le pool complet est reranké, pas seulement le niveau 2), puis le
-    niveau 3 si besoin ; arrêt dès que `top_k` sources pertinentes sont
-    réunies ou que tous les niveaux ont été consultés. Sans Cohere (pas de
-    scores réels — `rerank_avec_etat` le signale via `reel=False`), on ne peut
-    pas juger la pertinence : la cascade s'arrête dès que le pool dédupliqué
-    atteint `top_k`, quel que soit le niveau. `compteur["niveaux"]` reçoit le
-    nombre de niveaux effectivement consultés.
-
-    `contraintes` (optionnel — `None` = comportement actuel, aucun filtre) :
-    fraîcheur et domaines transmis à chaque fournisseur ; si le pool
-    dédupliqué reste vide alors que des domaines inclus étaient posés, une
-    relance sans eux a lieu une seule fois (pour l'ensemble de la recherche,
-    pas par niveau) pour ne pas produire un rapport vide. `compteur` —
-    dictionnaire fourni par l'appelant, rempli du nombre d'appels par
-    fournisseur (et du nombre de sources écartées par le filtre de
-    pertinence, `compteur["ecartes"]`). C'est ce qui rend le coût de
-    recherche mesurable : il n'apparaît sur aucune facture ventilée par
-    rapport.
-    """
-    settings = get_settings()
-    top_k = top_k or settings.search_topk
-    niveaux = _niveaux_disponibles(settings)
-    if not niveaux:
-        logger.info("No search provider configured/available.")
-        return []
-
-    pool: list[SearchResult] = []
-    resultats: list[SearchResult] = []
-    relance_faite = False
-    niveaux_utilises = 0
-
-    for i, providers in enumerate(niveaux, 1):
-        niveaux_utilises = i
-        bruts = _fan_out(providers, query, top_k, contraintes, compteur)
-        pool.extend(bruts)
-        deduped = _dedupe(pool)
-
-        if not deduped and not relance_faite:
-            repli = _repli_sans_domaines_inclus(contraintes)
-            if repli is not None:
-                relance_faite = True
-                logger.info("Search: pool vide avec domaines inclus, relance sans eux.")
-                bruts2 = _fan_out(providers, query, top_k, repli, compteur)
-                pool.extend(bruts2)
-                deduped = _dedupe(pool)
-
-        resultats, reel = rerank.rerank_avec_etat(
-            query, deduped, top_k, contraintes=contraintes, compteur=compteur)
-        logger.info("Search niveau %d : %d bruts → %d dédupliqués → %d retenus",
-                    i, len(bruts), len(deduped), len(resultats))
-
-        assez = len(resultats) >= top_k if reel else len(deduped) >= top_k
-        if assez:
-            break
-
-    if compteur is not None:
-        compteur["niveaux"] = niveaux_utilises
-    return resultats
-
-
 def _fan_out_multi(providers: list, angles: list[str], par_angle: int,
                    contraintes: Contraintes | None,
                    compteur: dict[str, int] | None) -> list[SearchResult]:
@@ -171,6 +103,102 @@ def _fan_out_multi(providers: list, angles: list[str], par_angle: int,
     return merged
 
 
+def _cascade(niveaux: list[list], fan_out, rerank_query: str, top_k: int,
+            contraintes: Contraintes | None, compteur: dict[str, int] | None,
+            nom_log: str) -> list[SearchResult]:
+    """Cascade partagée par `search` et `search_multi` : interroge les
+    niveaux l'un après l'autre, pool cumulatif dédupliqué, rerank du pool
+    complet à chaque niveau. `fan_out(providers, contraintes)` fait le
+    fan-out réel (un provider·requête à la fois pour `search`, tous les
+    angles pour `search_multi`) — c'est le seul point qui diffère entre les
+    deux appelants, d'où la factorisation (revue Task 2 : la boucle était
+    dupliquée à l'identique, ce qui aurait divergé au premier correctif).
+
+    Arrêt dès que `top_k` sources RÉELLEMENT pertinentes (score ≥ seuil,
+    garde minimale exclue — `pertinents` rendu par `rerank_avec_etat`, pas
+    `len(resultats)` qui inclut la garde même à score nul, cf. revue Task 2
+    constat C1) sont réunies, ou que tous les niveaux ont été consultés. Sans
+    scores réels (`reel=False` — pas de Cohere, panne, ou réponse sans
+    résultat exploitable), on ne peut pas juger la pertinence : la cascade
+    s'arrête dès que le pool dédupliqué atteint `top_k`, à n'importe quel
+    niveau. `compteur["_niveaux"]` (préfixe `_` : métadonnée, jamais
+    facturée comme un fournisseur — cf. `couts.cout_recherche_micro_eur`)
+    reçoit le nombre de niveaux effectivement consultés ; `compteur["_ecartes"]`
+    est écrit par le dernier appel à `rerank_avec_etat` (assignation, pas
+    accumulation — voir sa docstring), donc reflète le rerank final sur le
+    pool cumulé complet, pas la somme des écartés de chaque niveau.
+
+    Relance sans domaines inclus (Task 1) : une seule fois pour toute la
+    cascade (pas par niveau), si le pool dédupliqué est encore vide.
+    """
+    pool: list[SearchResult] = []
+    resultats: list[SearchResult] = []
+    relance_faite = False
+    niveaux_utilises = 0
+
+    for i, providers in enumerate(niveaux, 1):
+        niveaux_utilises = i
+        bruts = fan_out(providers, contraintes)
+        pool.extend(bruts)
+        deduped = _dedupe(pool)
+
+        if not deduped and not relance_faite:
+            repli = _repli_sans_domaines_inclus(contraintes)
+            if repli is not None:
+                relance_faite = True
+                logger.info("%s : pool vide avec domaines inclus, relance sans eux.",
+                            nom_log)
+                bruts2 = fan_out(providers, repli)
+                pool.extend(bruts2)
+                deduped = _dedupe(pool)
+
+        resultats, reel, pertinents = rerank.rerank_avec_etat(
+            rerank_query, deduped, top_k, contraintes=contraintes, compteur=compteur)
+        logger.info("%s niveau %d : %d bruts (ce niveau) → %d dédupliqués (cumulé) → "
+                    "%d retenus dont %d pertinents",
+                    nom_log, i, len(bruts), len(deduped), len(resultats), pertinents)
+
+        assez = pertinents >= top_k if reel else len(deduped) >= top_k
+        if assez:
+            break
+
+    if compteur is not None:
+        compteur["_niveaux"] = niveaux_utilises
+    return resultats
+
+
+def search(query: str, top_k: int | None = None,
+           contraintes: Contraintes | None = None,
+           compteur: dict[str, int] | None = None) -> list[SearchResult]:
+    """Run enabled providers by tier, merge, dedupe, rerank; return top-K results.
+
+    Recherche à niveaux (`settings.search_tier_list`, voir `_cascade`) : le
+    niveau 1 est interrogé seul, dédupliqué et reranké. Si le nombre de
+    sources RÉELLEMENT pertinentes est inférieur à `top_k`, le niveau 2 est
+    ajouté au pool (le pool complet est reranké, pas seulement le niveau 2),
+    puis le niveau 3 si besoin.
+
+    `contraintes` (optionnel — `None` = comportement actuel, aucun filtre) :
+    fraîcheur et domaines transmis à chaque fournisseur. `compteur` —
+    dictionnaire fourni par l'appelant, rempli du nombre d'appels par
+    fournisseur (clés de métadonnées préfixées `_` : `_niveaux`, `_ecartes`
+    — jamais des fournisseurs, jamais facturées). C'est ce qui rend le coût
+    de recherche mesurable : il n'apparaît sur aucune facture ventilée par
+    rapport.
+    """
+    settings = get_settings()
+    top_k = top_k or settings.search_topk
+    niveaux = _niveaux_disponibles(settings)
+    if not niveaux:
+        logger.info("No search provider configured/available.")
+        return []
+
+    def fan_out(providers: list, c: Contraintes | None) -> list[SearchResult]:
+        return _fan_out(providers, query, top_k, c, compteur)
+
+    return _cascade(niveaux, fan_out, query, top_k, contraintes, compteur, "Search")
+
+
 def search_multi(queries: list[str], top_k: int | None = None,
                  requete_de_rang: str | None = None,
                  contraintes: Contraintes | None = None,
@@ -185,10 +213,8 @@ def search_multi(queries: list[str], top_k: int | None = None,
     Les angles élargissent la collecte ; le reranker reste seul juge de ce qui
     entre dans le contexte final, classé contre la question d'origine.
 
-    `contraintes` propage comme dans `search` (relance sans domaines inclus
-    une seule fois si le pool dédupliqué reste vide). Cascade à niveaux
-    identique à `search`, mais chaque niveau interroge TOUS les angles
-    (`compteur["niveaux"]` compte les niveaux, comme dans `search`).
+    `contraintes` propage comme dans `search`. Cascade à niveaux identique à
+    `search` (voir `_cascade`), mais chaque niveau interroge TOUS les angles.
     """
     settings = get_settings()
     top_k = top_k or settings.search_topk
@@ -209,40 +235,11 @@ def search_multi(queries: list[str], top_k: int | None = None,
     par_angle = max(5, top_k // 2)
     requete = requete_de_rang or angles[0]
 
-    pool: list[SearchResult] = []
-    resultats: list[SearchResult] = []
-    relance_faite = False
-    niveaux_utilises = 0
+    def fan_out(providers: list, c: Contraintes | None) -> list[SearchResult]:
+        return _fan_out_multi(providers, angles, par_angle, c, compteur)
 
-    for i, providers in enumerate(niveaux, 1):
-        niveaux_utilises = i
-        bruts = _fan_out_multi(providers, angles, par_angle, contraintes, compteur)
-        pool.extend(bruts)
-        deduped = _dedupe(pool)
-
-        if not deduped and not relance_faite:
-            repli = _repli_sans_domaines_inclus(contraintes)
-            if repli is not None:
-                relance_faite = True
-                logger.info("Recherche multi-angles : pool vide avec domaines inclus, "
-                           "relance sans eux.")
-                bruts2 = _fan_out_multi(providers, angles, par_angle, repli, compteur)
-                pool.extend(bruts2)
-                deduped = _dedupe(pool)
-
-        resultats, reel = rerank.rerank_avec_etat(
-            requete, deduped, top_k, contraintes=contraintes, compteur=compteur)
-        logger.info("Recherche multi-angles niveau %d : %d angles, %d bruts → "
-                    "%d dédupliqués → %d retenus",
-                    i, len(angles), len(bruts), len(deduped), len(resultats))
-
-        assez = len(resultats) >= top_k if reel else len(deduped) >= top_k
-        if assez:
-            break
-
-    if compteur is not None:
-        compteur["niveaux"] = niveaux_utilises
-    return resultats
+    return _cascade(niveaux, fan_out, requete, top_k, contraintes, compteur,
+                    "Recherche multi-angles")
 
 
 def format_sources(results: list[SearchResult]) -> str:

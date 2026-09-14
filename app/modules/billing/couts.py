@@ -72,8 +72,14 @@ def _tarif_recherche(fournisseur: str) -> int:
 
 
 def cout_recherche_micro_eur(appels: dict[str, int] | None) -> int:
-    """Coût d'un ensemble d'appels de recherche, par fournisseur."""
+    """Coût d'un ensemble d'appels de recherche, par fournisseur.
+
+    Les clés de métadonnées du compteur de recherche (`_niveaux`, `_ecartes`,
+    …) commencent par `_` et ne désignent aucun fournisseur — les ignorer
+    évite de les facturer au tarif de repli comme un fournisseur inconnu
+    (revue Task 2, constat Q1 : un compteur `{"exa": 1, "niveaux": 2}`
+    facturait 2 appels fantômes en plus des vrais)."""
     if not appels:
         return 0
     return sum(_tarif_recherche(f) * max(0, int(n or 0))
-               for f, n in appels.items())
+               for f, n in appels.items() if not f.startswith("_"))

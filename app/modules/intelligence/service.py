@@ -559,8 +559,10 @@ def titre_depuis(question: str, longueur: int = 80) -> str:
 
 def _appels(compteur: dict[str, int]) -> int | None:
     """Nombre total d'appels de recherche, ou None si aucun (une conversation
-    triviale n'a rien cherché : un 0 la ferait passer pour mesurée à zéro)."""
-    return sum(compteur.values()) or None
+    triviale n'a rien cherché : un 0 la ferait passer pour mesurée à zéro).
+    Les clés de métadonnées (`_niveaux`, `_ecartes`, …) ne comptent pas comme
+    des appels — voir `app.shared.search.orchestrator`."""
+    return sum(v for k, v in compteur.items() if not k.startswith("_")) or None
 
 
 def _cout_recherche(compteur: dict[str, int]) -> int | None:

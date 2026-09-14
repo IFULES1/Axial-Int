@@ -82,12 +82,18 @@ def rerank_indices(query: str, documents: list[str], top_k: int) -> list[tuple[i
 def rerank_avec_etat(query: str, results: list[SearchResult], top_k: int,
                      contraintes: Contraintes | None = None,
                      compteur: dict[str, int] | None = None,
-                     ) -> tuple[list[SearchResult], bool]:
+                     ) -> tuple[list[SearchResult], bool, int]:
     """Comme `rerank`, mais indique aussi si les scores utilisés pour classer
-    (et, le cas échéant, filtrer) sont réels — la cascade à niveaux de
-    l'orchestrateur s'en sert pour savoir si « le nombre de résultats rendus »
-    peut être interprété comme « le nombre de résultats pertinents » (`reel`)
-    ou seulement comme « la taille du pool » (repli).
+    (et, le cas échéant, filtrer) sont réels, et combien de résultats sont
+    RÉELLEMENT pertinents (score ≥ seuil, garde minimale exclue) — la cascade
+    à niveaux de l'orchestrateur s'en sert pour décider d'appeler le niveau
+    suivant : `reel` dit si « le nombre de résultats rendus » peut être
+    interprété comme « le nombre de résultats pertinents » ou seulement comme
+    « la taille du pool » (repli), et `pertinents` porte ce compte (revue
+    Task 2, constat C1 : compter `len(résultats rendus)` confondait à tort
+    les `garde_minimale` résultats toujours conservés — même à score nul —
+    avec des résultats effectivement pertinents, ce qui pouvait arrêter la
+    cascade alors qu'aucune source ne franchissait le seuil).
 
     Le filtre de seuil ne s'applique que si Cohere a réellement noté les
     résultats — pas seulement si une clé est configurée (`available()` ne dit
@@ -100,9 +106,18 @@ def rerank_avec_etat(query: str, results: list[SearchResult], top_k: int,
     filtre pas non plus. Au moins `garde_minimale` résultats (les mieux
     classés) sont toujours conservés, même sous le seuil, pour ne jamais
     vider le contexte.
+
+    `compteur["_ecartes"]` (préfixe `_` : métadonnée, jamais un fournisseur
+    facturable — voir `couts.cout_recherche_micro_eur`) est ASSIGNÉ, pas
+    accumulé : l'orchestrateur reranke le pool cumulatif complet à chaque
+    niveau de la cascade et rappelle cette fonction à chaque fois avec le
+    même `compteur` ; assigner plutôt qu'additionner fait que seule la
+    dernière passe (le rerank final, sur le pool complet) compte, comme le
+    veut la revue (constat Q2) — pas la somme des écartés de chaque niveau,
+    qui recompte plusieurs fois les mêmes sources.
     """
     if not results:
-        return [], False
+        return [], False, 0
     documents = [f"{r.title}\n{r.snippet}" for r in results]
     pairs, reel = rerank_indices_avec_etat(query, documents, top_k)
     ranked = []
@@ -111,7 +126,7 @@ def rerank_avec_etat(query: str, results: list[SearchResult], top_k: int,
         ranked.append(results[idx])
 
     if not reel or all(r.score == 0.0 for r in ranked):
-        return ranked, False
+        return ranked, False, 0
 
     settings = get_settings()
     seuil = (contraintes.seuil_pertinence if contraintes is not None
@@ -122,8 +137,12 @@ def rerank_avec_etat(query: str, results: list[SearchResult], top_k: int,
 
     filtres = []
     ecartes = 0
+    pertinents = 0
     for i, r in enumerate(ranked):
-        if i < garde_minimale or r.score >= seuil:
+        est_pertinent = r.score >= seuil
+        if est_pertinent:
+            pertinents += 1
+        if i < garde_minimale or est_pertinent:
             filtres.append(r)
         else:
             ecartes += 1
@@ -132,8 +151,8 @@ def rerank_avec_etat(query: str, results: list[SearchResult], top_k: int,
         logger.info("Rerank : %d résultat(s) écarté(s) sous le seuil de pertinence %.2f",
                     ecartes, seuil)
     if compteur is not None:
-        compteur["ecartes"] = compteur.get("ecartes", 0) + ecartes
-    return filtres, True
+        compteur["_ecartes"] = ecartes
+    return filtres, True, pertinents
 
 
 def rerank(query: str, results: list[SearchResult], top_k: int,
@@ -141,10 +160,11 @@ def rerank(query: str, results: list[SearchResult], top_k: int,
           compteur: dict[str, int] | None = None) -> list[SearchResult]:
     """Reranke, puis écarte les résultats sous le seuil de pertinence.
 
-    Voir `rerank_avec_etat` pour le détail du comportement ; cette fonction
-    en jette l'indicateur `reel`, gardé par les seuls appelants qui en ont
-    besoin (la cascade à niveaux de l'orchestrateur).
+    Alias d'une ligne autour de `rerank_avec_etat`, gardé comme API publique
+    stable (et pour la suite de tests héritée de la Task 1) : aucun appelant
+    de production ne s'en sert — `orchestrator.py` appelle
+    `rerank_avec_etat` directement pour lire `reel` et `pertinents`.
     """
-    ranked, _ = rerank_avec_etat(query, results, top_k,
-                                 contraintes=contraintes, compteur=compteur)
+    ranked, _, _ = rerank_avec_etat(query, results, top_k,
+                                    contraintes=contraintes, compteur=compteur)
     return ranked

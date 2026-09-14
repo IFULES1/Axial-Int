@@ -679,7 +679,8 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
     from app.modules.billing.couts import cout_micro_eur, cout_recherche_micro_eur
 
     mesure = {
-        "appels_recherche": sum(appels_recherche.values()) or None,
+        "appels_recherche": sum(v for k, v in appels_recherche.items()
+                                if not k.startswith("_")) or None,
         "cout_recherche_micro_eur": cout_recherche_micro_eur(appels_recherche) or None,
         "tokens_entree": result.input_tokens or None,
         "tokens_sortie": result.output_tokens or None,
