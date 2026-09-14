@@ -43,3 +43,14 @@ de la Documentation (gardé ouvert).
 - Matrice sources par fonction ; revue de la stack API de septembre
   (consommation, coût par fonction, recharges) ; identifiants Google Cloud
   pour Drive ; test de la vue Comparer en prod.
+
+## Complément (14/09, après-midi)
+- Prix en euros retiré des pastilles de coût (messages, fil, rapports), même
+  pour un admin ; le coût réel reste dans Pilotage. Commit 56e3962.
+- httpx ne journalise plus les URL sortantes (la clé Gemini apparaissait dans
+  le journal systemd en paramètre de requête).
+- Bilan comptes au 14/09 : 12 comptes réels/internes, 3 utilisateurs externes
+  ayant produit (idfinance, christian@eqonx, s.gorjux), aucune carte posée,
+  aucun usage récurrent ; 43 contactés → 4 comptes créés.
+- Bugs 10 jours : aucune 500 applicative ; 7 indisponibilités Gemini + 7 Exa
+  (bascule automatique) ; 502 uniquement pendant les redémarrages de déploiement.
