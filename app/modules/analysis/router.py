@@ -99,8 +99,13 @@ def stream(payload: AnalysisRequest, user: AuthUser = Depends(get_current_user),
         elargir=payload.elargir, forcer=payload.forcer,
         cle_idempotence=x_idempotency_key,
     )
+    # Même enveloppe que les conversations : Starlette ferme un générateur
+    # ASYNC à la déconnexion du client, pas un générateur synchrone — sans
+    # elle, `stream_analysis` n'atteignait jamais son `finally`.
+    from app.modules.intelligence.router import _flux_sse
+
     return StreamingResponse(
-        generator,
+        _flux_sse(generator),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

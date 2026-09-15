@@ -1516,7 +1516,22 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
 
 
-def stream_analysis(*, db, user_id: str, is_admin: bool, query: str,
+def stream_analysis(*, db, **kwargs):
+    """Enveloppe : la session de requête est FERMÉE à la fin du flux, client
+    parti ou non. Sans ça, un flux abandonné (onglet fermé, réseau) ne rendait
+    sa connexion au pool qu'au ramasse-miettes, transaction ouverte entre-temps
+    — avec 10 rapports simultanés, c'est le pool qui s'épuise (revue du 15/09).
+    `_flux_sse` côté route garantit que `close()` est bien appelé ici."""
+    try:
+        yield from _stream_analysis_impl(db=db, **kwargs)
+    finally:
+        try:
+            db.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _stream_analysis_impl(*, db, user_id: str, is_admin: bool, query: str,
                     analysis_type: str, title: str | None = None,
                     top_k: int | None = None, elargir: bool = False,
                     forcer: bool = False, cle_idempotence: str | None = None):

@@ -59,7 +59,10 @@ def install_error_handlers(app: FastAPI) -> None:
 
         notifier_erreur(
             titre="Erreur backend non gérée",
-            route=request.url.path,
+            # Gabarit de route (« /reports/{report_id} ») et non l'URL concrète :
+            # la déduplication d'une heure porte sur la signature route + type,
+            # et un UUID différent par appel donnait un email par rapport (15/09).
+            route=getattr(request.scope.get("route"), "path", None) or request.url.path,
             methode=request.method,
             user_email=_email_utilisateur_courant(request),
             exc=exc,
