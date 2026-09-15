@@ -82,6 +82,16 @@ matrice cible (à arbitrer avec Miradie).
   récemment modifiées, 4 000 caractères par page, cache 10 min, sans filtre de
   pertinence côté Notion (c'est le rerank qui trie).
 
+## Matrice après Sources v2 (15/09)
+
+| Fonction | Web à niveaux (Perplexity + Exa, puis Tavily + Linkup) | Filtres fraîcheur / domaines / pertinence | Documents utilisateur | Base de connaissance | Notion | Base investisseurs | Pappers | Drive |
+|---|---|---|---|---|---|---|---|---|
+| Conversations | oui | oui, selon la question | oui | oui | si connecté | oui, si question de levée | non | import comme document |
+| Étude de marché, cartographie concurrentielle | oui | oui, selon le type et la question | oui | oui | si connecté | non | oui (clé à poser) | import |
+| Réglementaire, risques, techno, synthèse | oui | oui (réglementaire = domaines officiels + 365 j) | oui | oui | si connecté | non | non | import |
+| Cartographie investisseurs | oui | oui | oui | oui | si connecté | oui, en premier | non | import |
+| Agents de veille | inchangé | non | non | non | non | non | non | non |
+
 ## Points d'extension
 
 1. **Ajouter un fournisseur web** : classe dans `providers.py` (`name`,

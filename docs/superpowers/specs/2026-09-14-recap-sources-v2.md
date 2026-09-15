@@ -62,5 +62,32 @@ commerce de la catégorie « littérature stratégie ».
 - `Passage.origine` de la spec remplacé par le champ existant `Passage.source`.
 - Le script `scripts/ingest_knowledge_base.py` reste l'outil des lots en masse.
 
-## 6. Revue finale et déploiement
-(complété après la revue de branche et le déploiement)
+## 6. Revue finale et déploiement (15/09)
+
+Revue finale de branche : DÉPLOYABLE, aucun bloquant, trois points
+importants — deux corrigés avant déploiement (listage KB robuste à un Qdrant
+lent ou absent, délai client Qdrant 10 s, titre borné à 500 caractères), un
+reporté : le coût du rerank Cohere n'est pas compté alors que la cascade
+peut reranker deux fois (à ajouter aux tarifs de recherche).
+
+Déploiement : migration `0024_sources_v2` appliquée avant redémarrage,
+262 tests Sources v2 verts sur le serveur, front rebâti avec parité
+`BUILD_ID` = bundle = `/version` (1789461912), aucune erreur au journal.
+
+Incident pendant le déploiement, corrigé : la suite de tests lancée sur le
+serveur lisait le `QDRANT_URL` de Doppler et a écrit 127 points de test dans
+la base de connaissance de prod ; retirés (43 188 points, état exact
+d'avant), et `tests/conftest.py` force désormais Qdrant en mémoire pour tout
+test. Deux points orphelins de l'ancienne collection `documents` retirés au
+passage.
+
+Parcours réel (compte QA, prod) : question « préparer notre levée de fonds en
+seed : quels fonds VC cibler et quelles obligations réglementaires… » →
+réponse en 2 crédits / 9,8 k tokens, sources [1]-[12] = base investisseurs
+Axial en tête, [13]-[18] web, [19]-[20] guide France Digitale de la base de
+connaissance rendu comme un document ordinaire. Écran admin de la base vérifié
+en local (ajout par URL, échec nommé, suppression).
+
+Non vérifié en prod (compte admin nécessaire) : `GET /health/providers?reel=1`
+et l'écran Pilotage > Base de connaissance — à ouvrir par Miradie ; le premier
+listage remplit `kb_documents` à partir des 148 documents existants.
