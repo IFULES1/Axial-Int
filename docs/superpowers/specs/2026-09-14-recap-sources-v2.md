@@ -91,3 +91,27 @@ en local (ajout par URL, échec nommé, suppression).
 Non vérifié en prod (compte admin nécessaire) : `GET /health/providers?reel=1`
 et l'écran Pilotage > Base de connaissance — à ouvrir par Miradie ; le premier
 listage remplit `kb_documents` à partir des 148 documents existants.
+
+## 7. Mise en service de Perplexity et Pappers (15/09 soir)
+
+Clés posées par Miradie dans Doppler. Contrôle réel (`providers_summary(reel=True)`)
+vert pour tous les fournisseurs. Correctifs faits en conditions réelles :
+- **Perplexity** : la sonde de santé cherchait « Axial Intelligence test »
+  (aucun résultat) → requête réaliste ; six angles en parallèle donnaient des
+  `429` → deux appels simultanés au plus et second essai après 2 s.
+- **Pappers** : l'extraction des noms par le modèle tier chat rendait du bruit
+  (« Isère / Bourg- ») et ratait les éditeurs cités dans la question → noms
+  entre parenthèses lus directement dans la question, réponse du modèle
+  demandée en JSON et tolérée tronquée, bruit rejeté ; homonymes départagés
+  (éditeur ou société de conseil informatique avant SCI ou holding, puis
+  effectif) ; libellé d'effectif sans doublon ; **fiches conservées après le
+  classement** (le reranker les notait 0,13-0,25 face à une question de
+  marché : elles étaient toujours coupées — écart assumé avec la spec §3).
+- **Juge de couverture** : « part » (réponse tronquée) était lu comme
+  illisible → préfixes acceptés ; conséquence : le bandeau « Sources
+  partielles » s'affiche désormais quand le juge répond partiel, ce qui
+  arrive sur des questions bien couvertes (45 sources) — wording et seuil à
+  revoir avec Miradie.
+- Rapport de validation : étude de marché « logiciels de notes de frais », 45
+  sources (40 web + 5 Pappers), 40 crédits, 78 k tokens, coût de recherche
+  0,15 €.

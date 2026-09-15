@@ -31,3 +31,11 @@ puis rebuild du front). Vérifier ensuite avec `GET /health/providers?reel=1` (a
 - Coût du rerank Cohere non compté (cascade). Bloc investisseurs seulement au
   message qui parle de levée. Prompts de rapport à améliorer (sujet ouvert).
 - Next steps consommation / recharge : voir le message du 15/09.
+
+## Complément 15/09 soir — Perplexity et Pappers en service
+Clés posées ; tous fournisseurs verts au contrôle réel. Correctifs : sonde
+réaliste, Perplexity limité à 2 appels simultanés + retry 429, extraction des
+noms déterministe + JSON, homonymes Pappers, fiches gardées après classement,
+verdict de couverture par préfixe (→ bandeau « Sources partielles » plus
+fréquent : à revoir). Validation : étude de marché 45 sources dont 5 Pappers.
+Démo le 16/09 : compte QA prod `qa-cv2-1109@axial-qa.fr`, 80 crédits restants.
