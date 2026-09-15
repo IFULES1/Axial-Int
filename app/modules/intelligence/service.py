@@ -496,6 +496,12 @@ def _profil_pour_investisseurs(db: Session, user_id: str) -> dict:
 
 AGENT_MESSAGE_ACTION = "agent_message"
 
+# Délai maximal accordé à la base investisseurs en conversation (spec §4,
+# review Q-2) : `map_for_profile` peut faire plusieurs allers-retours LLM
+# (secteur, stade, élargissement) — un nom de module pour que les tests
+# puissent le raccourcir sans attendre la vraie durée.
+TIMEOUT_INVESTISSEURS_CONVERSATION_S = 8
+
 
 _LONG_ANSWER_SIGNALS = (
     "analyse", "détail", "approfondi", "compare", "comparaison", "stratégie",
@@ -980,16 +986,21 @@ def _rechercher(db: Session, user_id: str, content: str,
     # Spec §1 : les conversations passent aussi des contraintes (fraîcheur/
     # domaines dérivés des mots de la question) — `analysis_type=None` = pas de
     # filtre par type de rapport, seuls les mots de la question s'appliquent.
-    contraintes = contraintes_pour(requete, None)
+    # Sur `content` (la question BRUTE de ce tour), pas `requete` : `requete`
+    # est préfixée du titre du fil dès le deuxième message (review Q-5), et un
+    # fil intitulé « Actualité réglementaire RGPD » imposerait sinon sa
+    # fraîcheur de 90 jours à toutes les questions suivantes du même fil,
+    # même sans rapport avec l'actualité ou la réglementation.
+    contraintes = contraintes_pour(content, None)
 
-    investor_mapping = None
+    investor_context, investor_citations = "", []
     if ctx.trivial:
         doc_passages, web_results = [], []
     else:
         # RAG, recherche web et (le cas échéant) base investisseurs en
         # PARALLÈLE (elles ne partagent pas la session DB) — la base
         # investisseurs ne doit ajouter aucune latence au tour.
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
 
         profile = _profil_pour_investisseurs(db, user_id)
         # Spec §4 : la base investisseurs répond aussi en conversation quand la
@@ -1001,7 +1012,13 @@ def _rechercher(db: Session, user_id: str, content: str,
             and (profile.get("sector") or profile.get("funding_stage"))
         )
 
-        with ThreadPoolExecutor(max_workers=3 if veut_investisseurs else 2) as ex:
+        # PAS de `with` : `ThreadPoolExecutor.__exit__` appelle `shutdown(wait=True)`
+        # et attendrait la fin de `f_inv` même après que son `.result(timeout=8)`
+        # a déjà abandonné — ce qui annulerait le délai. `shutdown(wait=False)`
+        # dans le `finally` laisse un `map_for_profile` en retard finir dans son
+        # coin (sa mémoire, pas la session DB) sans retenir ce tour.
+        ex = ThreadPoolExecutor(max_workers=3 if veut_investisseurs else 2)
+        try:
             f_docs = ex.submit(_retrieve_context, requete, user_id)
             f_web = ex.submit(web_search.search, requete, 6,
                               contraintes=contraintes, compteur=appels_recherche)
@@ -1014,12 +1031,31 @@ def _rechercher(db: Session, user_id: str, content: str,
                 web_results = []
             _, doc_passages = f_docs.result()
             if f_inv is not None:
+                # `map_for_profile` peut faire plusieurs allers-retours LLM
+                # (secteur, stade, élargissement) : un délai borne le tour de
+                # conversation au lieu de le suspendre sur un aller-retour
+                # modèle (review Q-2). `citations()`/`format_context()` dans
+                # le MÊME `try` (review Q-6) : un mapping partiel (`KeyError`
+                # sur une clé de fiche manquante) ne doit pas non plus
+                # remonter en 500 — c'est un enrichissement, jamais un bloqueur.
                 try:
-                    investor_mapping = f_inv.result()
+                    mapping = f_inv.result(
+                        timeout=TIMEOUT_INVESTISSEURS_CONVERSATION_S)
+                    investor_citations = investors.citations(mapping)
+                    if investor_citations:
+                        investor_context = investors.format_context(mapping)
+                    else:
+                        logger.warning("Cartographie investisseurs vide pour "
+                                       "cette conversation")
+                except _FutureTimeout:
+                    logger.warning("Base investisseurs indisponible en "
+                                   "conversation : délai de %s s dépassé",
+                                   TIMEOUT_INVESTISSEURS_CONVERSATION_S)
                 except Exception as e:  # noqa: BLE001 — échec silencieux (spec §4)
                     logger.warning("Base investisseurs indisponible en "
                                    "conversation : %s", e)
-                    investor_mapping = None
+        finally:
+            ex.shutdown(wait=False)
 
     # Espace Notion de l'utilisateur : ses pages rejoignent le même pool que le
     # web et ses documents, donc elles sont rerankées et citées comme le reste.
@@ -1037,18 +1073,12 @@ def _rechercher(db: Session, user_id: str, content: str,
     # pool (web/RAG/Notion) reprend la numérotation après elle. Mapping vide ou
     # en échec → rien, jamais de blocage ni d'erreur utilisateur, pas de débit
     # supplémentaire (ce n'est qu'un enrichissement de la conversation).
-    investor_context, investor_citations = "", []
-    if investor_mapping is not None:
-        investor_citations = investors.citations(investor_mapping)
-        if investor_citations:
-            investor_context = investors.format_context(investor_mapping)
-        else:
-            logger.warning("Cartographie investisseurs vide pour cette conversation")
-
-    # Rerank web + internal together → one relevance-ordered context + citations.
+    # Garde sur `investor_citations`, pas `investor_context` (review Q-7) :
+    # c'est `investor_citations` qui fixe `start_at`, les deux ne doivent
+    # jamais pouvoir diverger.
     combined_context, citations = _assemble_sources(
         requete, web_results, doc_passages, start_at=len(investor_citations) + 1)
-    if investor_context:
+    if investor_citations:
         combined_context = investor_context + (
             "\n\n" + combined_context if combined_context else "")
         citations = investor_citations + citations

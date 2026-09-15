@@ -2300,13 +2300,23 @@ from app.modules.investors import service as investors_service
     "Quels investisseurs cibler en seed ?",
     "On cherche un fonds VC generaliste",
     "Qui contacter côté business angels ?",
-    "Peux-tu m'aider sur le financement de l'entreprise ?",
+    # `financement` seulement en combinaison (review Q-1, décision Tour 1) —
+    # exactement les deux formes citées par le contrôleur.
+    "Le financement de la startup est notre priorité",
+    "On discute du financement par des fonds étrangers",
     "What's a fair valuation for our term sheet?",
     "We are fundraising a Series B round",
     "Looking for venture investors",
-    "What ticket size should we expect?",
     "On doit émettre des BSA pour ce tour",
     "How to structure our seed round?",
+    # Faux négatifs testés explicitement par le contrôleur (Tour 1).
+    "comment lever 2 M€ en seed ?",
+    "quels VC cibler ?",
+    "préparer notre série A",
+    "how much to raise for a Series A",
+    # `ticket`/`valorisation` seulement en forme composée, jamais nus.
+    "Quel est le bon ticket d'investissement pour ce tour ?",
+    "On vise une valorisation post-money de 20M",
 ])
 def test_levee_detecte_les_formulations_fr_en(texte):
     assert investors_service.question_de_levee(texte) is True
@@ -2318,6 +2328,16 @@ def test_levee_detecte_les_formulations_fr_en(texte):
     "Comment améliorer notre taux de conversion produit ?",
     "",
     None,
+    # Tour de correction 1 (review Q-1) : faux positifs constatés sur la
+    # première version, vocabulaire courant sans rapport avec le financement.
+    "Notre marge est élevée sur ce segment",
+    "Comment relever ce défi organisationnel ?",
+    "Des changements profonds dans notre organisation",
+    "Nous voulons céder un fonds de commerce",
+    "Quel est notre ticket moyen sur le e-commerce ?",
+    "Améliorer la valorisation de notre marque employeur ?",
+    "Peut-on prélever un échantillon ?",
+    "Faut-il enlever cette fonctionnalité ?",
 ])
 def test_levee_ignore_les_questions_hors_sujet(texte):
     assert investors_service.question_de_levee(texte) is False
@@ -2447,16 +2467,25 @@ def _profil(db, *, sector=None, funding_stage=None):
     return uid
 
 
-def _ctx_conversation(*, user_id: str, trivial: bool = False):
+class _ConvFactice:
+    """Objet minimal portant `.title` — tout ce que `requete_de_recherche` lit
+    sur `ctx.conv`."""
+    def __init__(self, title):
+        self.title = title
+
+
+def _ctx_conversation(*, user_id: str, trivial: bool = False, titre: str | None = None,
+                      history=None):
     from app.modules.intelligence import service as intel
 
-    return intel._Contexte(conv=None, agent_key="axial_conseil", redirect_note=None,
-                           persona=None, conversation_libre=True, company_context="",
-                           attached_context="", history=[], trivial=trivial,
+    return intel._Contexte(conv=_ConvFactice(titre), agent_key="axial_conseil",
+                           redirect_note=None, persona=None, conversation_libre=True,
+                           company_context="", attached_context="",
+                           history=history or [], trivial=trivial,
                            user_id=user_id, conv_id=None, user_msg_id=None)
 
 
-def _neutraliser_reseau(monkeypatch, *, web_results=None):
+def _neutraliser_reseau(monkeypatch, *, web_results=None, doc_passages=None):
     from app.modules.integrations import notion_context
     from app.modules.intelligence import service as intel
     from app.shared import search as web_search
@@ -2468,7 +2497,8 @@ def _neutraliser_reseau(monkeypatch, *, web_results=None):
         return list(web_results or [])
 
     monkeypatch.setattr(web_search, "search", _search)
-    monkeypatch.setattr(intel, "_retrieve_context", lambda *a, **k: ("", []))
+    monkeypatch.setattr(intel, "_retrieve_context",
+                        lambda *a, **k: ("", list(doc_passages or [])))
     monkeypatch.setattr(notion_context, "passages_pour", lambda *a, **k: [])
     return appels_web
 
@@ -2511,6 +2541,71 @@ def test_conversation_investisseurs_numerotees_en_tete(monkeypatch):
     assert "Fonds Alpha" in rech.combined_context.split("[2]")[0]
 
 
+def test_conversation_investisseurs_numerotation_ne_decale_pas_off_by_one(monkeypatch):
+    """Tour de correction 1 (review Q-3) : le cas à une seule citation
+    investisseur ne peut pas attraper un off-by-one (`len(...)` vs
+    `len(...)+1`, ou un oubli des `networks`). Ici : 3 fonds + 2 réseaux (5
+    citations investisseurs) + 2 web + 1 RAG (3 citations restantes) = 8 au
+    total. `[6]` doit être la PREMIÈRE source non-investisseur, et
+    `citations[5]` (index 5, la 6ᵉ) doit lui correspondre."""
+    from app.modules.rag.vector_store import Passage
+    from app.modules.intelligence import service as intel
+
+    engine = _base_profils()
+    with _Session(engine) as db:
+        uid = _profil(db, sector="Fintech", funding_stage="Seed")
+
+        web = [
+            SearchResult(title="Article marché A", url="https://a.fr/x",
+                        snippet="Contexte marché A.", provider="exa"),
+            SearchResult(title="Article marché B", url="https://b.fr/y",
+                        snippet="Contexte marché B.", provider="exa"),
+        ]
+        rag = [Passage(text="Note interne financement", score=0.9, doc_id="d1",
+                       source="user", meta={"filename": "note.pdf"})]
+        _neutraliser_reseau(monkeypatch, web_results=web, doc_passages=rag)
+
+        mapping = {
+            "funds": [
+                {"nom": f"Fonds {n}", "site_web": f"https://{n.lower()}.vc",
+                 "score": 0.9, "n_vehicules": 1, "zone": "France",
+                 "secteurs": ["Fintech"], "stades": ["Seed"]}
+                for n in ("Alpha", "Beta", "Gamma")
+            ],
+            "networks": [
+                {"nom": f"Réseau {n}", "nature": "business angels", "score": 0.8,
+                 "secteurs": ["Fintech"], "stades": ["Seed"]}
+                for n in ("Un", "Deux")
+            ],
+            "note": None,
+        }
+        monkeypatch.setattr(investors_service, "map_for_profile",
+                            lambda *a, **k: mapping)
+
+        ctx = _ctx_conversation(user_id=uid)
+        rech = intel._rechercher(db, uid, "Comment lever des fonds en seed ?", ctx)
+
+    assert len(rech.citations) == 8
+    # [1]..[5] = investisseurs (3 fonds + 2 réseaux), dans l'ordre du mapping.
+    for i, titre in enumerate(["Fonds Alpha", "Fonds Beta", "Fonds Gamma",
+                               "Réseau Un", "Réseau Deux"]):
+        assert rech.citations[i]["source"] == "investisseurs"
+        assert rech.citations[i]["title"] == titre
+    # [6] = la PREMIÈRE source non-investisseur — citations[5], index 5.
+    assert rech.citations[5]["source"] != "investisseurs"
+    assert rech.citations[6]["source"] != "investisseurs"
+    assert rech.citations[7]["source"] != "investisseurs"
+    # Numérotation strictement continue 1..8 dans le contexte, sans trou ni
+    # doublon — le seul test qui verrouille réellement le contrat de la spec §4.
+    numeros = re.findall(r"^\[(\d+)\]", rech.combined_context, re.M)
+    assert numeros == [str(n) for n in range(1, 9)]
+    # Le bloc « [6] » (première source web) suit immédiatement le dernier
+    # bloc investisseur : aucun numéro investisseur ne réapparaît après lui.
+    bloc_apres_investisseurs = rech.combined_context.split("[6]", 1)[1]
+    assert "Fonds" not in bloc_apres_investisseurs
+    assert "Réseau" not in bloc_apres_investisseurs
+
+
 def test_conversation_investisseurs_propage_les_contraintes(monkeypatch):
     """`_rechercher` passe `contraintes_pour(question, None)` à `web_search.search`
     (spec §1) — pas de filtre de type de rapport, seulement les mots de la
@@ -2530,6 +2625,35 @@ def test_conversation_investisseurs_propage_les_contraintes(monkeypatch):
     assert isinstance(c, Contraintes)
     # « RGPD » + « cette semaine » : la règle la plus restrictive gagne (90 j).
     assert c.fraicheur_jours == 90
+
+
+def test_conversation_investisseurs_contraintes_sur_la_question_brute(monkeypatch):
+    """Tour de correction 1 (review Q-5) : les contraintes viennent de
+    `content` (la question BRUTE de ce tour), pas de `requete` (préfixée du
+    titre du fil dès le deuxième message) — sinon un fil intitulé « Actualité
+    réglementaire RGPD » imposerait sa fraîcheur de 90 j à toutes les
+    questions suivantes, même sans rapport."""
+    from app.modules.intelligence import service as intel
+    from app.shared.search.contraintes import Contraintes
+
+    engine = _base_profils()
+    with _Session(engine) as db:
+        uid = _profil(db, sector=None, funding_stage=None)
+        appels_web = _neutraliser_reseau(monkeypatch)
+        # Fil avec historique (`requete` sera préfixée du titre) et une
+        # question SUIVANTE sans rapport avec l'actualité/la réglementation.
+        ctx = _ctx_conversation(user_id=uid, titre="Actualité réglementaire RGPD",
+                                history=[{"role": "user", "content": "1ère question"}])
+        intel._rechercher(db, uid, "Comment structurer notre équipe ?", ctx)
+
+    assert len(appels_web) == 1
+    # La requête envoyée au web PORTE le titre (comportement inchangé)…
+    assert "Actualité réglementaire RGPD" in appels_web[0]["query"]
+    # … mais les CONTRAINTES ne doivent pas hériter de sa fraîcheur : la
+    # question de ce tour, seule, ne contient aucun mot déclencheur.
+    c = appels_web[0]["contraintes"]
+    assert isinstance(c, Contraintes)
+    assert c.fraicheur_jours is None
 
 
 def test_conversation_investisseurs_ignoree_si_pas_de_levee(monkeypatch):
@@ -2594,7 +2718,49 @@ def test_conversation_investisseurs_echec_silencieux(monkeypatch, caplog):
             rech = intel._rechercher(db, uid, "On veut lever des fonds en seed", ctx)
 
     assert not any(c.get("source") == "investisseurs" for c in rech.citations)
-    assert "indisponible" in caplog.text.lower() or "investisseurs" in caplog.text.lower()
+    # Assertion stricte (review Q-9) : le logger ET le message précis, pas une
+    # disjonction sur un mot qui apparaît dans d'autres avertissements du module.
+    messages = [r.getMessage() for r in caplog.records if r.name == "axial.intelligence"]
+    assert any("Base investisseurs indisponible en conversation" in m and
+              "base investisseurs indisponible" in m  # le texte de l'exception
+              for m in messages), messages
+
+
+def test_conversation_investisseurs_delai_depasse_reste_silencieux(monkeypatch, caplog):
+    """Tour de correction 1 (review Q-2) : `map_for_profile` qui dépasse le
+    délai (plusieurs allers-retours LLM possibles) ne bloque pas le tour —
+    `f_inv.result(timeout=...)` abandonne, journal seulement, pas
+    d'investisseurs. Le délai est raccourci ici pour ne pas ralentir la suite."""
+    import time as _time
+
+    from app.modules.intelligence import service as intel
+
+    monkeypatch.setattr(intel, "TIMEOUT_INVESTISSEURS_CONVERSATION_S", 0.05)
+
+    engine = _base_profils()
+    with _Session(engine) as db:
+        uid = _profil(db, sector="Fintech", funding_stage="Seed")
+        _neutraliser_reseau(monkeypatch)
+
+        def _lent(profile, *, limit):
+            _time.sleep(0.3)  # dépasse largement le délai raccourci
+            return {"funds": [], "networks": [], "note": None}
+
+        monkeypatch.setattr(investors_service, "map_for_profile", _lent)
+
+        ctx = _ctx_conversation(user_id=uid)
+        debut = _time.monotonic()
+        with caplog.at_level("WARNING", logger="axial.intelligence"):
+            rech = intel._rechercher(db, uid, "On veut lever des fonds en seed", ctx)
+        duree = _time.monotonic() - debut
+
+    # Le tour n'attend PAS la fin de `map_for_profile` (pas de `with` qui
+    # `shutdown(wait=True)` sur le thread encore en cours) : nettement sous
+    # les 0.3 s que le mapping simulé met à répondre.
+    assert duree < 0.25
+    assert not any(c.get("source") == "investisseurs" for c in rech.citations)
+    messages = [r.getMessage() for r in caplog.records if r.name == "axial.intelligence"]
+    assert any("délai" in m and "dépassé" in m for m in messages), messages
 
 
 def test_conversation_investisseurs_mapping_vide_reste_silencieux(monkeypatch):

@@ -28,10 +28,41 @@ logger = logging.getLogger("axial.investors")
 # une levée de fonds, des investisseurs, ou du financement — insensible à la
 # casse. Fonction pure, testée, sans appel modèle : la base investisseurs ne
 # doit pas dépendre d'un jugement LLM pour savoir si elle doit répondre.
+#
+# Tour de correction 1 (review) : la première version n'ancrait pas ses
+# alternances (`lev(er|ée)`, `fonds`, `ticket`, `valorisation` nus) et
+# déclenchait sur du vocabulaire courant sans rapport — « marge élevée »,
+# « relever », « changements profonds », « prélever », « enlever », « fonds
+# de commerce », « ticket moyen », « valorisation de la marque ». Chaque
+# alternance est maintenant bornée par `\b` et les mots trop génériques
+# (`fonds`, `ticket`, `valorisation`) n'existent qu'en forme composée
+# (« fonds d'investissement », « ticket d'investissement », « valorisation
+# pré-money »). `financement` de même : seulement en combinaison
+# (« financement de la startup », « financement par des fonds »), jamais nu.
 _LEVEE_PATTERN = re.compile(
-    r"lev(er|ée)|investisseur|fonds|\bvc\b|venture|business angel|seed|"
-    r"s[ée]rie\s*[abc]\b|series\s*[abc]\b|financement|fundrais|ticket|"
-    r"valorisation|term\s*sheet|\bbsa\b",
+    r"\blever des fonds\b"
+    r"|\blevée(s)? de fonds\b"
+    r"|\blevée\b"
+    r"|\blève\b"
+    r"|\bfundrais\w*"
+    r"|\binvestisseur\w*"
+    r"|\bbusiness angel\w*"
+    r"|\bVC\b"
+    r"|\bventure\b"
+    r"|\bseed\b"
+    r"|\bsérie [ABC]\b"
+    r"|\bseries [ABC]\b"
+    r"|\btour de table\b"
+    r"|\bterm sheet\b"
+    r"|\bBSA\b"
+    r"|\bvalorisation pré-?money\b"
+    r"|\bpost-?money\b"
+    r"|\bticket d.investissement\b"
+    r"|\bfonds d.investissement\b"
+    r"|\bfonds VC\b"
+    r"|\bcapital-?risque\b"
+    r"|\bfinancement (?:de (?:la |notre |cette )?)?(?:startup|entreprise|soci[ée]t[ée])\b"
+    r"|\bfinancement par (?:des |les )?fonds\b",
     re.IGNORECASE,
 )
 
