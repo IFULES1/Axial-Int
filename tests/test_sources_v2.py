@@ -4090,18 +4090,30 @@ def test_drive_export_google_doc_devient_txt(monkeypatch):
     assert capture[0]["headers"]["Authorization"] == "Bearer TOKEN"
 
 
-def test_drive_export_sheet_devient_csv():
+@pytest.mark.parametrize("mime_google,export_mime,suffixe", [
+    ("application/vnd.google-apps.spreadsheet", "text/csv", ".csv"),
+    ("application/vnd.google-apps.presentation", "application/pdf", ".pdf"),
+])
+def test_drive_export_sheet_et_slides_passent_par_telecharger_drive(
+        monkeypatch, mime_google, export_mime, suffixe):
+    """Revue Task 7, bloquant qualité 3 : la constante `GOOGLE_DOC_EXPORTS`
+    seule ne prouve rien sur `telecharger_drive` — il faut exercer l'URL
+    `/export`, le suffixe du nom et le mime de sortie pour Sheets et Slides
+    comme c'est déjà fait pour Docs."""
     from app.modules.integrations import service as integrations
 
-    assert integrations.GOOGLE_DOC_EXPORTS["application/vnd.google-apps.spreadsheet"] == (
-        "text/csv", ".csv")
+    monkeypatch.setattr(integrations, "jeton_actif", lambda db, uid, provider: "TOKEN")
+    capture: list[dict] = []
+    _drive_stub_stream(monkeypatch, morceaux=(b"contenu",), capture=capture)
 
+    nom, data, mime = integrations.telecharger_drive(
+        None, str(uuid.uuid4()), "fid", "Rapport", mime_google)
 
-def test_drive_export_slides_devient_pdf():
-    from app.modules.integrations import service as integrations
-
-    assert integrations.GOOGLE_DOC_EXPORTS["application/vnd.google-apps.presentation"] == (
-        "application/pdf", ".pdf")
+    assert nom == f"Rapport{suffixe}"
+    assert data == b"contenu"
+    assert mime == export_mime
+    assert capture[0]["url"] == f"{integrations.DRIVE_API}/files/fid/export"
+    assert capture[0]["params"] == {"mimeType": export_mime}
 
 
 def test_drive_binaire_garde_le_nom_d_origine(monkeypatch):
@@ -4158,6 +4170,107 @@ def test_drive_trop_volumineux_coupe_le_flux(monkeypatch):
                                        "Trop gros.pdf", "application/pdf")
     assert e.value.code == "fichier_trop_volumineux"
     assert e.value.status_code == 413
+
+
+def test_drive_nom_trop_long_est_tronque(monkeypatch):
+    """Revue Task 7, bloquant conformité 2 : `Document.filename` est
+    `String(512)` — un nom non borné avant l'ajout d'un suffixe d'export
+    ferait échouer l'insertion Postgres (`DataError` non nommée, 500 brut)
+    plutôt que produire un document. `_nettoyer_nom` borne à 200."""
+    from app.modules.integrations import service as integrations
+
+    monkeypatch.setattr(integrations, "jeton_actif", lambda db, uid, provider: "TOKEN")
+    _drive_stub_stream(monkeypatch, morceaux=(b"contenu",))
+
+    nom_long = "a" * 600
+    nom, data, mime = integrations.telecharger_drive(
+        None, str(uuid.uuid4()), "fid", nom_long, "application/pdf")
+
+    assert len(nom) == integrations._NOM_LONGUEUR_MAX
+    assert nom == "a" * integrations._NOM_LONGUEUR_MAX
+
+
+def test_drive_nom_nettoye_des_separateurs_et_caracteres_de_controle(monkeypatch):
+    from app.modules.integrations import service as integrations
+
+    monkeypatch.setattr(integrations, "jeton_actif", lambda db, uid, provider: "TOKEN")
+    _drive_stub_stream(monkeypatch, morceaux=(b"contenu",))
+
+    nom, _, _ = integrations.telecharger_drive(
+        None, str(uuid.uuid4()), "fid", "../../etc/passwd\x00\x1b.pdf", "application/pdf")
+
+    assert "/" not in nom
+    assert "\x00" not in nom and "\x1b" not in nom
+
+
+def test_drive_nom_vide_apres_nettoyage_est_inaccessible(monkeypatch):
+    from app.modules.integrations import service as integrations
+
+    monkeypatch.setattr(integrations, "jeton_actif", lambda db, uid, provider: "TOKEN")
+    with pytest.raises(AppError) as e:
+        integrations.telecharger_drive(None, str(uuid.uuid4()), "fid",
+                                       "\x00\x01\x02", "application/pdf")
+    assert e.value.code == "drive_fichier_inaccessible"
+
+
+def test_drive_mime_type_borne_a_128(monkeypatch):
+    from app.modules.integrations import service as integrations
+
+    monkeypatch.setattr(integrations, "jeton_actif", lambda db, uid, provider: "TOKEN")
+    _drive_stub_stream(monkeypatch, morceaux=(b"contenu",))
+
+    _, _, mime = integrations.telecharger_drive(
+        None, str(uuid.uuid4()), "fid", "fichier.bin", "x" * 500)
+    assert len(mime) == integrations._MIME_LONGUEUR_MAX
+
+
+def test_drive_route_nom_de_600_caracteres_cree_le_document_tronque(monkeypatch):
+    """Bout en bout via la route (contrainte du tour de correction) : un
+    `name` de 600 caractères ne doit jamais produire un 500, seulement un
+    document créé avec un nom tronqué."""
+    import datetime as _dt
+
+    from fastapi.testclient import TestClient
+
+    from app.db import get_db
+    from app.main import app as _app
+    from app.modules.auth.schemas import AuthUser
+    from app.modules.auth.security import get_current_user
+    from app.modules.integrations import service as integrations
+
+    user_id = str(uuid.uuid4())
+    monkeypatch.setattr(integrations, "jeton_actif", lambda db, uid, provider: "TOKEN")
+    _drive_stub_stream(monkeypatch, morceaux=(b"contenu",))
+
+    capture: dict = {}
+
+    class _DocStub:
+        id = uuid.uuid4()
+        filename = ""
+        mime_type = "application/pdf"
+        size_bytes = 7
+        chunk_count = 1
+        created_at = _dt.datetime.now(_dt.timezone.utc)
+
+    def _ingest_stub(db, *, user_id, filename, data, mime_type=None):
+        capture.update(filename=filename)
+        _DocStub.filename = filename
+        return _DocStub()
+
+    monkeypatch.setattr("app.modules.documents.service.ingest", _ingest_stub)
+
+    _app.dependency_overrides[get_current_user] = lambda: AuthUser(
+        id=user_id, email="u@axial-ia.fr", is_admin=False)
+    _app.dependency_overrides[get_db] = lambda: iter([None])
+    client = TestClient(_app)
+    try:
+        r = client.post("/integrations/google/importer",
+                        json={"file_id": "abc", "name": "b" * 600,
+                              "mime_type": "application/pdf"})
+        assert r.status_code == 200, r.text
+        assert len(capture["filename"]) <= 200
+    finally:
+        _app.dependency_overrides.clear()
 
 
 def test_drive_etat_expose_selecteur_selon_client_id(monkeypatch):

@@ -14,6 +14,7 @@ import {
 import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axImporterDepuisDrive, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument, axKbLister, axKbAjouterFichier, axKbAjouterUrl, axKbSupprimer } from "./bridge";
 import { parserMarkdown } from "./markdown";
 import { creerVeilleVersion, lireVersionServie } from "./version";
+import { chargerGooglePicker, ouvrirPickerDrive } from "./drive";
 
 
 /* data.js */
@@ -671,7 +672,9 @@ const STRINGS = {
     'err.drive_non_connecte.titre': 'Google Drive non connecté',
     'err.drive_non_connecte.detail': 'Connectez Google Drive dans Paramètres > Connexions pour importer depuis Drive.',
     'err.drive_inaccessible.titre': 'Fichier Drive inaccessible',
-    'err.drive_inaccessible.detail': "Ce fichier n'a pas pu être lu sur Google Drive — vérifiez qu'il existe toujours et réessayez.",
+    'err.drive_inaccessible.detail': "Ce fichier n'a pas pu être lu sur Google Drive — vérifiez qu'il existe toujours, que le compte Google connecté à Axial est bien celui qui le possède, puis réessayez.",
+    'err.drive_autorisation_refusee.titre': 'Autorisation Google refusée',
+    'err.drive_autorisation_refusee.detail': "L'accès à votre Google Drive n'a pas été autorisé (fenêtre fermée ou bloquée par le navigateur) — réessayez, et autorisez la fenêtre de connexion Google si votre navigateur l'a bloquée.",
   },
   en: {
     'common.continue': 'Continue',
@@ -1138,7 +1141,9 @@ const STRINGS = {
     'err.drive_non_connecte.titre': 'Google Drive not connected',
     'err.drive_non_connecte.detail': 'Connect Google Drive in Settings > Connections to import from Drive.',
     'err.drive_inaccessible.titre': 'Drive file unreachable',
-    'err.drive_inaccessible.detail': 'This file could not be read from Google Drive — check that it still exists and try again.',
+    'err.drive_inaccessible.detail': 'This file could not be read from Google Drive — check that it still exists, that the Google account connected to Axial owns it, and try again.',
+    'err.drive_autorisation_refusee.titre': 'Google authorization denied',
+    'err.drive_autorisation_refusee.detail': "Access to your Google Drive was not granted (window closed or blocked by the browser) — try again, and allow the Google sign-in window if your browser blocked it.",
   },
 };
 
@@ -2989,10 +2994,14 @@ function decrireErreur(e, t) {
     return { titre: t(`${prefixe}.titre`), detail: t(`${prefixe}.detail`), action };
   }
   // Import depuis Google Drive (Sources v2 §6, task-7-report.md) : erreurs
-  // nommées rendues par POST /integrations/google/importer.
+  // nommées rendues par POST /integrations/google/importer, plus
+  // `drive_autorisation_refusee` posé côté navigateur par
+  // `obtenirJetonPickerDrive` (drive.js) — jeton refusé, popup bloquée ou
+  // fenêtre de consentement fermée (revue Task 7, tour 1).
   const CODES_DRIVE = {
     google_non_connecte: ['err.drive_non_connecte', null],
     drive_fichier_inaccessible: ['err.drive_inaccessible', null],
+    drive_autorisation_refusee: ['err.drive_autorisation_refusee', null],
   };
   if (CODES_DRIVE[code]) {
     const [prefixe, action] = CODES_DRIVE[code];
@@ -6976,94 +6985,6 @@ window.AgentSession = AgentSession;
 
 
 /* =================================================================
-   Google Picker (Sources v2 §6) — importer des fichiers Drive comme
-   documents Axial. Le Picker EXIGE un jeton OAuth côté NAVIGATEUR (c'est
-   Google qui l'impose, indépendant du jeton serveur géré par
-   `integrations.jeton_actif`) : `google.accounts.oauth2.initTokenClient`
-   en obtient un, scope `drive.file`, jamais persisté ni envoyé au backend —
-   seuls `file_id`/`name`/`mime_type` partent vers `axImporterDepuisDrive`,
-   qui retélécharge côté serveur avec le jeton, lui, stocké.
-   ================================================================= */
-const GOOGLE_PICKER_SCOPE = 'https://www.googleapis.com/auth/drive.file';
-// Formats acceptés par `documents.ingest` (PDF/DOCX/XLSX/CSV/TXT/MD) + les
-// trois types Google natifs, exportés côté serveur (`telecharger_drive`).
-const GOOGLE_PICKER_MIME_TYPES = [
-  'application/pdf',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'text/csv',
-  'text/plain',
-  'text/markdown',
-  'application/vnd.google-apps.document',
-  'application/vnd.google-apps.spreadsheet',
-  'application/vnd.google-apps.presentation',
-].join(',');
-
-let _googlePickerChargement = null;
-/** Charge `api.js` (Picker) et `gsi/client` (jeton OAuth navigateur) à la
- * demande, une seule fois : la promesse est mémorisée pour tout appel
- * suivant, y compris un premier appel concurrent. */
-function chargerGooglePicker() {
-  if (_googlePickerChargement) return _googlePickerChargement;
-  const chargerScript = (src) => new Promise((res, rej) => {
-    const s = document.createElement('script');
-    s.src = src; s.async = true; s.defer = true;
-    s.onload = res; s.onerror = () => rej(new Error(`Chargement de ${src} impossible`));
-    document.head.appendChild(s);
-  });
-  _googlePickerChargement = Promise.all([
-    chargerScript('https://apis.google.com/js/api.js')
-      .then(() => new Promise((res) => window.gapi.load('picker', res))),
-    chargerScript('https://accounts.google.com/gsi/client'),
-  ]).catch((e) => { _googlePickerChargement = null; throw e; });
-  return _googlePickerChargement;
-}
-
-function obtenirJetonPickerDrive(clientId) {
-  return new Promise((resolve, reject) => {
-    try {
-      const client = window.google.accounts.oauth2.initTokenClient({
-        client_id: clientId,
-        scope: GOOGLE_PICKER_SCOPE,
-        callback: (reponse) => {
-          if (reponse && reponse.access_token) resolve(reponse.access_token);
-          else reject(new Error('Autorisation Google refusée'));
-        },
-      });
-      client.requestAccessToken();
-    } catch (e) { reject(e); }
-  });
-}
-
-/** Ouvre le sélecteur Drive ; renvoie les fichiers choisis
- * (`[{id, name, mimeType}]`), ou `[]` si l'utilisateur annule. */
-async function ouvrirPickerDrive(apiKey, clientId) {
-  await chargerGooglePicker();
-  const jeton = await obtenirJetonPickerDrive(clientId);
-  return new Promise((resolve, reject) => {
-    try {
-      const vue = new window.google.picker.DocsView()
-        .setIncludeFolders(false)
-        .setMimeTypes(GOOGLE_PICKER_MIME_TYPES);
-      const picker = new window.google.picker.PickerBuilder()
-        .addView(vue)
-        .setOAuthToken(jeton)
-        .setDeveloperKey(apiKey)
-        .setAppId(clientId.split('-')[0])
-        .setCallback((donnee) => {
-          if (donnee.action === window.google.picker.Action.PICKED) {
-            resolve((donnee.docs || []).map((d) => ({ id: d.id, name: d.name, mimeType: d.mimeType })));
-          } else if (donnee.action === window.google.picker.Action.CANCEL) {
-            resolve([]);
-          }
-        })
-        .build();
-      picker.setVisible(true);
-    } catch (e) { reject(e); }
-  });
-}
-
-/* =================================================================
    MEMORY — Axial's Key
    ================================================================= */
 function DocumentsPanel() {
@@ -7088,24 +7009,42 @@ function DocumentsPanel() {
   const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
   const driveGoogle = (driveEtat && driveEtat.google) || {};
   const driveVisible = !!(driveGoogle.selecteur && googleApiKey && googleClientId);
+  // Revue Task 7, tour 1 : charge les DEUX scripts du Picker dès que le
+  // bouton devient visible (montage), PAS au clic — `requestAccessToken()`
+  // doit s'exécuter dans le geste utilisateur, sans attendre un aller-retour
+  // réseau, sous peine de blocage de la popup de consentement Google.
+  React.useEffect(() => {
+    if (driveVisible) chargerGooglePicker().catch(() => { /* l'échec ressort au clic */ });
+  }, [driveVisible]);
   const importerDepuisDrive = async () => {
     // Google non connecté pour ce compte : même parcours que la tuile
     // Connexions plutôt qu'une erreur — la connexion redirige immédiatement.
     if (!driveGoogle.connecte) { axConnectIntegration('google'); return; }
     setDriveBusy(true); setErr('');
+    // Déclaré hors du `try` : si `ouvrirPickerDrive` échoue avant tout choix
+    // (jeton refusé, popup bloquée), reste `[]` et rien à recharger — mais si
+    // un import échoue APRÈS que d'autres ont réussi, `fichiers` porte déjà
+    // la liste complète et le `finally` recharge quand même (revue Task 7,
+    // tour 1, bloquant qualité 2 : un import partiel restait invisible).
+    let fichiers = [];
     try {
-      const fichiers = await ouvrirPickerDrive(googleApiKey, googleClientId);
+      fichiers = await ouvrirPickerDrive(googleApiKey, googleClientId);
       for (const f of fichiers) {
         // Séquentiel : chaque import est un appel serveur (téléchargement
         // Drive + indexation) — les paralléliser n'apporterait rien et
         // compliquerait le rapport d'erreur partiel.
         await axImporterDepuisDrive(f.id, f.name, f.mimeType);
       }
-      if (fichiers.length) load();
     } catch (ex) {
       setErr(decrireErreur(ex, t).detail);
+    } finally {
+      // `setDriveBusy(false)` DOIT être dans ce `finally` (revue Task 7,
+      // tour 1, bloquant qualité 1) : sans lui, un jeton navigateur jamais
+      // obtenu (popup bloquée, fenêtre fermée) laissait le bouton bloqué sur
+      // « Import… » pour toute la durée de vie de la surface.
+      if (fichiers.length) load();
+      setDriveBusy(false);
     }
-    setDriveBusy(false);
   };
   const onFile = async (e) => {
     const f = e.target.files && e.target.files[0];

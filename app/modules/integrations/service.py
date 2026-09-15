@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import logging
+import re
 import uuid
 
 import httpx
@@ -206,6 +207,25 @@ GOOGLE_DOC_EXPORTS: dict[str, tuple[str, str]] = {
     "application/vnd.google-apps.presentation": ("application/pdf", ".pdf"),
 }
 
+# `name`/`mime_type` viennent du navigateur (le Picker), pas d'une source
+# fiable : un appel direct à la route peut envoyer n'importe quoi. Sans
+# borne, un nom trop long dépasse `Document.filename` (`String(512)`,
+# suffixe d'export compris) et remonte en 500 brut (`DataError` Postgres non
+# nommée) plutôt qu'en erreur propre — revue Task 7, bloquant 2.
+_NOM_LONGUEUR_MAX = 200
+_MIME_LONGUEUR_MAX = 128
+
+
+def _nettoyer_nom(name: str) -> str:
+    """Nom sûr pour `documents.ingest` : caractères de contrôle et
+    séparateurs de chemin retirés (le nom ne sert jamais de chemin disque —
+    `documents/extract.py` n'en lit que le suffixe — mais un `/`/`\\` dans un
+    nom affiché reste une mauvaise idée), longueur bornée avant l'ajout d'un
+    éventuel suffixe d'export."""
+    nettoye = re.sub(r"[\x00-\x1f\x7f]", "", name or "")
+    nettoye = nettoye.replace("/", "_").replace("\\", "_").strip()
+    return nettoye[:_NOM_LONGUEUR_MAX]
+
 
 def telecharger_drive(db: Session, user_id: str, file_id: str, name: str,
                       mime_type: str | None) -> tuple[str, bytes, str]:
@@ -224,17 +244,28 @@ def telecharger_drive(db: Session, user_id: str, file_id: str, name: str,
         raise AppError("Google Drive n'est pas connecté.", 400,
                        code="google_non_connecte")
 
+    message_inaccessible = (
+        "Ce fichier Drive est inaccessible. Reconnectez Google Drive ou "
+        "vérifiez que le compte Google connecté à Axial est bien celui qui "
+        "possède le fichier."
+    )
+
+    nom_propre = _nettoyer_nom(name)
+    if not nom_propre:
+        raise AppError(message_inaccessible, 400, code="drive_fichier_inaccessible")
+    mime_type = str(mime_type)[:_MIME_LONGUEUR_MAX] if mime_type else None
+
     export = GOOGLE_DOC_EXPORTS.get(mime_type or "")
     if export:
         export_mime, suffixe = export
         url = f"{DRIVE_API}/files/{file_id}/export"
         params = {"mimeType": export_mime}
-        nom = f"{name}{suffixe}"
+        nom = f"{nom_propre}{suffixe}"
         mime_sortie = export_mime
     else:
         url = f"{DRIVE_API}/files/{file_id}"
         params = {"alt": "media"}
-        nom = name
+        nom = nom_propre
         mime_sortie = mime_type or "application/octet-stream"
 
     entetes = {"Authorization": f"Bearer {jeton}"}
@@ -242,9 +273,7 @@ def telecharger_drive(db: Session, user_id: str, file_id: str, name: str,
         with httpx.stream("GET", url, headers=entetes, params=params,
                           timeout=30.0) as r:
             if r.status_code in (401, 403, 404):
-                raise AppError("Ce fichier Drive est inaccessible. Reconnectez "
-                               "Google Drive ou vérifiez qu'il existe toujours.",
-                               400, code="drive_fichier_inaccessible")
+                raise AppError(message_inaccessible, 400, code="drive_fichier_inaccessible")
             r.raise_for_status()
             morceaux: list[bytes] = []
             taille = 0
@@ -259,9 +288,7 @@ def telecharger_drive(db: Session, user_id: str, file_id: str, name: str,
         raise
     except httpx.HTTPError as e:
         logger.warning("Téléchargement Drive échoué (%s) : %s", file_id, e)
-        raise AppError("Ce fichier Drive est inaccessible. Reconnectez "
-                       "Google Drive ou vérifiez qu'il existe toujours.",
-                       400, code="drive_fichier_inaccessible") from e
+        raise AppError(message_inaccessible, 400, code="drive_fichier_inaccessible") from e
 
     return nom, b"".join(morceaux), mime_sortie
 
