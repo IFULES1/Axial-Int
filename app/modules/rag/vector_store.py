@@ -50,7 +50,9 @@ def _client() -> QdrantClient:
         return QdrantClient(path=url[len("file:"):])
     if url.startswith((".", "/")):  # local path → persistent embedded
         return QdrantClient(path=url)
-    return QdrantClient(url=url)
+    # Délai explicite (revue finale) : sans lui, un Qdrant qui ne répond pas
+    # bloque une requête HTTP entière au lieu d'échouer en 10 s.
+    return QdrantClient(url=url, timeout=10)
 
 
 def ensure_collection(name: str) -> None:

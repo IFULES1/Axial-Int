@@ -4399,3 +4399,33 @@ def test_drive_route_sans_jeton_renvoie_400(monkeypatch):
         assert r.json()["error"]["code"] == "google_non_connecte"
     finally:
         _app.dependency_overrides.clear()
+
+
+# --- Revue finale : robustesse du listage et bornes de titre -----------------
+
+def test_kb_lister_survit_a_un_qdrant_injoignable(monkeypatch):
+    """Un scroll Qdrant qui lève ne rend jamais 500 : la liste en base s'affiche."""
+    from app.modules.kb import service as kb
+
+    engine = _kb_engine()
+
+    def _casse():
+        raise RuntimeError("timed out key=abc")
+
+    monkeypatch.setattr(kb, "_scroll_qdrant_cache", _casse)
+    with Session(engine) as db:
+        items = kb.lister(db)
+    assert items == []
+
+
+def test_kb_titre_borne_a_500_caracteres(monkeypatch):
+    from app.modules.kb import service as kb
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    with Session(engine) as db:
+        ligne = kb._indexer(db, ligne=None, doc_id="kb:test-titre-long", titre="x" * 900,
+                            source="https://exemple.fr/" + "y" * 900, type_="url",
+                            categorie="07_ajouts-admin", mime_type="text/html",
+                            taille_octets=10, admin_id=None, text="mot " * 500, filename=None)
+        assert len(ligne.titre) == 500

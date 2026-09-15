@@ -41,6 +41,7 @@ from app.modules.documents.extract import SUPPORTED_EXTENSIONS, chunk_text, extr
 from app.modules.documents.service import MAX_UPLOAD_BYTES
 from app.modules.kb.models import KbDocument
 from app.modules.rag import embeddings, vector_store
+from app.shared.secrets import sans_secret
 
 logger = logging.getLogger("axial.kb")
 
@@ -61,6 +62,9 @@ CATEGORIES = (
 )
 
 CONTENU_MIN_URL = 1500  # caractères — en-deçà, une page web n'apporte rien d'exploitable.
+# Borne de `KbDocument.titre` (String(500)) ; SQLite ne l'applique pas en
+# test, Postgres oui : un titre issu d'une URL longue faisait 500 en prod.
+TITRE_MAX = 500
 HTTP_TIMEOUT = 20.0
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
              "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -137,7 +141,14 @@ def _backfill(db: Session) -> None:
     (l'autre requête l'a déjà écrite, ou le prochain listage la rattrapera),
     les autres lignes du lot sont commitées normalement.
     """
-    distants = _scroll_qdrant_cache()
+    # Revue finale : un Qdrant lent ou absent ne doit jamais rendre 500 sur
+    # le listage — la liste en base reste affichable, le rattrapage
+    # attendra le prochain appel.
+    try:
+        distants = _scroll_qdrant_cache()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Rattrapage KB : Qdrant injoignable (%s), listage sans rattrapage", sans_secret(e))
+        return
     if not distants:
         return
     existants = {r for (r,) in db.execute(select(KbDocument.doc_id))}
@@ -156,7 +167,7 @@ def _backfill(db: Session) -> None:
         try:
             with db.begin_nested():
                 db.add(KbDocument(
-                    id=uuid.uuid4(), doc_id=doc_id, titre=titre, source=source,
+                    id=uuid.uuid4(), doc_id=doc_id, titre=(titre or "")[:TITRE_MAX], source=source,
                     type="fichier", categorie=categorie, mime_type=None,
                     nb_chunks=info.get("nb_chunks", 0), taille_octets=0,
                     cree_par=None, statut="indexe", erreur=None,
@@ -223,7 +234,7 @@ def _indexer(db: Session, *, ligne: KbDocument | None, doc_id: str, titre: str,
     chunks = chunk_text(text)
     if ligne is None:
         ligne = KbDocument(id=uuid.uuid4(), doc_id=doc_id)
-    ligne.titre = titre
+    ligne.titre = (titre or "")[:TITRE_MAX]
     ligne.source = source
     ligne.type = type_
     ligne.categorie = categorie
