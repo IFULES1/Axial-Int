@@ -44,14 +44,25 @@ def assemble(query: str, web_results, doc_passages, top_k: int = 8,
         title = meta.get("title") or meta.get("filename") or "Base de connaissance"
         ref = meta.get("source") or meta.get("category") or ""
         espace = p.source == "notion"
+        est_kb = p.source == "kb"
+        if espace:
+            tag = f"(espace Notion : {title})"
+        elif est_kb:
+            # CONTEXTE MODÈLE seulement (tour 1, décision C2) — la CITATION
+            # ci-dessous garde `source="interne"` (décision C1) : la base de
+            # connaissance Axial n'est jamais nommée à l'utilisateur, seul le
+            # modèle voit cette étiquette pour pondérer le passage.
+            tag = f"(base Axial : {title})"
+        elif ref:
+            tag = f"(réf. interne : {ref} — {title})"
+        else:
+            tag = f"(réf. interne : {title})"
         pool.append({
             "text": p.text,
-            "tag": (f"(espace Notion : {title})" if espace
-                    else (f"(réf. interne : {ref} — {title})" if ref
-                          else f"(réf. interne : {title})")),
+            "tag": tag,
             "body": p.text,
             "cite": {"title": title,
-                     "source": "notion" if espace else ("interne" if p.source == "kb" else "document"),
+                     "source": "notion" if espace else ("interne" if est_kb else "document"),
                      "url": meta.get("url") if espace else None,
                      "reference": "Votre espace Notion" if espace else ref,
                      "excerpt": (p.text or "")[:350]},

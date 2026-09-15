@@ -15,19 +15,30 @@ que le lot ingéré en masse par le script (ou par une ancienne session) entre
 dans le registre sans script de rattrapage séparé. Le scroll Qdrant est mis
 en cache 10 minutes en mémoire de processus : c'est un inventaire du lot
 existant, pas une source de vérité qui change à chaque appel.
+
+Décisions du tour 1 de revue (voir `task-5-report.md`, section « Tour 1 ») :
+* C1/C3 — `Passage.source` (valeurs `"user"|"kb"|"notion"`) reste le contrat,
+  `Passage.origine` du brief initial est abandonné : équivalent fonctionnel,
+  jamais renommé pour ne pas produire un second nom pour la même chose.
+  La CITATION garde `source="interne"` pour un passage KB — contrat déjà
+  exposé, le FRONT (Task 6) choisit son propre libellé neutre ; ce module ne
+  nomme jamais « base Axial » dans un champ visible utilisateur.
 """
 from __future__ import annotations
 
 import logging
 import time
 import uuid
+from html.parser import HTMLParser
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.errors import AppError
 from app.modules.documents.extract import SUPPORTED_EXTENSIONS, chunk_text, extract_text
+from app.modules.documents.service import MAX_UPLOAD_BYTES
 from app.modules.kb.models import KbDocument
 from app.modules.rag import embeddings, vector_store
 
@@ -56,6 +67,11 @@ USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 _SCROLL_TTL_SECONDES = 600.0
 _scroll_cache: dict = {"at": 0.0, "docs": None}
+
+
+def _invalider_cache_scroll() -> None:
+    _scroll_cache["docs"] = None
+    _scroll_cache["at"] = 0.0
 
 
 # --- backfill : inventaire Qdrant, mis en cache 10 minutes -----------------
@@ -108,6 +124,19 @@ def _scroll_qdrant_cache() -> dict[str, dict]:
 
 
 def _backfill(db: Session) -> None:
+    """Crée les lignes manquantes une par une, sous SAVEPOINT (tour 1, Q2).
+
+    Deux admins qui ouvrent Pilotage en même temps (ou deux workers qui
+    traitent chacun un `GET /admin/kb`, chacun avec son propre
+    `_scroll_cache` vide) peuvent calculer le même lot de `doc_id`
+    manquants et tenter de les insérer en parallèle. L'index unique sur
+    `doc_id` protège l'intégrité, mais SANS `begin_nested()` la première
+    `IntegrityError` casserait la transaction ENTIÈRE : toutes les lignes du
+    lot, pas seulement celle en conflit. Un `SAVEPOINT` par ligne isole
+    l'échec — la ligne en conflit est simplement absente de CETTE passe
+    (l'autre requête l'a déjà écrite, ou le prochain listage la rattrapera),
+    les autres lignes du lot sont commitées normalement.
+    """
     distants = _scroll_qdrant_cache()
     if not distants:
         return
@@ -124,12 +153,18 @@ def _backfill(db: Session) -> None:
         source = source_payload if (source_payload and source_payload != categorie) \
             else "ingestion initiale 08/2026"
         titre = info.get("title") or info.get("filename") or doc_id
-        db.add(KbDocument(
-            id=uuid.uuid4(), doc_id=doc_id, titre=titre, source=source,
-            type="fichier", categorie=categorie, mime_type=None,
-            nb_chunks=info.get("nb_chunks", 0), taille_octets=0,
-            cree_par=None, statut="indexe", erreur=None,
-        ))
+        try:
+            with db.begin_nested():
+                db.add(KbDocument(
+                    id=uuid.uuid4(), doc_id=doc_id, titre=titre, source=source,
+                    type="fichier", categorie=categorie, mime_type=None,
+                    nb_chunks=info.get("nb_chunks", 0), taille_octets=0,
+                    cree_par=None, statut="indexe", erreur=None,
+                ))
+                db.flush()
+        except IntegrityError:
+            logger.info("Backfill KB : %s déjà écrit par une requête concurrente.", doc_id)
+            continue
     db.commit()
 
 
@@ -151,6 +186,14 @@ def _verifier_categorie(categorie: str) -> None:
         raise AppError(
             "Catégorie inconnue. Catégories valides : " + ", ".join(CATEGORIES) + ".",
             422, code="categorie_invalide",
+        )
+
+
+def _verifier_taille(taille: int) -> None:
+    if taille > MAX_UPLOAD_BYTES:
+        raise AppError(
+            f"Fichier trop volumineux (max {MAX_UPLOAD_BYTES // (1024 * 1024)} Mo).",
+            413, code="fichier_trop_volumineux",
         )
 
 
@@ -217,6 +260,10 @@ def _indexer(db: Session, *, ligne: KbDocument | None, doc_id: str, titre: str,
     db.add(ligne)
     db.commit()
     db.refresh(ligne)
+    # Par symétrie avec `supprimer` (tour 1, Q3) : ce document existe
+    # désormais dans Qdrant, l'inventaire caché ne doit pas prétendre le
+    # contraire jusqu'à expiration des 10 minutes.
+    _invalider_cache_scroll()
     return ligne
 
 
@@ -232,6 +279,7 @@ def ingerer_fichier(db: Session, admin_id: str, filename: str, data: bytes,
         )
     if not data:
         raise AppError("Fichier vide.", 422, code="empty_file")
+    _verifier_taille(len(data))
 
     doc_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"kb:{filename}"))
     ligne = _ligne_reutilisable(db, doc_id)
@@ -251,20 +299,74 @@ def ingerer_fichier(db: Session, admin_id: str, filename: str, data: bytes,
                     filename=filename)
 
 
+class _ExtracteurHTML(HTMLParser):
+    """Nettoyage HTML sans dépendance (tour 1, Q5 — remplace `lxml`, jamais
+    déclaré dans `requirements.txt`). Retire le contenu de `script`/`style`/
+    `nav`/`noscript`, capture le `<title>`, garde le reste comme texte."""
+
+    _TAGS_IGNORES = {"script", "style", "nav", "noscript"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._profondeur_ignoree = 0
+        self._dans_titre = False
+        self._titre: list[str] = []
+        self._morceaux: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:  # noqa: D102
+        if tag in self._TAGS_IGNORES:
+            self._profondeur_ignoree += 1
+        elif tag == "title":
+            self._dans_titre = True
+
+    def handle_endtag(self, tag: str) -> None:  # noqa: D102
+        if tag in self._TAGS_IGNORES and self._profondeur_ignoree > 0:
+            self._profondeur_ignoree -= 1
+        elif tag == "title":
+            self._dans_titre = False
+
+    def handle_data(self, data: str) -> None:  # noqa: D102
+        if self._profondeur_ignoree:
+            return
+        (self._titre if self._dans_titre else self._morceaux).append(data)
+
+    @property
+    def titre(self) -> str:
+        return "".join(self._titre).strip()
+
+    @property
+    def texte(self) -> str:
+        return " ".join(" ".join(self._morceaux).split())
+
+
 def _extraire_html(html: str) -> tuple[str, str]:
     """(titre, texte nettoyé) — retire script/style/nav, garde le reste."""
-    import lxml.html as LH
-
+    parseur = _ExtracteurHTML()
     try:
-        doc = LH.fromstring(html)
+        parseur.feed(html)
     except Exception:
         return "", ""
-    titres = doc.xpath("//title/text()")
-    titre = titres[0].strip() if titres and titres[0].strip() else ""
-    for noeud in doc.xpath("//script|//style|//nav|//noscript"):
-        noeud.drop_tree()
-    texte = " ".join(doc.text_content().split())
-    return titre, texte
+    return parseur.titre, parseur.texte
+
+
+def _telecharger(url: str) -> tuple[bytes, str]:
+    """Téléchargement en flux, coupé net au-delà de `MAX_UPLOAD_BYTES`
+    (tour 1, Q1) : un admin qui colle l'URL d'un dump volumineux ne doit
+    jamais faire gonfler le worker jusqu'à l'OOM — la coupure intervient
+    pendant la lecture, avant que le corps entier ne soit en mémoire."""
+    tampon = bytearray()
+    with httpx.stream("GET", url, headers={"User-Agent": USER_AGENT}, timeout=HTTP_TIMEOUT,
+                      follow_redirects=True) as reponse:
+        reponse.raise_for_status()
+        content_type = (reponse.headers.get("content-type") or "").lower()
+        for morceau in reponse.iter_bytes():
+            tampon.extend(morceau)
+            if len(tampon) > MAX_UPLOAD_BYTES:
+                raise AppError(
+                    f"Fichier trop volumineux (max {MAX_UPLOAD_BYTES // (1024 * 1024)} Mo).",
+                    413, code="fichier_trop_volumineux",
+                )
+    return bytes(tampon), content_type
 
 
 def ingerer_url(db: Session, admin_id: str, url: str,
@@ -278,20 +380,24 @@ def ingerer_url(db: Session, admin_id: str, url: str,
     ligne = _ligne_reutilisable(db, doc_id)
 
     try:
-        reponse = httpx.get(url, headers={"User-Agent": USER_AGENT}, timeout=HTTP_TIMEOUT,
-                            follow_redirects=True)
-        reponse.raise_for_status()
+        data, content_type = _telecharger(url)
+    except AppError:
+        raise
     except Exception as e:
         raise AppError("Impossible de récupérer cette URL.", 422, code="url_inaccessible") from e
 
-    content_type = (reponse.headers.get("content-type") or "").lower()
     est_pdf = "pdf" in content_type or url.lower().split("?")[0].endswith(".pdf")
     if est_pdf:
         titre = url
-        text = extract_text("document.pdf", reponse.content)
+        try:
+            text = extract_text("document.pdf", data)
+        except Exception as e:
+            # Q4 (tour 1) : un PDF distant tronqué/chiffré ne doit jamais
+            # remonter comme 500 — même garantie que le chemin fichier.
+            raise AppError("PDF illisible ou corrompu.", 422, code="contenu_illisible") from e
         mime = "application/pdf"
     else:
-        titre_html, text = _extraire_html(reponse.text)
+        titre_html, text = _extraire_html(data.decode("utf-8", errors="ignore"))
         titre = titre_html or url
         mime = content_type.split(";")[0].strip() or "text/html"
 
@@ -302,7 +408,7 @@ def ingerer_url(db: Session, admin_id: str, url: str,
         )
 
     return _indexer(db, ligne=ligne, doc_id=doc_id, titre=titre, source=url, type_="url",
-                    categorie=categorie, mime_type=mime, taille_octets=len(reponse.content),
+                    categorie=categorie, mime_type=mime, taille_octets=len(data),
                     admin_id=admin_id, text=text, filename=None)
 
 
@@ -317,3 +423,9 @@ def supprimer(db: Session, doc_id: str) -> None:
     if ligne is not None:
         db.delete(ligne)
         db.commit()
+    # Tour 1, Q3 : sans cette invalidation, l'inventaire Qdrant caché (10 min)
+    # contient encore ce `doc_id` — le prochain `lister()` le backfille tel
+    # quel (`nb_chunks` non nul, vecteurs pourtant partis), et une nouvelle
+    # tentative d'ingestion du même fichier se voit refuser en `deja_indexe`
+    # par cette ligne fantôme.
+    _invalider_cache_scroll()

@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime as dt
 
 from fastapi import APIRouter, Depends, File, Form, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -72,9 +73,12 @@ async def ajouter_fichier(
     db: Session = Depends(get_db),
 ) -> KbDocumentOut:
     data = await fichier.read()
-    ligne = service.ingerer_fichier(
-        db, user.id, fichier.filename or "fichier", data, fichier.content_type,
-        categorie=categorie or service.DEFAULT_CATEGORIE,
+    # Extraction + embeddings sont bloquants (CPU/réseau) : `run_in_threadpool`
+    # les sort de l'event loop, comme les routes sync (`ajouter_url`,
+    # `lister`, `supprimer`) le font déjà nativement (tour 1, Q1).
+    ligne = await run_in_threadpool(
+        service.ingerer_fichier, db, user.id, fichier.filename or "fichier", data,
+        fichier.content_type, categorie or service.DEFAULT_CATEGORIE,
     )
     return _to_out(ligne)
 

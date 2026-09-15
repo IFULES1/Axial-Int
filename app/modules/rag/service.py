@@ -27,16 +27,22 @@ def retrieve(query: str, user_id: str, top_k: int = 8,
 
 
 def format_context(passages: list[Passage]) -> str:
-    """Numbered context block, tagging knowledge-base sources for citation."""
+    """Numbered context block, tagging knowledge-base sources for the MODEL.
+
+    « (base Axial : <titre>) » n'est vu QUE par le modèle, dans ce bloc de
+    contexte — jamais par l'utilisateur : les citations qu'il voit passent
+    par `grounding.assemble`, qui garde `source="interne"` (spec §5, décision
+    du contrôleur du tour 1 : la base de connaissance n'est jamais nommée
+    côté utilisateur ; le front, Task 6, choisit son propre libellé neutre).
+    """
     if not passages:
         return ""
     lines = []
     for i, p in enumerate(passages, 1):
         tag = ""
         if p.source == "kb" and p.meta:
-            bits = [p.meta.get("source"), p.meta.get("title")]
-            label = " — ".join(b for b in bits if b)
-            if label:
-                tag = f" (réf. interne : {label})"
+            titre = p.meta.get("title")
+            if titre:
+                tag = f" (base Axial : {titre})"
         lines.append(f"[{i}]{tag} {p.text}")
     return "\n\n".join(lines)

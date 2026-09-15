@@ -2960,6 +2960,23 @@ def test_kb_ingerer_fichier_vide():
     assert e.value.code == "empty_file"
 
 
+def test_kb_ingerer_fichier_trop_volumineux(monkeypatch):
+    """Tour 1, Q1 : `ingerer_fichier` réutilise `MAX_UPLOAD_BYTES` de
+    `documents.service` (pas une nouvelle constante) — un fichier au-delà
+    est refusé avant extraction/embeddings, jamais un 500 OOM."""
+    from app.errors import AppError
+    from app.modules.documents.service import MAX_UPLOAD_BYTES
+    from app.modules.kb import service as kb
+
+    engine = _kb_engine()
+    with Session(engine) as db:
+        with pytest.raises(AppError) as e:
+            kb.ingerer_fichier(db, str(uuid.uuid4()), _kb_nom("gros"),
+                               b"0" * (MAX_UPLOAD_BYTES + 1), "text/plain")
+    assert e.value.code == "fichier_trop_volumineux"
+    assert e.value.status_code == 413
+
+
 def test_kb_ingerer_fichier_deja_indexe(monkeypatch):
     from app.errors import AppError
     from app.modules.kb import service as kb
@@ -3012,9 +3029,11 @@ def test_kb_ingerer_fichier_reprise_apres_echec(monkeypatch):
 
 # --- ingerer_url --------------------------------------------------------------
 
-class _FauxReponseHTTP:
+class _FauxFluxHTTP:
+    """Fake pour `httpx.stream(...)` (tour 1, Q1 : téléchargement en flux) —
+    context manager + `iter_bytes()`, comme la vraie réponse streamée."""
+
     def __init__(self, *, text="", content=b"", headers=None, status_code=200):
-        self.text = text
         self.content = content or text.encode("utf-8")
         self.headers = headers or {}
         self.status_code = status_code
@@ -3024,6 +3043,17 @@ class _FauxReponseHTTP:
             import httpx
 
             raise httpx.HTTPStatusError("erreur", request=None, response=self)
+
+    def iter_bytes(self):
+        pas = 4096
+        for i in range(0, len(self.content), pas):
+            yield self.content[i:i + pas]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
 
 
 def test_kb_ingerer_url_ok_extrait_titre_html(monkeypatch):
@@ -3037,8 +3067,8 @@ def test_kb_ingerer_url_ok_extrait_titre_html(monkeypatch):
            f"<p>{_kb_texte(600)}</p></body></html>")
 
     monkeypatch.setattr(
-        "app.modules.kb.service.httpx.get",
-        lambda *a, **k: _FauxReponseHTTP(text=html, headers={"content-type": "text/html"}),
+        "app.modules.kb.service.httpx.stream",
+        lambda *a, **k: _FauxFluxHTTP(text=html, headers={"content-type": "text/html"}),
     )
     with Session(engine) as db:
         ligne = kb.ingerer_url(db, str(uuid.uuid4()), url)
@@ -3058,8 +3088,8 @@ def test_kb_ingerer_url_pdf_distant(monkeypatch):
     url = f"https://exemple.fr/{uuid.uuid4().hex}.pdf"
 
     monkeypatch.setattr(
-        "app.modules.kb.service.httpx.get",
-        lambda *a, **k: _FauxReponseHTTP(content=b"%PDF-fake",
+        "app.modules.kb.service.httpx.stream",
+        lambda *a, **k: _FauxFluxHTTP(content=b"%PDF-fake",
                                          headers={"content-type": "application/pdf"}),
     )
     monkeypatch.setattr("app.modules.kb.service.extract_text",
@@ -3071,6 +3101,56 @@ def test_kb_ingerer_url_pdf_distant(monkeypatch):
         assert ligne.source == url
 
 
+def test_kb_ingerer_url_pdf_distant_illisible(monkeypatch):
+    """Tour 1, Q4 : un PDF distant tronqué/chiffré doit sortir en
+    `contenu_illisible` (422), jamais en 500 — même garantie que le chemin
+    fichier (`extraction_failed`), le chemin URL avait l'appel non enveloppé."""
+    from app.errors import AppError
+    from app.modules.kb import service as kb
+
+    engine = _kb_engine()
+    url = f"https://exemple.fr/{uuid.uuid4().hex}.pdf"
+    monkeypatch.setattr(
+        "app.modules.kb.service.httpx.stream",
+        lambda *a, **k: _FauxFluxHTTP(content=b"%PDF-fake-corrompu",
+                                      headers={"content-type": "application/pdf"}),
+    )
+
+    def _casse(filename, data):
+        raise ValueError("PDF corrompu")
+
+    monkeypatch.setattr("app.modules.kb.service.extract_text", _casse)
+    with Session(engine) as db:
+        with pytest.raises(AppError) as e:
+            kb.ingerer_url(db, str(uuid.uuid4()), url)
+    assert e.value.code == "contenu_illisible"
+    assert e.value.status_code == 422
+
+
+def test_kb_ingerer_url_trop_volumineuse(monkeypatch):
+    """Tour 1, Q1 : le téléchargement d'URL est coupé en flux au-delà de
+    `MAX_UPLOAD_BYTES` — jamais chargé entier en mémoire avant vérification."""
+    from app.errors import AppError
+    from app.modules.documents.service import MAX_UPLOAD_BYTES
+    from app.modules.kb import service as kb
+
+    engine = _kb_engine()
+    url = f"https://exemple.fr/{uuid.uuid4().hex}"
+    gros_contenu = b"x" * (MAX_UPLOAD_BYTES + 1)
+    monkeypatch.setattr(
+        "app.modules.kb.service.httpx.stream",
+        lambda *a, **k: _FauxFluxHTTP(content=gros_contenu,
+                                      headers={"content-type": "text/html"}),
+    )
+    with Session(engine) as db:
+        with pytest.raises(AppError) as e:
+            kb.ingerer_url(db, str(uuid.uuid4()), url)
+    assert e.value.code == "fichier_trop_volumineux"
+    assert e.value.status_code == 413
+    with Session(engine) as db:
+        assert list(db.scalars(select(KbDocument))) == []
+
+
 def test_kb_ingerer_url_contenu_insuffisant(monkeypatch):
     from app.errors import AppError
     from app.modules.kb import service as kb
@@ -3079,8 +3159,8 @@ def test_kb_ingerer_url_contenu_insuffisant(monkeypatch):
     url = f"https://exemple.fr/{uuid.uuid4().hex}"
     html = "<html><head><title>Court</title></head><body><p>Trop court.</p></body></html>"
     monkeypatch.setattr(
-        "app.modules.kb.service.httpx.get",
-        lambda *a, **k: _FauxReponseHTTP(text=html, headers={"content-type": "text/html"}),
+        "app.modules.kb.service.httpx.stream",
+        lambda *a, **k: _FauxFluxHTTP(text=html, headers={"content-type": "text/html"}),
     )
     with Session(engine) as db:
         with pytest.raises(AppError) as e:
@@ -3100,7 +3180,7 @@ def test_kb_ingerer_url_inaccessible(monkeypatch):
     def _echec(*a, **k):
         raise OSError("connexion refusée")
 
-    monkeypatch.setattr("app.modules.kb.service.httpx.get", _echec)
+    monkeypatch.setattr("app.modules.kb.service.httpx.stream", _echec)
     with Session(engine) as db:
         with pytest.raises(AppError) as e:
             kb.ingerer_url(db, str(uuid.uuid4()), url)
@@ -3116,8 +3196,8 @@ def test_kb_ingerer_url_deja_indexe(monkeypatch):
     url = f"https://exemple.fr/{uuid.uuid4().hex}"
     html = f"<html><head><title>T</title></head><body><p>{_kb_texte(600)}</p></body></html>"
     monkeypatch.setattr(
-        "app.modules.kb.service.httpx.get",
-        lambda *a, **k: _FauxReponseHTTP(text=html, headers={"content-type": "text/html"}),
+        "app.modules.kb.service.httpx.stream",
+        lambda *a, **k: _FauxFluxHTTP(text=html, headers={"content-type": "text/html"}),
     )
     with Session(engine) as db:
         kb.ingerer_url(db, str(uuid.uuid4()), url)
@@ -3202,6 +3282,56 @@ def test_kb_lister_pas_de_doublon_au_second_appel(monkeypatch):
         assert len(lignes) == 1
 
 
+def test_kb_backfill_ignore_une_ligne_en_conflit_sans_casser_les_autres(monkeypatch):
+    """Tour 1, Q2 : simule deux passes de backfill concurrentes sur le même
+    lot — la ligne d'un `doc_id` lève une `IntegrityError` au moment de son
+    `flush()` (comme si une autre requête venait de l'écrire entre le SELECT
+    `existants` et cette insertion). `_backfill` doit l'avaler via un
+    SAVEPOINT par ligne et continuer : ni 500, ni perte des AUTRES lignes du
+    même lot."""
+    from sqlalchemy.exc import IntegrityError
+
+    from app.modules.kb import service as kb
+    from app.modules.rag import embeddings as _emb
+    from app.modules.rag import vector_store
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    doc_id_en_conflit = str(uuid.uuid4())
+    doc_id_normal = str(uuid.uuid4())
+    for doc_id, titre in ((doc_id_en_conflit, "En conflit"), (doc_id_normal, "Normal")):
+        vector_store.upsert_chunks(
+            doc_id, "__kb__", ["x"], _emb.embed_texts(["x"]),
+            collection=vector_store.KB_COLLECTION,
+            extra_payload={"title": titre, "filename": "t.pdf",
+                          "category": "01_macro-institutionnel", "source": "s", "sector": ""},
+        )
+
+    reel_flush = Session.flush
+    deja_leve = {"fait": False}
+
+    def _flush_avec_course(self, *a, **k):
+        if not deja_leve["fait"]:
+            for obj in list(self.new):
+                if isinstance(obj, KbDocument) and obj.doc_id == doc_id_en_conflit:
+                    deja_leve["fait"] = True
+                    raise IntegrityError("insert", {}, Exception("unique constraint failed"))
+        return reel_flush(self, *a, **k)
+
+    monkeypatch.setattr(Session, "flush", _flush_avec_course)
+    with Session(engine) as db:
+        kb.lister(db)  # ne doit PAS lever malgré l'IntegrityError simulée
+        lignes = {i.doc_id: i for i in db.scalars(select(KbDocument))}
+
+    assert deja_leve["fait"]
+    assert doc_id_normal in lignes
+    assert lignes[doc_id_normal].titre == "Normal"
+    # Aucune trace de la ligne en conflit ICI — soit l'autre requête
+    # concurrente l'a bien écrite ailleurs, soit le prochain `lister()` la
+    # rattrape. Dans les deux cas : jamais deux lignes, jamais une 500.
+    assert doc_id_en_conflit not in lignes
+
+
 def test_kb_lister_scroll_mis_en_cache(monkeypatch):
     """Deux appels rapprochés ne rescannent Qdrant qu'une fois (cache 10 min)."""
     from app.modules.kb import service as kb
@@ -3268,6 +3398,38 @@ def test_kb_supprimer_retire_vecteurs_et_ligne(monkeypatch):
         kb.supprimer(db, doc_id)
 
         assert not vector_store.has_document(doc_id, collection=vector_store.KB_COLLECTION)
+        assert db.scalars(select(KbDocument).where(KbDocument.doc_id == doc_id)).first() is None
+
+
+def test_kb_supprimer_invalide_le_cache_pas_de_ligne_fantome(monkeypatch):
+    """Tour 1, Q3 : sans invalidation, le scroll caché (10 min) contient
+    encore le `doc_id` supprimé — le `lister()` suivant le recrée en ligne
+    fantôme (vecteurs partis, ligne `statut="indexe"`). Le cache doit être
+    invalidé par `supprimer` pour que ce `lister()` revoie l'état réel."""
+    from app.modules.kb import service as kb
+    from app.modules.rag import embeddings as _emb
+    from app.modules.rag import vector_store
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    doc_id = str(uuid.uuid4())
+    vector_store.upsert_chunks(
+        doc_id, "__kb__", ["x"], _emb.embed_texts(["x"]),
+        collection=vector_store.KB_COLLECTION,
+        extra_payload={"title": "T", "filename": "t.pdf",
+                      "category": "01_macro-institutionnel", "source": "s", "sector": ""},
+    )
+    with Session(engine) as db:
+        # Premier listage : backfille la ligne ET met le scroll en cache.
+        items = kb.lister(db)
+        assert any(i.doc_id == doc_id for i in items)
+        assert kb._scroll_cache["docs"] is not None
+
+        kb.supprimer(db, doc_id)
+        assert kb._scroll_cache["docs"] is None  # invalidé, pas seulement expiré
+
+        items_apres = kb.lister(db)
+        assert not any(i.doc_id == doc_id for i in items_apres)
         assert db.scalars(select(KbDocument).where(KbDocument.doc_id == doc_id)).first() is None
 
 
@@ -3350,8 +3512,8 @@ def test_kb_route_upload_fichier_admin(monkeypatch):
 
 def test_kb_route_ajouter_url_admin(monkeypatch):
     monkeypatch.setattr(
-        "app.modules.kb.service.httpx.get",
-        lambda *a, **k: _FauxReponseHTTP(
+        "app.modules.kb.service.httpx.stream",
+        lambda *a, **k: _FauxFluxHTTP(
             text=(f"<html><head><title>Page test</title></head>"
                  f"<body><p>{_kb_texte(600)}</p></body></html>"),
             headers={"content-type": "text/html"},
@@ -3422,14 +3584,46 @@ def test_kb_passage_source_kb_et_titre_apres_ingestion(monkeypatch):
     assert trouve.meta.get("title") == nom
 
 
-def test_kb_grounding_reference_interne_sans_nom_de_base():
-    """Le tag interne cite le titre, jamais « base Axial » (décision du 14/09)."""
+def test_kb_grounding_contexte_modele_etiquette_base_axial():
+    """Tour 1, décision C2 : le CONTEXTE MODÈLE (jamais vu par l'utilisateur)
+    étiquette « (base Axial : <titre>) » pour un passage KB."""
     from app.modules.rag.vector_store import Passage
     from app.shared import grounding
 
     passage = Passage(text="contenu interne", score=0.9, doc_id="d1", source="kb",
                       meta={"title": "Guide interne", "source": "Guide interne"})
-    contexte, citations = grounding.assemble("question", [], [passage])
-    assert "Axial" not in contexte
-    assert "base de connaissance" not in contexte.lower()
+    contexte, _ = grounding.assemble("question", [], [passage])
+    assert "(base Axial : Guide interne)" in contexte
+
+
+def test_kb_grounding_citation_source_interne_fige(monkeypatch):
+    """Tour 1, décision C1 : le backend garde `source="interne"` — contrat
+    existant, figé ici pour que Task 6 (front) puisse s'appuyer dessus sans
+    surprise. Aucun libellé « base Axial »/« base de connaissance » ne fuit
+    dans la citation elle-même (titre, référence, extrait) : c'est le FRONT,
+    pas ce backend, qui choisit le libellé neutre affiché à l'utilisateur."""
+    from app.modules.rag.vector_store import Passage
+    from app.shared import grounding
+
+    passage = Passage(text="contenu interne", score=0.9, doc_id="d1", source="kb",
+                      meta={"title": "Guide interne", "category": "03_reglementaire"})
+    _, citations = grounding.assemble("question", [], [passage])
+    assert citations[0]["source"] == "interne"
     assert citations[0]["title"] == "Guide interne"
+    for valeur in (citations[0]["title"], citations[0].get("reference") or "",
+                  citations[0].get("excerpt") or ""):
+        assert "axial" not in valeur.lower()
+        assert "base de connaissance" not in valeur.lower()
+
+
+def test_kb_format_context_rag_etiquette_base_axial():
+    """`rag.service.format_context` (le SEUL bloc vu par le modèle) porte la
+    même étiquette que `grounding.assemble` — décision C2, les deux endroits
+    nommés par le contrôleur."""
+    from app.modules.rag import service as rag_service
+    from app.modules.rag.vector_store import Passage
+
+    passage = Passage(text="contenu interne", score=0.9, doc_id="d1", source="kb",
+                      meta={"title": "Guide interne", "source": "Guide interne"})
+    contexte = rag_service.format_context([passage])
+    assert "(base Axial : Guide interne)" in contexte
