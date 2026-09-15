@@ -4429,3 +4429,28 @@ def test_kb_titre_borne_a_500_caracteres(monkeypatch):
                             categorie="07_ajouts-admin", mime_type="text/html",
                             taille_octets=10, admin_id=None, text="mot " * 500, filename=None)
         assert len(ligne.titre) == 500
+
+
+# --- Extraction des noms de sociétés : déterministe + JSON (15/09) ---------
+
+def test_noms_dans_la_question_liste_entre_parentheses():
+    from app.modules.analysis.service import _noms_dans_la_question
+    q = ("Marché français des logiciels de notes de frais pour PME en 2026 : taille, acteurs "
+         "en présence (Expensya, N2F, Spendesk, Jenji, Lucca), dynamique et opportunités (France, PME).")
+    assert _noms_dans_la_question(q) == ["Expensya", "N2F", "Spendesk", "Jenji", "Lucca"]
+
+
+def test_noms_de_societes_json_et_bruit_rejete(monkeypatch):
+    from app.modules.analysis import service as A
+    from app.shared import llm_client
+    monkeypatch.setattr(llm_client, "generate",
+                        lambda **k: type("R", (), {"text": '["Doctolib", "Alan", "(France). Highly recognized as a French", "paris"]'})())
+    noms = A._noms_de_societes("Quels concurrents de Doctolib ?", {"company_name": "QA CV2 SAS"}, [])
+    assert noms == ["QA CV2 SAS", "Doctolib", "Alan"]
+
+
+def test_noms_de_societes_reponse_en_lignes_toujours_acceptee(monkeypatch):
+    from app.modules.analysis import service as A
+    from app.shared import llm_client
+    monkeypatch.setattr(llm_client, "generate", lambda **k: type("R", (), {"text": "1. Swile\n2. Lydia\n"})())
+    assert A._noms_de_societes("Concurrents ?", None, []) == ["Swile", "Lydia"]

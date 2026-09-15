@@ -121,10 +121,53 @@ def _retrieve_context(query: str, user_id: str, top_k: int):
 # d'une extraction par le modèle plutôt que d'une heuristique regex : les
 # noms propres échappent trop souvent à un motif fixe.
 _PROMPT_NOMS_SOCIETES = (
-    "Liste jusqu'à 8 noms d'entreprises françaises mentionnées dans ces "
-    "extraits (question + titres/extraits web). Réponds UNIQUEMENT par une "
-    "ligne par nom, sans commentaire."
+    "Relève les noms d'ENTREPRISES (sociétés commerciales, éditeurs, marques) "
+    "cités dans la question et les extraits ci-dessus. Ignore les lieux, les "
+    "personnes, les institutions et les termes génériques. Réponds UNIQUEMENT "
+    "par un tableau JSON de chaînes, 8 noms au plus, sans texte autour. "
+    "Exemple : [\"Doctolib\", \"Alan\"]. Aucun nom : []."
 )
+
+# Noms écrits noir sur blanc dans la question, sans passer par le modèle :
+# « acteurs en présence (Expensya, N2F, Spendesk, Jenji, Lucca) » — le 15/09,
+# le modèle tier chat avait rendu du bruit et raté ces cinq noms. Une liste
+# entre parenthèses ou après « : » dont chaque élément commence par une
+# majuscule ou un chiffre est prise telle quelle.
+_LISTE_DANS_QUESTION = re.compile(r"\(([^()]{3,200})\)")
+_MOTS_GENERIQUES = {
+    "france", "pme", "eti", "tpe", "saas", "b2b", "b2c", "ia", "ai", "seed",
+    "europe", "paris", "startup", "startups", "sas", "sarl", "sa",
+}
+
+
+def _noms_dans_la_question(query: str) -> list[str]:
+    noms: list[str] = []
+    for groupe in _LISTE_DANS_QUESTION.findall(query or ""):
+        elements = [e.strip(" .;") for e in re.split(r",| et | ou |/", groupe)]
+        candidats = [e for e in elements if e and e[0].isupper() or (e and e[0].isdigit())]
+        # Une vraie liste de noms : au moins deux éléments courts, tous « propres ».
+        if len(candidats) < 2 or any(len(e.split()) > 4 for e in candidats):
+            continue
+        for e in candidats:
+            if e.lower() not in _MOTS_GENERIQUES and e not in noms:
+                noms.append(e)
+    return noms[:8]
+
+
+def _noms_depuis_reponse_llm(texte: str) -> list[str]:
+    """Tableau JSON attendu ; à défaut, une ligne par nom (ancien format)."""
+    import json
+
+    brut = (texte or "").strip()
+    debut, fin = brut.find("["), brut.rfind("]")
+    if debut != -1 and fin > debut:
+        try:
+            valeurs = json.loads(brut[debut:fin + 1])
+            if isinstance(valeurs, list):
+                return [str(v).strip() for v in valeurs if isinstance(v, (str, int))]
+        except ValueError:
+            pass
+    return [ligne for ligne in brut.splitlines()]
 
 
 # Puce (`-`, `•`, `*`) ou numéro (`1.`, `1)`) en tête de ligne, répétés
@@ -146,6 +189,12 @@ def _nettoyer_nom_societe(ligne: str) -> str | None:
     # « Voici les entreprises mentionnées : » — une phrase d'amorce, pas un nom.
     if nom.endswith(":"):
         return None
+    # Un nom de société tient en quelques mots et ne ressemble pas à une phrase :
+    # « (France). Highly recognized as a French » (sortie du 15/09) est rejeté.
+    if len(nom.split()) > 5 or nom[0].islower() or "(" in nom or nom.endswith("."):
+        return None
+    if nom.lower() in _MOTS_GENERIQUES:
+        return None
     return nom
 
 
@@ -158,6 +207,10 @@ def _noms_de_societes(query: str, profile: dict | None, web_results) -> list[str
     if company_name and company_name.strip():
         noms.append(company_name.strip())
         vus.add(company_name.strip().lower())
+    for nom in _noms_dans_la_question(query):
+        if nom.lower() not in vus:
+            vus.add(nom.lower())
+            noms.append(nom)
 
     extraits = "\n".join(
         f"- {r.title} : {r.snippet}" for r in (web_results or [])[:15]
@@ -177,7 +230,7 @@ def _noms_de_societes(query: str, profile: dict | None, web_results) -> list[str
         logger.warning("Extraction des noms de sociétés indisponible : %s", e)
         return noms
 
-    for ligne in texte.splitlines():
+    for ligne in _noms_depuis_reponse_llm(texte):
         nom = _nettoyer_nom_societe(ligne)
         if not nom:
             continue
