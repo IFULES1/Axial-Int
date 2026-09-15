@@ -39,3 +39,12 @@ noms déterministe + JSON, homonymes Pappers, fiches gardées après classement,
 verdict de couverture par préfixe (→ bandeau « Sources partielles » plus
 fréquent : à revoir). Validation : étude de marché 45 sources dont 5 Pappers.
 Démo le 16/09 : compte QA prod `qa-cv2-1109@axial-qa.fr`, 80 crédits restants.
+
+## Complément 15/09 tard — préparation démo du 16/09
+Parcours d'inscription joué en prod avec `qa-demo-1509@axial-qa.fr` (mot de
+passe dans le scratchpad) : tout OK. Correctifs déployés : carte mémorisée
+24 h, contexte d'onboarding conservé, refresh 503 hors refus, messages
+d'inscription, session du flux de rapport fermée, dédup des emails d'erreur,
+bandeau adouci, pool 15+25, Perplexity en niveau 2. Dossier :
+`docs/superpowers/specs/2026-09-15-preparation-demo.md`. Point ouvert :
+40 crédits d'essai = une seule étude de marché (décision Miradie).
