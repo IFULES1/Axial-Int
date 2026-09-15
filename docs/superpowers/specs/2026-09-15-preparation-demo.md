@@ -42,11 +42,11 @@ et un parcours réel joué en prod avec un compte neuf (`qa-demo-1509@axial-qa.f
 
 1. **Ne rien déployer entre 8 h et 14 h** : un rebuild du front afficherait le
    bandeau « nouvelle version » chez tous les participants.
-2. Les participants ont **40 crédits** : une conversation coûte 2, une étude de
-   marché 40, une cartographie concurrentielle ou réglementaire 25, une
-   cartographie investisseurs 30. Après un rapport à 40, le compte est vide.
-   Recharge à la main depuis Pilotage (« créditer ») ou relever la dotation
-   d'essai avant 9 h — décision de Miradie.
+2. Les participants ont **100 crédits** (`CREDITS_ESSAI=100` dans Doppler depuis
+   le 15/09 soir, vérifié par une inscription neuve) : une conversation coûte 2,
+   une étude de marché 40, une cartographie concurrentielle ou réglementaire 25,
+   une cartographie investisseurs 30. Remettre 40 après la démo :
+   `doppler secrets set CREDITS_ESSAI=40 --config prd` puis redémarrage.
 3. Le premier rapport offert part automatiquement à chaque inscription
    (4 à 9 min, email à la fin) : dix inscriptions groupées = dix rapports en
    parallèle. Étaler les inscriptions de quelques minutes limite la file.
