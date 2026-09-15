@@ -1970,10 +1970,10 @@ const LABELS_EN = {
   "abonnés Pro": "Pro subscribers",
   "Toutes les lignes ne portent pas encore leur coût : ce total ne couvre que celles mesurées. La colonne « Mesurées » dit sur quoi il porte.":
     "Not every row carries its cost yet: this total covers only the measured ones. The \"Measured\" column says what it is based on.",
-  "Vous gardez vos 40 crédits offerts. Cette option reste disponible jusqu'au":
-    "You keep your 40 free credits. This option stays available until",
-  "Vous gardez vos 40 crédits offerts — de quoi lancer une étude complète.":
-    "You keep your 40 free credits — enough for a full study.",
+  "Vous gardez vos {n} crédits offerts. Cette option reste disponible jusqu'au":
+    "You keep your {n} free credits. This option stays available until",
+  "Vous gardez vos {n} crédits offerts — de quoi lancer une étude complète.":
+    "You keep your {n} free credits — enough for a full study.",
   "Votre période d'essai est terminée. Ajoutez une carte pour continuer à utiliser Axial — ou répondez à l'un de nos emails si vous avez besoin de plus de temps.":
     "Your trial period is over. Add a card to keep using Axial — or reply to one of my emails if you need more time.",
   "Pilotage": "Metrics",
@@ -2035,8 +2035,8 @@ const LABELS_EN = {
   "Votre avis": "Your feedback",
   "Dites-nous ce que vaut ce rapport": "Tell us what this report is worth",
   "Continuer sans carte": "Continue without a card",
-  "Vous gardez vos 40 crédits offerts — de quoi lancer une étude complète. Vous pourrez activer l'essai plus tard, depuis Crédits.":
-    "You keep your 40 free credits — enough for a full study. You can start the trial later, from Credits.",
+  "Vous gardez vos {n} crédits offerts — de quoi lancer une étude complète. Vous pourrez activer l'essai plus tard, depuis Crédits.":
+    "You keep your {n} free credits — enough for a full study. You can start the trial later, from Credits.",
   "Continuer": "Continue",
   "CE QU'AXIAL RETIENDRA": "WHAT AXIAL WILL REMEMBER",
   "Vous pourrez modifier, supprimer ou ajouter des faits depuis votre mémoire.":
@@ -2089,9 +2089,9 @@ const LABELS_EN = {
   // final. Ils passaient leurs titres en dur et restaient en français même
   // avec l'interface en anglais — au moment précis où l'on demande une carte.
   "Activez votre essai.": "Activate your trial.",
-  "40 crédits offerts pendant 14 jours — aucun débit aujourd'hui.":
-    "40 free credits for 14 days — nothing charged today.",
-  "40 crédits offerts, utilisables dès maintenant": "40 free credits, usable right away",
+  "{n} crédits offerts pendant 14 jours — aucun débit aujourd'hui.":
+    "{n} free credits for 14 days — nothing charged today.",
+  "{n} crédits offerts, utilisables dès maintenant": "{n} free credits, usable right away",
   "0 € débité aujourd'hui — votre carte sert uniquement à activer l'essai":
     "€0 charged today — your card only activates the trial",
   "Au bout de 14 jours, l'abonnement Pro démarre : 50 €/mois, 120 crédits":
@@ -2628,9 +2628,14 @@ function OnbStep4({ onBack, onSkip }) {
         // Sans date connue, on reste permissif : refuser l'accès sur une
         // information manquante serait le pire des deux défauts.
         fin: b.essai_expire_le || null,
+        // Dotation réelle (CREDITS_ESSAI côté serveur) : le texte ne dit plus
+        // « 40 » en dur — 100 pour la démo du 16/09.
+        credits: (b.trial_credits ?? b.available ?? null),
       }))
-      .catch(() => setEssai({ actif: true, periode: true, fin: null }));
+      .catch(() => setEssai({ actif: true, periode: true, fin: null, credits: null }));
   }, []);
+  const nCredits = (essai && essai.credits != null) ? String(essai.credits) : '…';
+  const avecN = (texte) => texte.replace('{n}', nCredits);
   const finLisible = (essai && essai.fin)
     ? new Date(essai.fin).toLocaleDateString(
         window.AXIAL_LANG === 'en' ? 'en-GB' : 'fr-FR',
@@ -2654,11 +2659,11 @@ function OnbStep4({ onBack, onSkip }) {
   return (
     <OnbShell step={3} onBack={onBack}
       title={libelle("Activez votre essai.")}
-      sub={libelle("40 crédits offerts pendant 14 jours — aucun débit aujourd'hui.")}>
+      sub={avecN(libelle("{n} crédits offerts pendant 14 jours — aucun débit aujourd'hui."))}>
       <article className="first-action-card">
         <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
           {[
-            ['check', libelle("40 crédits offerts, utilisables dès maintenant")],
+            ['check', avecN(libelle("{n} crédits offerts, utilisables dès maintenant"))],
             ['check', libelle("0 € débité aujourd'hui — votre carte sert uniquement à activer l'essai")],
             ['check', libelle("Au bout de 14 jours, l'abonnement Pro démarre : 50 €/mois, 120 crédits")],
             ['check', libelle("Email de rappel avant le premier débit · annulation en 1 clic, à tout moment")],
@@ -2694,8 +2699,8 @@ function OnbStep4({ onBack, onSkip }) {
                   compte interne l'essai est passé, afficher une échéance
                   expirée ferait croire à un accès déjà perdu. */}
               {(essai.periode && finLisible)
-                ? `${libelle("Vous gardez vos 40 crédits offerts. Cette option reste disponible jusqu'au")} ${finLisible}.`
-                : libelle("Vous gardez vos 40 crédits offerts — de quoi lancer une étude complète.")}
+                ? `${avecN(libelle("Vous gardez vos {n} crédits offerts. Cette option reste disponible jusqu'au"))} ${finLisible}.`
+                : avecN(libelle("Vous gardez vos {n} crédits offerts — de quoi lancer une étude complète."))}
             </p>
           </div>
         )}

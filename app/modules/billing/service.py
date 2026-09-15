@@ -27,6 +27,14 @@ from app.modules.billing.models import CreditBalance, CreditEvent, UserSubscript
 # pouvait produire aucun rapport — le cœur du produit restait fermé, et le
 # blocage de la carte était simplement déplacé de trois écrans.
 FREE_BETA_CREDITS = 40
+
+
+def credits_essai() -> int:
+    """Dotation d'essai à la création du compte : `CREDITS_ESSAI` (Doppler),
+    40 par défaut. Distincte de `FREE_BETA_CREDITS`, la mensualité du plan."""
+    from app.config import get_settings
+
+    return int(get_settings().credits_essai or FREE_BETA_CREDITS)
 FREE_BETA_DAYS = 14
 
 
@@ -68,13 +76,14 @@ def get_or_create_balance(db: Session, user_id: str, *,
     uid = uuid.UUID(user_id)
     balance = db.get(CreditBalance, uid)
     if balance is None:
+        dotation = credits_essai()
         balance = CreditBalance(
             user_id=uid,
-            trial_credits=FREE_BETA_CREDITS,
+            trial_credits=dotation,
             trial_expires_at=_now() + dt.timedelta(days=FREE_BETA_DAYS),
         )
         db.add(balance)
-        _log_event(db, user_id, FREE_BETA_CREDITS, "essai_bienvenue")
+        _log_event(db, user_id, dotation, "essai_bienvenue")
         if commit:
             db.commit()
             db.refresh(balance)

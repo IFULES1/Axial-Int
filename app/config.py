@@ -164,6 +164,9 @@ class Settings(BaseSettings):
     # calculables — le tableau de bord affiche « non renseigné » plutôt qu'un
     # zéro qui ferait croire à une structure gratuite.
     couts_fixes_mensuels_eur: float = 0.0
+    # Crédits offerts à la création d'un compte (essai). Réglable sans
+    # déploiement : 100 pour la démo du 16/09, 40 par défaut.
+    credits_essai: int = 40
 
     # --- Tarifs des fournisseurs de recherche web -------------------------
     # Micro-euros PAR APPEL (1 € = 1 000 000 µ€). Un « appel » = une requête
