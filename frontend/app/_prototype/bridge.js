@@ -571,6 +571,32 @@ export async function axUploadDocument(file, _retried = false) {
   return res.json();
 }
 
+// --- kb (base de connaissance Axial, admin uniquement — Sources v2 §5) ---
+export async function axKbLister() { return axFetch("/admin/kb"); }
+export async function axKbAjouterUrl(url, categorie) {
+  return axFetch("/admin/kb/urls", { method: "POST", body: { url, categorie } });
+}
+export async function axKbAjouterFichier(file, categorie, _retried = false) {
+  const tok = axGetToken();
+  const fd = new FormData();
+  fd.append("fichier", file);
+  if (categorie) fd.append("categorie", categorie);
+  const res = await fetch(AX_API + "/admin/kb/fichiers", {
+    method: "POST",
+    headers: tok ? { Authorization: "Bearer " + tok } : {},
+    body: fd,
+  });
+  if ((res.status === 401 || res.status === 403) && !_retried) {
+    const ok = await tryRefresh();
+    if (ok) return axKbAjouterFichier(file, categorie, true);
+  }
+  if (!res.ok) throw await erreurDepuisReponse(res, "Échec de l'envoi.");
+  return res.json();
+}
+export async function axKbSupprimer(docId) {
+  return axFetch(`/admin/kb/${docId}`, { method: "DELETE" });
+}
+
 // --- reports ---
 
 /** Repli bloquant du flux : `POST /analysis/run` crée la ligne, lance le même

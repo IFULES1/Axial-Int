@@ -11,7 +11,7 @@ import {
   etatDepuisRapport, etatDepuisStockage, etatSupprime, versStockage,
   libelleEtape, libelleRaison,
 } from "./rapports_etat";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument, axKbLister, axKbAjouterFichier, axKbAjouterUrl, axKbSupprimer } from "./bridge";
 import { parserMarkdown } from "./markdown";
 import { creerVeilleVersion, lireVersionServie } from "./version";
 
@@ -514,9 +514,12 @@ const STRINGS = {
     'conv.etape.recherche': 'Recherche web…',
     'conv.etape.sources': 'sources lues',
     // Étiquettes d'origine des citations (spec §4/§3) — la base de connaissance
-    // Axial (kb) n'en a volontairement AUCUNE (décision de Miradie du 14/09).
+    // Axial (kb, citée par le backend sous source="interne") n'est JAMAIS
+    // nommée côté utilisateur (décision de Miradie du 14/09) : elle prend un
+    // libellé générique, comme un document.
     'conv.source.investisseurs': 'Base investisseurs Axial',
     'conv.source.pappers': 'Registre des entreprises (Pappers)',
+    'conv.source.interne': 'Document de référence',
     'conv.etape.redaction': 'Rédaction…',
     'conv.etape.secondes': 's',
     'conv.scroll.bas': 'Nouveaux messages',
@@ -631,6 +634,36 @@ const STRINGS = {
     'err.type_inconnu.detail': 'Ce type de rapport n\u2019existe plus. Choisissez-en un dans la liste.',
     'err.rapport_supprime.titre': 'Ce rapport a été supprimé',
     'err.rapport_supprime.detail': 'Il a été supprimé pendant sa génération. Aucun crédit n\u2019a été débité — vous pouvez relancer la même question.',
+    // Base de connaissance Axial (Sources v2 §5) — écran admin (Pilotage) uniquement.
+    'err.kb_deja_indexe.titre': 'Déjà indexé',
+    'err.kb_deja_indexe.detail': 'Ce fichier ou cette adresse figure déjà dans la base de connaissance.',
+    'err.kb_contenu_insuffisant.titre': 'Contenu insuffisant',
+    'err.kb_contenu_insuffisant.detail': 'Le texte extrait est trop court ou vide pour être indexé.',
+    'err.kb_format_non_supporte.titre': 'Format non pris en charge',
+    'err.kb_format_non_supporte.detail': 'Formats acceptés : PDF, DOCX, XLSX, CSV, TXT, MD.',
+    'kb.titre': 'Base de connaissance Axial',
+    'kb.sous_titre': 'Corpus alimentant les rapports et les réponses — visible seulement ici.',
+    'kb.compte.documents': 'documents',
+    'kb.compte.morceaux': 'morceaux indexés',
+    'kb.categorie.label': 'Catégorie',
+    'kb.deposer_fichier': 'Déposer un fichier',
+    'kb.url.placeholder': 'https://…',
+    'kb.url.ajouter': 'Ajouter',
+    'kb.indexation_en_cours': 'Indexation en cours…',
+    'kb.vide': 'Aucun document dans la base de connaissance.',
+    'kb.col.titre': 'Titre',
+    'kb.col.source': 'Source',
+    'kb.col.categorie': 'Catégorie',
+    'kb.col.type': 'Type',
+    'kb.col.morceaux': 'Morceaux',
+    'kb.col.date': 'Date',
+    'kb.col.statut': 'Statut',
+    'kb.type.fichier': 'Fichier',
+    'kb.type.url': 'URL',
+    'kb.statut.indexe': 'Indexé',
+    'kb.statut.echec': 'Échec',
+    'kb.supprimer': 'Supprimer',
+    'kb.supprimer.confirmation': 'Supprimer ce document de la base de connaissance ? Cette action est définitive.',
   },
   en: {
     'common.continue': 'Continue',
@@ -948,10 +981,12 @@ const STRINGS = {
     'conv.etape.attente': 'Preparing…',
     'conv.etape.recherche': 'Web search…',
     'conv.etape.sources': 'sources read',
-    // Citation origin labels (spec §4/§3) — the Axial knowledge base (kb) gets
-    // NONE on purpose (Miradie's 14/09 decision).
+    // Citation origin labels (spec §4/§3) — the Axial knowledge base (kb,
+    // cited by the backend under source="interne") is NEVER named to users
+    // (Miradie's 14/09 decision): it gets a generic label, like a document.
     'conv.source.investisseurs': 'Axial investor database',
     'conv.source.pappers': 'Company registry (Pappers)',
+    'conv.source.interne': 'Reference document',
     'conv.etape.redaction': 'Writing…',
     'conv.etape.secondes': 's',
     'conv.scroll.bas': 'New messages',
@@ -1058,6 +1093,36 @@ const STRINGS = {
     'err.type_inconnu.detail': 'This report type no longer exists. Pick one from the list.',
     'err.rapport_supprime.titre': 'This report was deleted',
     'err.rapport_supprime.detail': 'It was deleted while it was being generated. No credits were charged — you can run the same question again.',
+    // Axial knowledge base (Sources v2 §5) — Pilotage (admin) screen only.
+    'err.kb_deja_indexe.titre': 'Already indexed',
+    'err.kb_deja_indexe.detail': 'This file or address is already in the knowledge base.',
+    'err.kb_contenu_insuffisant.titre': 'Not enough content',
+    'err.kb_contenu_insuffisant.detail': 'The extracted text is too short or empty to be indexed.',
+    'err.kb_format_non_supporte.titre': 'Unsupported format',
+    'err.kb_format_non_supporte.detail': 'Accepted formats: PDF, DOCX, XLSX, CSV, TXT, MD.',
+    'kb.titre': 'Axial knowledge base',
+    'kb.sous_titre': 'Corpus feeding reports and answers — visible only here.',
+    'kb.compte.documents': 'documents',
+    'kb.compte.morceaux': 'indexed chunks',
+    'kb.categorie.label': 'Category',
+    'kb.deposer_fichier': 'Upload a file',
+    'kb.url.placeholder': 'https://…',
+    'kb.url.ajouter': 'Add',
+    'kb.indexation_en_cours': 'Indexing…',
+    'kb.vide': 'No document in the knowledge base.',
+    'kb.col.titre': 'Title',
+    'kb.col.source': 'Source',
+    'kb.col.categorie': 'Category',
+    'kb.col.type': 'Type',
+    'kb.col.morceaux': 'Chunks',
+    'kb.col.date': 'Date',
+    'kb.col.statut': 'Status',
+    'kb.type.fichier': 'File',
+    'kb.type.url': 'URL',
+    'kb.statut.indexe': 'Indexed',
+    'kb.statut.echec': 'Failed',
+    'kb.supprimer': 'Delete',
+    'kb.supprimer.confirmation': 'Delete this document from the knowledge base? This cannot be undone.',
   },
 };
 
@@ -2896,6 +2961,17 @@ function decrireErreur(e, t) {
     const [prefixe, action] = CODES_RAPPORTS[code];
     return { titre: t(`${prefixe}.titre`), detail: t(`${prefixe}.detail`), action };
   }
+  // Base de connaissance Axial (Sources v2 §5, task-5-report.md) : erreurs
+  // nommées rendues par POST /admin/kb/fichiers et /admin/kb/urls.
+  const CODES_KB = {
+    deja_indexe: ['err.kb_deja_indexe', null],
+    contenu_insuffisant: ['err.kb_contenu_insuffisant', null],
+    unsupported_format: ['err.kb_format_non_supporte', null],
+  };
+  if (CODES_KB[code]) {
+    const [prefixe, action] = CODES_KB[code];
+    return { titre: t(`${prefixe}.titre`), detail: t(`${prefixe}.detail`), action };
+  }
   // Message du backend s'il existe : il est déjà rédigé pour l'utilisateur.
   return {
     titre: t('err.defaut.titre'),
@@ -4307,6 +4383,7 @@ function ComptesAdmin() {
 }
 
 function PilotageSurface() {
+  const t = window.useT();
   const [jours, setJours] = React.useState(30);
   const [vue, setVue] = React.useState('chiffres'); // chiffres | comptes
   const [d, setD] = React.useState(null);
@@ -4320,6 +4397,44 @@ function PilotageSurface() {
   const eur = (v) => (v == null ? '—' : `${Number(v).toFixed(2)} €`);
   const eur4 = (v) => (v == null ? '—' : `${Number(v).toFixed(4)} €`);
   const pct = (v) => (v == null ? '—' : `${Number(v).toFixed(1)} %`);
+
+  // --- Base de connaissance Axial (Sources v2 §5) — admin uniquement. ---
+  const DEFAULT_CATEGORIE = '07_ajouts-admin';
+  const [kb, setKb] = React.useState(null); // { items, categories }
+  const [kbErr, setKbErr] = React.useState('');
+  const [kbBusy, setKbBusy] = React.useState(false); // un envoi à la fois
+  const [kbCategorie, setKbCategorie] = React.useState(DEFAULT_CATEGORIE);
+  const [kbUrl, setKbUrl] = React.useState('');
+  const kbFileRef = React.useRef(null);
+  const kbLoad = () => axKbLister().then(setKb).catch((e) => setKbErr((e && e.message) || 'Erreur'));
+  React.useEffect(() => { kbLoad(); }, []);
+  const kbOnFile = async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    setKbBusy(true); setKbErr('');
+    try { await axKbAjouterFichier(f, kbCategorie); }
+    catch (ex) { setKbErr(decrireErreur(ex, t).detail); }
+    setKbBusy(false);
+    if (kbFileRef.current) kbFileRef.current.value = '';
+    kbLoad();
+  };
+  const kbAjouterUrl = async () => {
+    const url = kbUrl.trim();
+    if (!url || kbBusy) return;
+    setKbBusy(true); setKbErr('');
+    try { await axKbAjouterUrl(url, kbCategorie); setKbUrl(''); }
+    catch (ex) { setKbErr(decrireErreur(ex, t).detail); }
+    setKbBusy(false);
+    kbLoad();
+  };
+  const kbSupprimer = async (doc) => {
+    if (!window.confirm(t('kb.supprimer.confirmation'))) return;
+    try { await axKbSupprimer(doc.id); } catch (ex) { setKbErr((ex && ex.message) || 'Erreur'); }
+    kbLoad();
+  };
+  const kbFmtDate = (iso) => (iso ? fmtDate(iso, window.AXIAL_LANG || 'fr') : '—');
+  const kbTotalChunks = kb ? kb.items.reduce((s, it) => s + (it.nb_chunks || 0), 0) : 0;
+  const kbTriee = kb ? [...kb.items].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')) : [];
 
   const Bloc = ({ titre, enfants }) => (
     <section style={{ marginBottom: 28 }}>
@@ -4480,6 +4595,98 @@ function PilotageSurface() {
           </p>
         </>
       )}
+
+      <section style={{ marginTop: 28 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+          <div className="label">{t('kb.titre')}</div>
+          {kb && (
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--fg-3)' }}>
+              {kb.items.length} {t('kb.compte.documents')} · {kbTotalChunks} {t('kb.compte.morceaux')}
+            </div>
+          )}
+        </div>
+        <p style={{ fontSize: 12.5, color: 'var(--fg-3)', margin: '0 0 12px' }}>{t('kb.sous_titre')}</p>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <select value={kbCategorie} onChange={(e) => setKbCategorie(e.target.value)} disabled={kbBusy}
+            aria-label={t('kb.categorie.label')}
+            style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8,
+                     color: 'var(--fg)', fontSize: 12.5, padding: '7px 9px' }}>
+            {(kb && kb.categories.length ? kb.categories : [DEFAULT_CATEGORIE]).map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+          <button className="btn btn-secondary btn-sm" disabled={kbBusy}
+            onClick={() => kbFileRef.current && kbFileRef.current.click()}>
+            <Icon name="plus" size={13} />
+            {kbBusy ? t('kb.indexation_en_cours') : t('kb.deposer_fichier')}
+          </button>
+          <input ref={kbFileRef} type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.md" style={{ display: 'none' }}
+            onChange={kbOnFile} disabled={kbBusy} />
+          <input value={kbUrl} onChange={(e) => setKbUrl(e.target.value)} placeholder={t('kb.url.placeholder')}
+            disabled={kbBusy}
+            style={{ flex: '1 1 220px', minWidth: 0, background: 'var(--surface-2)', border: '1px solid var(--border)',
+                     borderRadius: 8, color: 'var(--fg)', fontSize: 12.5, padding: '7px 10px', outline: 'none' }} />
+          <button className="btn btn-secondary btn-sm" disabled={kbBusy || !kbUrl.trim()} onClick={kbAjouterUrl}>
+            {t('kb.url.ajouter')}
+          </button>
+        </div>
+
+        {kbErr && <p style={{ color: 'var(--error, #e5484d)', fontSize: 12.5, marginBottom: 10 }}>{kbErr}</p>}
+        {kb === null && !kbErr && <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>…</p>}
+        {kb !== null && kbTriee.length === 0 && (
+          <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>{t('kb.vide')}</p>
+        )}
+        {kbTriee.length > 0 && (
+          <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13, background: 'var(--surface-2)' }}>
+              <thead>
+                <tr>{[t('kb.col.titre'), t('kb.col.source'), t('kb.col.categorie'), t('kb.col.type'),
+                      t('kb.col.morceaux'), t('kb.col.date'), t('kb.col.statut'), ''].map((h, i) => (
+                  <th key={i} style={{ textAlign: 'left', padding: '9px 12px', fontSize: 11,
+                                       textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--fg-3)',
+                                       borderBottom: '1px solid var(--border)' }}>{h}</th>
+                ))}</tr>
+              </thead>
+              <tbody>
+                {kbTriee.map((doc) => (
+                  <tr key={doc.id}>
+                    <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', maxWidth: 260,
+                                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.titre}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', maxWidth: 220,
+                                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                                 color: 'var(--fg-3)' }}>{doc.source}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', fontFamily: 'var(--font-mono)',
+                                 fontSize: 11.5, color: 'var(--fg-3)' }}>{doc.categorie}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)' }}>
+                      {doc.type === 'url' ? t('kb.type.url') : t('kb.type.fichier')}
+                    </td>
+                    <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', fontFamily: 'var(--font-mono)' }}>
+                      {doc.nb_chunks}
+                    </td>
+                    <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', fontFamily: 'var(--font-mono)',
+                                 fontSize: 11.5, color: 'var(--fg-3)' }}>{kbFmtDate(doc.created_at)}</td>
+                    <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)' }}>
+                      {doc.statut === 'echec' ? (
+                        <span className="ax-badge-illisible" title={doc.erreur || ''}>
+                          <Icon name="alert" size={10} /> {t('kb.statut.echec')}
+                        </span>
+                      ) : (
+                        <span className="chip chip-success">{t('kb.statut.indexe')}</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '9px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right' }}>
+                      <button className="icon-btn" onClick={() => kbSupprimer(doc)} title={t('kb.supprimer')}>
+                        <Icon name="x" size={13} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
@@ -8988,7 +9195,10 @@ function App() {
       ? t('conv.source.investisseurs')
       : c.source === 'pappers'
       ? t('conv.source.pappers')
-      : (c.source === 'document' ? 'Votre document' : ('Base de connaissance Axial' + (c.reference ? ' · ' + c.reference : ''))),
+      // `interne` = un passage de la base de connaissance Axial (grounding.py) :
+      // jamais nommé côté utilisateur (décision du 14/09), donc le même
+      // libellé générique qu'un document plutôt que « Base de connaissance ».
+      : (c.source === 'document' ? 'Votre document' : (t('conv.source.interne') + (c.reference ? ' · ' + c.reference : ''))),
     excerpt: c.excerpt || '',
     link: c.url || null,
   }));
