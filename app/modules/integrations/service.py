@@ -175,6 +175,7 @@ def deconnecter(db: Session, user_id: str, provider: str) -> None:
 
 def etat(db: Session, user_id: str) -> dict:
     """Ce que l'écran Paramètres affiche pour chaque outil."""
+    s = get_settings()
     out = {}
     for provider in ("notion", "google"):
         conn = get(db, user_id, provider)
@@ -184,7 +185,85 @@ def etat(db: Session, user_id: str) -> dict:
             "compte": (conn.account or {}) if conn else None,
             "depuis": conn.created_at.isoformat() if conn else None,
         }
+    # Le sélecteur Drive (front, Google Picker) n'a besoin que de l'identifiant
+    # client côté navigateur — pas du secret ni de `integrations_secret_key`
+    # que `configure()` exige pour l'échange OAuth côté serveur. Le front
+    # croise ce booléen avec ses propres `NEXT_PUBLIC_GOOGLE_*` (spec §6).
+    out["google"]["selecteur"] = bool(s.google_client_id)
     return out
+
+
+# --- Drive comme source (spec §6) -------------------------------------------
+
+DRIVE_API = "https://www.googleapis.com/drive/v3"
+# Google Docs/Sheets/Slides n'ont pas de contenu binaire natif : ils
+# s'exportent dans un format concret. `drive.file` autorise `export` comme
+# `alt=media`, tant que le fichier a été choisi par l'utilisateur via le
+# Picker (spec §6).
+GOOGLE_DOC_EXPORTS: dict[str, tuple[str, str]] = {
+    "application/vnd.google-apps.document": ("text/plain", ".txt"),
+    "application/vnd.google-apps.spreadsheet": ("text/csv", ".csv"),
+    "application/vnd.google-apps.presentation": ("application/pdf", ".pdf"),
+}
+
+
+def telecharger_drive(db: Session, user_id: str, file_id: str, name: str,
+                      mime_type: str | None) -> tuple[str, bytes, str]:
+    """Télécharge un fichier Drive choisi par l'utilisateur (Picker) et
+    renvoie `(nom, bytes, mime)`, prêt pour `documents.ingest`.
+
+    Un Google Doc/Sheet/Slide est exporté dans un format concret (texte, CSV,
+    PDF) ; tout le reste (PDF, DOCX, images…) est téléchargé tel quel via
+    `alt=media`. La lecture est en flux et coupée à `MAX_UPLOAD_BYTES` : un
+    fichier trop gros est jamais entièrement rapatrié.
+    """
+    from app.modules.documents.service import MAX_UPLOAD_BYTES
+
+    jeton = jeton_actif(db, user_id, "google")
+    if not jeton:
+        raise AppError("Google Drive n'est pas connecté.", 400,
+                       code="google_non_connecte")
+
+    export = GOOGLE_DOC_EXPORTS.get(mime_type or "")
+    if export:
+        export_mime, suffixe = export
+        url = f"{DRIVE_API}/files/{file_id}/export"
+        params = {"mimeType": export_mime}
+        nom = f"{name}{suffixe}"
+        mime_sortie = export_mime
+    else:
+        url = f"{DRIVE_API}/files/{file_id}"
+        params = {"alt": "media"}
+        nom = name
+        mime_sortie = mime_type or "application/octet-stream"
+
+    entetes = {"Authorization": f"Bearer {jeton}"}
+    try:
+        with httpx.stream("GET", url, headers=entetes, params=params,
+                          timeout=30.0) as r:
+            if r.status_code in (401, 403, 404):
+                raise AppError("Ce fichier Drive est inaccessible. Reconnectez "
+                               "Google Drive ou vérifiez qu'il existe toujours.",
+                               400, code="drive_fichier_inaccessible")
+            r.raise_for_status()
+            morceaux: list[bytes] = []
+            taille = 0
+            for morceau in r.iter_bytes():
+                taille += len(morceau)
+                if taille > MAX_UPLOAD_BYTES:
+                    raise AppError(
+                        f"Fichier trop volumineux (max {MAX_UPLOAD_BYTES // (1024*1024)} Mo).",
+                        413, code="fichier_trop_volumineux")
+                morceaux.append(morceau)
+    except AppError:
+        raise
+    except httpx.HTTPError as e:
+        logger.warning("Téléchargement Drive échoué (%s) : %s", file_id, e)
+        raise AppError("Ce fichier Drive est inaccessible. Reconnectez "
+                       "Google Drive ou vérifiez qu'il existe toujours.",
+                       400, code="drive_fichier_inaccessible") from e
+
+    return nom, b"".join(morceaux), mime_sortie
 
 
 def mcp_pour_rapport(db: Session, user_id: str) -> tuple[list, list]:

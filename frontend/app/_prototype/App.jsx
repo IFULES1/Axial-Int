@@ -11,7 +11,7 @@ import {
   etatDepuisRapport, etatDepuisStockage, etatSupprime, versStockage,
   libelleEtape, libelleRaison,
 } from "./rapports_etat";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument, axKbLister, axKbAjouterFichier, axKbAjouterUrl, axKbSupprimer } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axImporterDepuisDrive, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument, axKbLister, axKbAjouterFichier, axKbAjouterUrl, axKbSupprimer } from "./bridge";
 import { parserMarkdown } from "./markdown";
 import { creerVeilleVersion, lireVersionServie } from "./version";
 
@@ -665,6 +665,13 @@ const STRINGS = {
     'kb.statut.echec': 'Échec',
     'kb.supprimer': 'Supprimer',
     'kb.supprimer.confirmation': 'Supprimer ce document de la base de connaissance ? Cette action est définitive.',
+    'drive.importer': 'Importer depuis Drive',
+    'drive.importer.aide': 'Choisissez des fichiers dans votre Google Drive à importer comme documents',
+    'drive.importer.busy': 'Import…',
+    'err.drive_non_connecte.titre': 'Google Drive non connecté',
+    'err.drive_non_connecte.detail': 'Connectez Google Drive dans Paramètres > Connexions pour importer depuis Drive.',
+    'err.drive_inaccessible.titre': 'Fichier Drive inaccessible',
+    'err.drive_inaccessible.detail': "Ce fichier n'a pas pu être lu sur Google Drive — vérifiez qu'il existe toujours et réessayez.",
   },
   en: {
     'common.continue': 'Continue',
@@ -1125,6 +1132,13 @@ const STRINGS = {
     'kb.statut.echec': 'Failed',
     'kb.supprimer': 'Delete',
     'kb.supprimer.confirmation': 'Delete this document from the knowledge base? This cannot be undone.',
+    'drive.importer': 'Import from Drive',
+    'drive.importer.aide': 'Choose files from your Google Drive to import as documents',
+    'drive.importer.busy': 'Importing…',
+    'err.drive_non_connecte.titre': 'Google Drive not connected',
+    'err.drive_non_connecte.detail': 'Connect Google Drive in Settings > Connections to import from Drive.',
+    'err.drive_inaccessible.titre': 'Drive file unreachable',
+    'err.drive_inaccessible.detail': 'This file could not be read from Google Drive — check that it still exists and try again.',
   },
 };
 
@@ -2972,6 +2986,16 @@ function decrireErreur(e, t) {
   };
   if (CODES_KB[code]) {
     const [prefixe, action] = CODES_KB[code];
+    return { titre: t(`${prefixe}.titre`), detail: t(`${prefixe}.detail`), action };
+  }
+  // Import depuis Google Drive (Sources v2 §6, task-7-report.md) : erreurs
+  // nommées rendues par POST /integrations/google/importer.
+  const CODES_DRIVE = {
+    google_non_connecte: ['err.drive_non_connecte', null],
+    drive_fichier_inaccessible: ['err.drive_inaccessible', null],
+  };
+  if (CODES_DRIVE[code]) {
+    const [prefixe, action] = CODES_DRIVE[code];
     return { titre: t(`${prefixe}.titre`), detail: t(`${prefixe}.detail`), action };
   }
   // Message du backend s'il existe : il est déjà rédigé pour l'utilisateur.
@@ -6952,6 +6976,94 @@ window.AgentSession = AgentSession;
 
 
 /* =================================================================
+   Google Picker (Sources v2 §6) — importer des fichiers Drive comme
+   documents Axial. Le Picker EXIGE un jeton OAuth côté NAVIGATEUR (c'est
+   Google qui l'impose, indépendant du jeton serveur géré par
+   `integrations.jeton_actif`) : `google.accounts.oauth2.initTokenClient`
+   en obtient un, scope `drive.file`, jamais persisté ni envoyé au backend —
+   seuls `file_id`/`name`/`mime_type` partent vers `axImporterDepuisDrive`,
+   qui retélécharge côté serveur avec le jeton, lui, stocké.
+   ================================================================= */
+const GOOGLE_PICKER_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+// Formats acceptés par `documents.ingest` (PDF/DOCX/XLSX/CSV/TXT/MD) + les
+// trois types Google natifs, exportés côté serveur (`telecharger_drive`).
+const GOOGLE_PICKER_MIME_TYPES = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+  'text/plain',
+  'text/markdown',
+  'application/vnd.google-apps.document',
+  'application/vnd.google-apps.spreadsheet',
+  'application/vnd.google-apps.presentation',
+].join(',');
+
+let _googlePickerChargement = null;
+/** Charge `api.js` (Picker) et `gsi/client` (jeton OAuth navigateur) à la
+ * demande, une seule fois : la promesse est mémorisée pour tout appel
+ * suivant, y compris un premier appel concurrent. */
+function chargerGooglePicker() {
+  if (_googlePickerChargement) return _googlePickerChargement;
+  const chargerScript = (src) => new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = true; s.defer = true;
+    s.onload = res; s.onerror = () => rej(new Error(`Chargement de ${src} impossible`));
+    document.head.appendChild(s);
+  });
+  _googlePickerChargement = Promise.all([
+    chargerScript('https://apis.google.com/js/api.js')
+      .then(() => new Promise((res) => window.gapi.load('picker', res))),
+    chargerScript('https://accounts.google.com/gsi/client'),
+  ]).catch((e) => { _googlePickerChargement = null; throw e; });
+  return _googlePickerChargement;
+}
+
+function obtenirJetonPickerDrive(clientId) {
+  return new Promise((resolve, reject) => {
+    try {
+      const client = window.google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: GOOGLE_PICKER_SCOPE,
+        callback: (reponse) => {
+          if (reponse && reponse.access_token) resolve(reponse.access_token);
+          else reject(new Error('Autorisation Google refusée'));
+        },
+      });
+      client.requestAccessToken();
+    } catch (e) { reject(e); }
+  });
+}
+
+/** Ouvre le sélecteur Drive ; renvoie les fichiers choisis
+ * (`[{id, name, mimeType}]`), ou `[]` si l'utilisateur annule. */
+async function ouvrirPickerDrive(apiKey, clientId) {
+  await chargerGooglePicker();
+  const jeton = await obtenirJetonPickerDrive(clientId);
+  return new Promise((resolve, reject) => {
+    try {
+      const vue = new window.google.picker.DocsView()
+        .setIncludeFolders(false)
+        .setMimeTypes(GOOGLE_PICKER_MIME_TYPES);
+      const picker = new window.google.picker.PickerBuilder()
+        .addView(vue)
+        .setOAuthToken(jeton)
+        .setDeveloperKey(apiKey)
+        .setAppId(clientId.split('-')[0])
+        .setCallback((donnee) => {
+          if (donnee.action === window.google.picker.Action.PICKED) {
+            resolve((donnee.docs || []).map((d) => ({ id: d.id, name: d.name, mimeType: d.mimeType })));
+          } else if (donnee.action === window.google.picker.Action.CANCEL) {
+            resolve([]);
+          }
+        })
+        .build();
+      picker.setVisible(true);
+    } catch (e) { reject(e); }
+  });
+}
+
+/* =================================================================
    MEMORY — Axial's Key
    ================================================================= */
 function DocumentsPanel() {
@@ -6961,9 +7073,40 @@ function DocumentsPanel() {
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState('');
   const [reindexe, setReindexe] = React.useState('');
+  const [driveEtat, setDriveEtat] = React.useState(null);
+  const [driveBusy, setDriveBusy] = React.useState(false);
   const fileRef = React.useRef(null);
   const load = () => axListDocuments().then(setDocs).catch(() => setDocs([]));
   React.useEffect(() => { load(); }, []);
+  React.useEffect(() => { axIntegrations().then(setDriveEtat).catch(() => setDriveEtat({})); }, []);
+  // Bouton « Importer depuis Drive » : n'apparaît que si le backend expose
+  // `google.selecteur` (GOOGLE_CLIENT_ID configuré côté serveur) ET si les
+  // deux variables navigateur du Picker sont posées (spec §6). Sans l'une des
+  // deux, proposer le bouton mènerait à un échec — masqué plutôt qu'en erreur
+  // (contrainte globale du chantier).
+  const googleApiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
+  const googleClientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+  const driveGoogle = (driveEtat && driveEtat.google) || {};
+  const driveVisible = !!(driveGoogle.selecteur && googleApiKey && googleClientId);
+  const importerDepuisDrive = async () => {
+    // Google non connecté pour ce compte : même parcours que la tuile
+    // Connexions plutôt qu'une erreur — la connexion redirige immédiatement.
+    if (!driveGoogle.connecte) { axConnectIntegration('google'); return; }
+    setDriveBusy(true); setErr('');
+    try {
+      const fichiers = await ouvrirPickerDrive(googleApiKey, googleClientId);
+      for (const f of fichiers) {
+        // Séquentiel : chaque import est un appel serveur (téléchargement
+        // Drive + indexation) — les paralléliser n'apporterait rien et
+        // compliquerait le rapport d'erreur partiel.
+        await axImporterDepuisDrive(f.id, f.name, f.mimeType);
+      }
+      if (fichiers.length) load();
+    } catch (ex) {
+      setErr(decrireErreur(ex, t).detail);
+    }
+    setDriveBusy(false);
+  };
   const onFile = async (e) => {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
@@ -6990,9 +7133,17 @@ function DocumentsPanel() {
         <div className="section-label">
           {lang === 'fr' ? 'Vos documents (utilisés dans les analyses)' : 'Your documents (used in analyses)'}
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current && fileRef.current.click()} disabled={busy}>
-          <Icon name="plus" size={13} />{busy ? (lang === 'fr' ? 'Envoi…' : 'Uploading…') : (lang === 'fr' ? 'Ajouter' : 'Add')}
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current && fileRef.current.click()} disabled={busy}>
+            <Icon name="plus" size={13} />{busy ? (lang === 'fr' ? 'Envoi…' : 'Uploading…') : (lang === 'fr' ? 'Ajouter' : 'Add')}
+          </button>
+          {driveVisible && (
+            <button className="btn btn-secondary btn-sm" onClick={importerDepuisDrive}
+              disabled={driveBusy} title={t('drive.importer.aide')}>
+              <Icon name="folder" size={13} />{driveBusy ? t('drive.importer.busy') : t('drive.importer')}
+            </button>
+          )}
+        </div>
         <input ref={fileRef} type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.md" style={{ display: 'none' }} onChange={onFile} />
       </div>
       {err && <p style={{ color: 'var(--error, #e5484d)', fontSize: 12.5, marginBottom: 10 }}>{err}</p>}

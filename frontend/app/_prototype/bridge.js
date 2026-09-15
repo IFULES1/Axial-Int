@@ -493,6 +493,14 @@ export async function axDeliverReport(provider, reportId) {
     method: "POST", body: { report_id: reportId },
   });
 }
+/** Importe un fichier choisi via le Google Picker comme document Axial
+ * (Sources v2 §6) ; renvoie le `DocumentOut` créé, même forme que
+ * `axUploadDocument`. */
+export async function axImporterDepuisDrive(fileId, name, mimeType) {
+  return axFetch("/integrations/google/importer", {
+    method: "POST", body: { file_id: fileId, name, mime_type: mimeType },
+  });
+}
 
 // --- veille agents (watches) ---
 export async function axWatchSkills() { return axFetch("/watches/skills", { auth: false }); }

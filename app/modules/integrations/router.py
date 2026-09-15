@@ -106,6 +106,29 @@ def deliver_notion(payload: LivraisonIn, user: AuthUser = Depends(get_current_us
     return {"url": url}
 
 
+class ImporterDriveIn(BaseModel):
+    file_id: str
+    name: str
+    mime_type: str | None = None
+
+
+@router.post("/google/importer")
+def importer_drive(payload: ImporterDriveIn, user: AuthUser = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
+    """Importer un fichier choisi via le Google Picker comme document Axial
+    (spec §6) : téléchargement/export Drive puis pipeline `documents.ingest`
+    identique à l'upload local (mêmes formats, mêmes limites). Réponse dans
+    la même forme que `POST /documents/upload` (`DocumentOut`)."""
+    from app.modules.documents import service as documents_service
+    from app.modules.documents.router import _to_out
+
+    nom, data, mime = service.telecharger_drive(
+        db, user.id, payload.file_id, payload.name, payload.mime_type)
+    doc = documents_service.ingest(db, user_id=user.id, filename=nom, data=data,
+                                   mime_type=mime)
+    return _to_out(doc)
+
+
 @router.post("/google/deliver")
 def deliver_drive(payload: LivraisonIn, user: AuthUser = Depends(get_current_user),
                   db: Session = Depends(get_db)) -> dict:
