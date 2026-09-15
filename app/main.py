@@ -94,6 +94,7 @@ def _mount_routers() -> None:
     from app.modules.billing.router import router as billing_router
     from app.modules.documents.router import router as documents_router
     from app.modules.intelligence.router import router as intelligence_router
+    from app.modules.kb.router import router as kb_router
     from app.modules.memory.router import router as memory_router
     from app.modules.rag.router import router as rag_router
     from app.modules.reports.router import router as reports_router
@@ -122,6 +123,7 @@ def _mount_routers() -> None:
     app.include_router(integrations_router)
     app.include_router(metrics_router)
     app.include_router(viz_router)
+    app.include_router(kb_router)
 
 
 _mount_routers()

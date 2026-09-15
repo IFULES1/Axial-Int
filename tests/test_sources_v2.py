@@ -5,10 +5,14 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import uuid
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.modules.kb.models import KbDocument
 from app.shared.search.contraintes import (
     Contraintes,
     DOMAINES_EXCLUS_DEFAUT,
@@ -2801,3 +2805,631 @@ def test_conversation_investisseurs_pas_de_recherche_si_message_trivial(monkeypa
 
     assert not appele
     assert rech.citations == []
+
+
+# ===========================================================================
+# Task 5 — base de connaissance Axial (app/modules/kb/)
+# ===========================================================================
+#
+# `embed_texts` est bouchonné (vecteurs factices de la bonne dimension) :
+# aucun test d'ingestion n'appelle Cohere. Qdrant tourne en mémoire
+# (`QDRANT_URL=:memory:`, voir `.env` — même fixture que le reste de la
+# suite) ; le client est mis en cache par processus (`vector_store._client`
+# est `@lru_cache`), donc la collection `knowledge_base` est PARTAGÉE entre
+# tous les tests de ce fichier : chaque test choisit un nom/URL unique
+# (uuid4) pour ne jamais collisionner avec un autre test sur `doc_id`.
+
+import io as _io_kb
+
+
+@pytest.fixture(autouse=True)
+def _kb_cache_propre():
+    """Le cache du scroll Qdrant (10 min, spec §5) est un dict de module —
+    partagé entre tests s'il n'est pas remis à zéro."""
+    from app.modules.kb import service as kb_service
+
+    kb_service._scroll_cache["docs"] = None
+    kb_service._scroll_cache["at"] = 0.0
+    yield
+    kb_service._scroll_cache["docs"] = None
+    kb_service._scroll_cache["at"] = 0.0
+
+
+def _kb_engine():
+    import app.modules.kb.models  # noqa: F401 — enregistre `kb_documents`
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
+
+    from app.db import Base as _Base
+
+    engine = create_engine("sqlite://", future=True,
+                           connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    _Base.metadata.create_all(engine, tables=[_Base.metadata.tables["kb_documents"]])
+    return engine
+
+
+def _kb_stub_embeddings(monkeypatch):
+    """Vecteurs factices, tous identiques : suffisant pour que la recherche
+    par similarité retrouve n'importe quel chunk indexé par ces tests."""
+    from app.modules.rag import embeddings as _emb
+
+    monkeypatch.setattr(
+        _emb, "embed_texts",
+        lambda textes, **kw: [[0.01] * _emb.embedding_dim() for _ in textes],
+    )
+
+
+def _kb_nom(prefixe: str) -> str:
+    """Nom de fichier/URL unique par test — `doc_id` en dérive (uuid5)."""
+    import uuid as _uuid
+
+    return f"{prefixe}-{_uuid.uuid4().hex}.txt"
+
+
+def _kb_texte(mots: int = 400) -> str:
+    return " ".join(f"mot{i}" for i in range(mots))
+
+
+# --- table, routes montées --------------------------------------------------
+
+def test_kb_table_colonnes_presentes():
+    import app.modules.kb.models  # noqa: F401
+
+    from app.db import Base as _Base
+
+    cols = _Base.metadata.tables["kb_documents"].c
+    for nom in ("id", "doc_id", "titre", "source", "type", "categorie",
+                "mime_type", "nb_chunks", "taille_octets", "cree_par",
+                "created_at", "statut", "erreur"):
+        assert nom in cols, f"kb_documents.{nom} manquant"
+    assert not cols["doc_id"].nullable
+    assert not cols["titre"].nullable
+    assert not cols["statut"].nullable
+
+
+def test_kb_routes_montees_et_reservees_admin():
+    from fastapi.testclient import TestClient
+
+    from app.main import app as _app
+
+    client = TestClient(_app)
+    chemins = client.get("/openapi.json").json()["paths"]
+    assert "/admin/kb" in chemins
+    assert "/admin/kb/fichiers" in chemins
+    assert "/admin/kb/urls" in chemins
+    assert "/admin/kb/{doc_id}" in chemins
+    # Sans jeton : 401/403, jamais un 200 qui exposerait la base.
+    assert client.get("/admin/kb").status_code in (401, 403)
+    assert client.delete("/admin/kb/x").status_code in (401, 403)
+
+
+# --- ingerer_fichier ---------------------------------------------------------
+
+def test_kb_ingerer_fichier_ok(monkeypatch):
+    from app.modules.kb import service as kb
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    nom = _kb_nom("rapport")
+    with Session(engine) as db:
+        ligne = kb.ingerer_fichier(db, str(uuid.uuid4()), nom,
+                                   _kb_texte().encode("utf-8"), "text/plain")
+        assert ligne.statut == "indexe"
+        assert ligne.nb_chunks > 0
+        assert ligne.categorie == kb.DEFAULT_CATEGORIE
+        assert ligne.type == "fichier"
+        assert ligne.titre == nom
+        assert ligne.source == nom
+        assert ligne.erreur is None
+
+
+def test_kb_ingerer_fichier_categorie_invalide(monkeypatch):
+    from app.errors import AppError
+    from app.modules.kb import service as kb
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    with Session(engine) as db:
+        with pytest.raises(AppError) as e:
+            kb.ingerer_fichier(db, str(uuid.uuid4()), _kb_nom("x"),
+                               _kb_texte().encode("utf-8"), "text/plain",
+                               categorie="99_nimporte-quoi")
+    assert e.value.code == "categorie_invalide"
+
+
+def test_kb_ingerer_fichier_format_non_supporte():
+    from app.errors import AppError
+    from app.modules.kb import service as kb
+
+    engine = _kb_engine()
+    with Session(engine) as db:
+        with pytest.raises(AppError) as e:
+            kb.ingerer_fichier(db, str(uuid.uuid4()), "virus.exe", b"x", None)
+    assert e.value.code == "unsupported_format"
+
+
+def test_kb_ingerer_fichier_vide():
+    from app.errors import AppError
+    from app.modules.kb import service as kb
+
+    engine = _kb_engine()
+    with Session(engine) as db:
+        with pytest.raises(AppError) as e:
+            kb.ingerer_fichier(db, str(uuid.uuid4()), _kb_nom("vide"), b"", None)
+    assert e.value.code == "empty_file"
+
+
+def test_kb_ingerer_fichier_deja_indexe(monkeypatch):
+    from app.errors import AppError
+    from app.modules.kb import service as kb
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    nom = _kb_nom("doublon")
+    with Session(engine) as db:
+        kb.ingerer_fichier(db, str(uuid.uuid4()), nom,
+                           _kb_texte().encode("utf-8"), "text/plain")
+        with pytest.raises(AppError) as e:
+            kb.ingerer_fichier(db, str(uuid.uuid4()), nom,
+                               _kb_texte().encode("utf-8"), "text/plain")
+    assert e.value.code == "deja_indexe"
+
+
+def test_kb_ingerer_fichier_reprise_apres_echec(monkeypatch):
+    """Un premier essai en échec (panne d'embeddings) laisse une ligne
+    `statut="echec"` réutilisée par le second essai — pas de `deja_indexe`."""
+    from app.errors import AppError
+    from app.modules.kb import service as kb
+    from app.modules.rag import embeddings as _emb
+
+    engine = _kb_engine()
+    nom = _kb_nom("reprise")
+
+    def _casse(*a, **k):
+        raise RuntimeError("Cohere indisponible")
+
+    monkeypatch.setattr(_emb, "embed_texts", _casse)
+    with Session(engine) as db:
+        with pytest.raises(AppError) as e1:
+            kb.ingerer_fichier(db, str(uuid.uuid4()), nom,
+                               _kb_texte().encode("utf-8"), "text/plain")
+        assert e1.value.code == "indexing_failed"
+
+        lignes = list(db.scalars(select(KbDocument)))
+        assert len(lignes) == 1
+        assert lignes[0].statut == "echec"
+        assert lignes[0].erreur
+
+        _kb_stub_embeddings(monkeypatch)
+        ligne2 = kb.ingerer_fichier(db, str(uuid.uuid4()), nom,
+                                    _kb_texte().encode("utf-8"), "text/plain")
+        assert ligne2.statut == "indexe"
+        assert ligne2.erreur is None
+        # même ligne réutilisée, pas une deuxième
+        assert list(db.scalars(select(KbDocument))) == [ligne2]
+
+
+# --- ingerer_url --------------------------------------------------------------
+
+class _FauxReponseHTTP:
+    def __init__(self, *, text="", content=b"", headers=None, status_code=200):
+        self.text = text
+        self.content = content or text.encode("utf-8")
+        self.headers = headers or {}
+        self.status_code = status_code
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import httpx
+
+            raise httpx.HTTPStatusError("erreur", request=None, response=self)
+
+
+def test_kb_ingerer_url_ok_extrait_titre_html(monkeypatch):
+    from app.modules.kb import service as kb
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    url = f"https://exemple.fr/{uuid.uuid4().hex}"
+    html = (f"<html><head><title>Le titre de la page</title></head><body>"
+           f"<nav>menu ignoré</nav><script>alert(1)</script>"
+           f"<p>{_kb_texte(600)}</p></body></html>")
+
+    monkeypatch.setattr(
+        "app.modules.kb.service.httpx.get",
+        lambda *a, **k: _FauxReponseHTTP(text=html, headers={"content-type": "text/html"}),
+    )
+    with Session(engine) as db:
+        ligne = kb.ingerer_url(db, str(uuid.uuid4()), url)
+        assert ligne.statut == "indexe"
+        assert ligne.titre == "Le titre de la page"
+        assert ligne.source == url
+        assert ligne.type == "url"
+        assert "menu ignoré" not in (kb._extraire_html(html)[1])
+        assert "alert(1)" not in (kb._extraire_html(html)[1])
+
+
+def test_kb_ingerer_url_pdf_distant(monkeypatch):
+    from app.modules.kb import service as kb
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    url = f"https://exemple.fr/{uuid.uuid4().hex}.pdf"
+
+    monkeypatch.setattr(
+        "app.modules.kb.service.httpx.get",
+        lambda *a, **k: _FauxReponseHTTP(content=b"%PDF-fake",
+                                         headers={"content-type": "application/pdf"}),
+    )
+    monkeypatch.setattr("app.modules.kb.service.extract_text",
+                        lambda filename, data: _kb_texte(600))
+    with Session(engine) as db:
+        ligne = kb.ingerer_url(db, str(uuid.uuid4()), url)
+        assert ligne.statut == "indexe"
+        assert ligne.mime_type == "application/pdf"
+        assert ligne.source == url
+
+
+def test_kb_ingerer_url_contenu_insuffisant(monkeypatch):
+    from app.errors import AppError
+    from app.modules.kb import service as kb
+
+    engine = _kb_engine()
+    url = f"https://exemple.fr/{uuid.uuid4().hex}"
+    html = "<html><head><title>Court</title></head><body><p>Trop court.</p></body></html>"
+    monkeypatch.setattr(
+        "app.modules.kb.service.httpx.get",
+        lambda *a, **k: _FauxReponseHTTP(text=html, headers={"content-type": "text/html"}),
+    )
+    with Session(engine) as db:
+        with pytest.raises(AppError) as e:
+            kb.ingerer_url(db, str(uuid.uuid4()), url)
+        assert e.value.code == "contenu_insuffisant"
+        # Aucune ligne créée pour un contenu refusé.
+        assert list(db.scalars(select(KbDocument))) == []
+
+
+def test_kb_ingerer_url_inaccessible(monkeypatch):
+    from app.errors import AppError
+    from app.modules.kb import service as kb
+
+    engine = _kb_engine()
+    url = f"https://exemple.fr/{uuid.uuid4().hex}"
+
+    def _echec(*a, **k):
+        raise OSError("connexion refusée")
+
+    monkeypatch.setattr("app.modules.kb.service.httpx.get", _echec)
+    with Session(engine) as db:
+        with pytest.raises(AppError) as e:
+            kb.ingerer_url(db, str(uuid.uuid4()), url)
+    assert e.value.code == "url_inaccessible"
+
+
+def test_kb_ingerer_url_deja_indexe(monkeypatch):
+    from app.errors import AppError
+    from app.modules.kb import service as kb
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    url = f"https://exemple.fr/{uuid.uuid4().hex}"
+    html = f"<html><head><title>T</title></head><body><p>{_kb_texte(600)}</p></body></html>"
+    monkeypatch.setattr(
+        "app.modules.kb.service.httpx.get",
+        lambda *a, **k: _FauxReponseHTTP(text=html, headers={"content-type": "text/html"}),
+    )
+    with Session(engine) as db:
+        kb.ingerer_url(db, str(uuid.uuid4()), url)
+        with pytest.raises(AppError) as e:
+            kb.ingerer_url(db, str(uuid.uuid4()), url)
+    assert e.value.code == "deja_indexe"
+
+
+# --- lister / backfill ---------------------------------------------------------
+
+def test_kb_lister_backfill_depuis_qdrant(monkeypatch):
+    """Un point déposé directement dans Qdrant (comme le script de lot) sans
+    ligne `kb_documents` apparaît au premier `lister()`."""
+    from app.modules.kb import service as kb
+    from app.modules.rag import embeddings as _emb
+    from app.modules.rag import vector_store
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    doc_id = str(uuid.uuid4())
+    vecteurs = _emb.embed_texts(["chunk un", "chunk deux"])
+    vector_store.upsert_chunks(
+        doc_id, "__kb__", ["chunk un", "chunk deux"], vecteurs,
+        collection=vector_store.KB_COLLECTION,
+        extra_payload={"title": "Rapport BCE", "filename": "bce.pdf",
+                      "category": "01_macro-institutionnel",
+                      "category_fallback_marker": "01_macro-institutionnel",
+                      "source": "01_macro-institutionnel", "sector": ""},
+    )
+    with Session(engine) as db:
+        items = kb.lister(db)
+        ligne = next(i for i in items if i.doc_id == doc_id)
+        assert ligne.titre == "Rapport BCE"
+        assert ligne.categorie == "01_macro-institutionnel"
+        # source == category (repli du script de lot) → pas « distincte »
+        assert ligne.source == "ingestion initiale 08/2026"
+        assert ligne.cree_par is None
+        assert ligne.type == "fichier"
+        assert ligne.statut == "indexe"
+        assert ligne.nb_chunks == 2
+
+
+def test_kb_lister_backfill_source_distincte_conservee(monkeypatch):
+    from app.modules.kb import service as kb
+    from app.modules.rag import embeddings as _emb
+    from app.modules.rag import vector_store
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    doc_id = str(uuid.uuid4())
+    vecteurs = _emb.embed_texts(["chunk un"])
+    vector_store.upsert_chunks(
+        doc_id, "__kb__", ["chunk un"], vecteurs,
+        collection=vector_store.KB_COLLECTION,
+        extra_payload={"title": "Étude INSEE", "filename": "insee.pdf",
+                      "category": "02_sectoriel", "source": "INSEE", "sector": ""},
+    )
+    with Session(engine) as db:
+        items = kb.lister(db)
+        ligne = next(i for i in items if i.doc_id == doc_id)
+        assert ligne.source == "INSEE"
+
+
+def test_kb_lister_pas_de_doublon_au_second_appel(monkeypatch):
+    from app.modules.kb import service as kb
+    from app.modules.rag import embeddings as _emb
+    from app.modules.rag import vector_store
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    doc_id = str(uuid.uuid4())
+    vector_store.upsert_chunks(
+        doc_id, "__kb__", ["x"], _emb.embed_texts(["x"]),
+        collection=vector_store.KB_COLLECTION,
+        extra_payload={"title": "T", "filename": "t.pdf",
+                      "category": "01_macro-institutionnel", "source": "s", "sector": ""},
+    )
+    with Session(engine) as db:
+        kb.lister(db)
+        kb.lister(db)
+        lignes = [i for i in db.scalars(select(KbDocument)) if i.doc_id == doc_id]
+        assert len(lignes) == 1
+
+
+def test_kb_lister_scroll_mis_en_cache(monkeypatch):
+    """Deux appels rapprochés ne rescannent Qdrant qu'une fois (cache 10 min)."""
+    from app.modules.kb import service as kb
+
+    engine = _kb_engine()
+    appels = []
+    reel = kb._scroll_qdrant
+
+    def _compte():
+        appels.append(1)
+        return reel()
+
+    monkeypatch.setattr(kb, "_scroll_qdrant", _compte)
+    with Session(engine) as db:
+        kb.lister(db)
+        kb.lister(db)
+    assert len(appels) == 1
+
+
+def test_kb_lister_cache_expire_apres_ttl(monkeypatch):
+    from app.modules.kb import service as kb
+
+    engine = _kb_engine()
+    appels = []
+    reel = kb._scroll_qdrant
+
+    def _compte():
+        appels.append(1)
+        return reel()
+
+    monkeypatch.setattr(kb, "_scroll_qdrant", _compte)
+    with Session(engine) as db:
+        kb.lister(db)
+        kb._scroll_cache["at"] -= (kb._SCROLL_TTL_SECONDES + 1)
+        kb.lister(db)
+    assert len(appels) == 2
+
+
+def test_kb_categories_disponibles_inclut_les_defauts(monkeypatch):
+    from app.modules.kb import service as kb
+
+    engine = _kb_engine()
+    with Session(engine) as db:
+        cats = kb.categories_disponibles(db)
+    for c in kb.CATEGORIES:
+        assert c in cats
+
+
+# --- supprimer -----------------------------------------------------------------
+
+def test_kb_supprimer_retire_vecteurs_et_ligne(monkeypatch):
+    from app.modules.kb import service as kb
+    from app.modules.rag import vector_store
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    nom = _kb_nom("a-supprimer")
+    with Session(engine) as db:
+        ligne = kb.ingerer_fichier(db, str(uuid.uuid4()), nom,
+                                   _kb_texte().encode("utf-8"), "text/plain")
+        doc_id = ligne.doc_id
+        assert vector_store.has_document(doc_id, collection=vector_store.KB_COLLECTION)
+
+        kb.supprimer(db, doc_id)
+
+        assert not vector_store.has_document(doc_id, collection=vector_store.KB_COLLECTION)
+        assert db.scalars(select(KbDocument).where(KbDocument.doc_id == doc_id)).first() is None
+
+
+def test_kb_supprimer_introuvable():
+    from app.errors import AppError
+    from app.modules.kb import service as kb
+
+    engine = _kb_engine()
+    with Session(engine) as db:
+        with pytest.raises(AppError) as e:
+            kb.supprimer(db, str(uuid.uuid4()))
+    assert e.value.code == "not_found"
+
+
+# --- routes HTTP admin -----------------------------------------------------
+
+def _http_kb(engine, *, is_admin):
+    from fastapi.testclient import TestClient
+
+    from app.db import get_db
+    from app.main import app as _app
+    from app.modules.auth.schemas import AuthUser
+    from app.modules.auth.security import get_current_admin
+
+    def _db():
+        with Session(engine) as s:
+            yield s
+
+    admin = AuthUser(id=str(uuid.uuid4()), email="admin@axial-ia.fr", is_admin=is_admin)
+
+    def _admin_dep():
+        if not is_admin:
+            from app.errors import AppError
+
+            raise AppError("Accès réservé aux administrateurs.", 403, code="forbidden")
+        return admin
+
+    _app.dependency_overrides[get_db] = _db
+    _app.dependency_overrides[get_current_admin] = _admin_dep
+    return _app, TestClient(_app)
+
+
+def test_kb_route_liste_refusee_a_un_non_admin():
+    engine = _kb_engine()
+    app_, client = _http_kb(engine, is_admin=False)
+    try:
+        r = client.get("/admin/kb")
+        assert r.status_code == 403
+    finally:
+        app_.dependency_overrides.clear()
+
+
+def test_kb_route_upload_fichier_admin(monkeypatch):
+    from app.modules.rag import embeddings as _emb
+
+    monkeypatch.setattr(_emb, "embed_texts",
+                        lambda textes, **kw: [[0.01] * _emb.embedding_dim() for _ in textes])
+    engine = _kb_engine()
+    app_, client = _http_kb(engine, is_admin=True)
+    try:
+        nom = _kb_nom("upload")
+        r = client.post(
+            "/admin/kb/fichiers",
+            files={"fichier": (nom, _io_kb.BytesIO(_kb_texte().encode("utf-8")), "text/plain")},
+        )
+        assert r.status_code == 200, r.text
+        corps = r.json()
+        assert corps["statut"] == "indexe"
+        assert corps["nb_chunks"] > 0
+        assert corps["categorie"] == "07_ajouts-admin"
+
+        r2 = client.get("/admin/kb")
+        assert r2.status_code == 200
+        liste = r2.json()
+        assert any(i["doc_id"] == corps["doc_id"] for i in liste["items"])
+        assert "07_ajouts-admin" in liste["categories"]
+    finally:
+        app_.dependency_overrides.clear()
+
+
+def test_kb_route_ajouter_url_admin(monkeypatch):
+    monkeypatch.setattr(
+        "app.modules.kb.service.httpx.get",
+        lambda *a, **k: _FauxReponseHTTP(
+            text=(f"<html><head><title>Page test</title></head>"
+                 f"<body><p>{_kb_texte(600)}</p></body></html>"),
+            headers={"content-type": "text/html"},
+        ),
+    )
+    from app.modules.rag import embeddings as _emb
+
+    monkeypatch.setattr(_emb, "embed_texts",
+                        lambda textes, **kw: [[0.01] * _emb.embedding_dim() for _ in textes])
+    engine = _kb_engine()
+    app_, client = _http_kb(engine, is_admin=True)
+    try:
+        url = f"https://exemple.fr/{uuid.uuid4().hex}"
+        r = client.post("/admin/kb/urls", json={"url": url})
+        assert r.status_code == 200, r.text
+        corps = r.json()
+        assert corps["titre"] == "Page test"
+        assert corps["type"] == "url"
+    finally:
+        app_.dependency_overrides.clear()
+
+
+def test_kb_route_supprimer_admin(monkeypatch):
+    from app.modules.rag import embeddings as _emb
+
+    monkeypatch.setattr(_emb, "embed_texts",
+                        lambda textes, **kw: [[0.01] * _emb.embedding_dim() for _ in textes])
+    engine = _kb_engine()
+    app_, client = _http_kb(engine, is_admin=True)
+    try:
+        nom = _kb_nom("a-effacer")
+        r = client.post(
+            "/admin/kb/fichiers",
+            files={"fichier": (nom, _io_kb.BytesIO(_kb_texte().encode("utf-8")), "text/plain")},
+        )
+        doc_id = r.json()["doc_id"]
+        r2 = client.delete(f"/admin/kb/{doc_id}")
+        assert r2.status_code == 204
+        r3 = client.delete(f"/admin/kb/{doc_id}")
+        assert r3.status_code == 404
+    finally:
+        app_.dependency_overrides.clear()
+
+
+# --- rag.service / grounding : intégration (pas de nouveau code ici) --------
+#
+# `rag.service.retrieve` et `grounding.assemble` gèrent déjà `Passage.source
+# == "kb"` (méta `title`, tag « réf. interne », citation sans jamais nommer
+# « base Axial ») — vérifié ci-dessous plutôt que redupliqué.
+
+def test_kb_passage_source_kb_et_titre_apres_ingestion(monkeypatch):
+    from app.modules.kb import service as kb
+    from app.modules.rag import embeddings as _emb
+    from app.modules.rag import vector_store
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    nom = _kb_nom("passage")
+    with Session(engine) as db:
+        ligne = kb.ingerer_fichier(db, str(uuid.uuid4()), nom,
+                                   _kb_texte().encode("utf-8"), "text/plain")
+
+    vecteur = _emb.embed_texts(["mot0"])[0]
+    passages = vector_store.search(vecteur, user_id=None, top_k=50,
+                                   collection=vector_store.KB_COLLECTION)
+    trouve = next(p for p in passages if p.doc_id == ligne.doc_id)
+    assert trouve.source == "kb"
+    assert trouve.meta.get("title") == nom
+
+
+def test_kb_grounding_reference_interne_sans_nom_de_base():
+    """Le tag interne cite le titre, jamais « base Axial » (décision du 14/09)."""
+    from app.modules.rag.vector_store import Passage
+    from app.shared import grounding
+
+    passage = Passage(text="contenu interne", score=0.9, doc_id="d1", source="kb",
+                      meta={"title": "Guide interne", "source": "Guide interne"})
+    contexte, citations = grounding.assemble("question", [], [passage])
+    assert "Axial" not in contexte
+    assert "base de connaissance" not in contexte.lower()
+    assert citations[0]["title"] == "Guide interne"
