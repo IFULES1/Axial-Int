@@ -9,11 +9,13 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.errors import install_error_handlers
+from app.errors import AppError, install_error_handlers
+from app.modules.auth.schemas import AuthUser
+from app.modules.auth.security import get_current_user_optionnel
 from app.shared.health import providers_summary
 
 logger = logging.getLogger("axial.main")
@@ -80,9 +82,18 @@ def health() -> dict:
 
 
 @app.get("/health/providers", tags=["health"])
-def health_providers() -> dict:
-    """Real configuration state of every external dependency."""
-    return providers_summary()
+def health_providers(
+    reel: bool = False,
+    utilisateur: AuthUser | None = Depends(get_current_user_optionnel),
+) -> dict:
+    """Real configuration state of every external dependency.
+
+    `?reel=1` ajoute un appel de test par fournisseur configuré — réservé à
+    un admin (dépendance conditionnelle : l'appel public sans `reel`, utilisé
+    par la supervision, reste sans authentification)."""
+    if reel and (utilisateur is None or not utilisateur.is_admin):
+        raise AppError("Accès réservé aux administrateurs.", 403, code="forbidden")
+    return providers_summary(reel=reel)
 
 
 # --- Module routers ------------------------------------------------------

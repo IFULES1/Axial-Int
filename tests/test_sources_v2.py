@@ -3695,3 +3695,291 @@ def test_kb_format_context_rag_etiquette_base_axial():
                       meta={"title": "Guide interne", "source": "Guide interne"})
     contexte = rag_service.format_context([passage])
     assert "(base Axial : Guide interne)" in contexte
+
+
+# --- Task 8 : santé réelle des fournisseurs ---------------------------------
+#
+# `health.providers_summary(reel=True)` : un appel de test court par
+# fournisseur CONFIGURÉ, en parallèle, timeout 8 s chacun. Jamais
+# d'exception hors de la fonction. Voir spec §8.
+
+_CLES_REEL = ("EXA_API_KEY", "TAVILY_API_KEY", "LINKUP_API_KEY",
+             "PERPLEXITY_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY",
+             "COHERE_API_KEY", "PAPPERS_API_KEY")
+
+
+def _isoler_cles_reel(monkeypatch, *actives):
+    """Décharge TOUTES les clés touchées par le mode réel, puis n'active que
+    celles données. Sans ça, une vraie clé Doppler déjà présente dans
+    l'environnement de dev ferait un vrai appel réseau et rendrait ces tests
+    non déterministes (voire lents/flaky selon la connectivité)."""
+    for var in _CLES_REEL:
+        monkeypatch.delenv(var, raising=False)
+    for var in actives:
+        monkeypatch.setenv(var, "cle-test")
+    get_settings.cache_clear()
+
+
+def test_health_reel_tous_fournisseurs_configures_succes(monkeypatch):
+    """Chaque fournisseur configuré est vérifié : moteurs de recherche
+    (search non vide), LLM chat/report (generate ne lève pas), rerank
+    (score réel), Pappers (fiche trouvée). `ok` global reste vrai."""
+    from app.shared import health
+
+    _isoler_cles_reel(monkeypatch, *_CLES_REEL)
+    try:
+        from app.shared.search import providers as search_providers
+        for moteur in ("exa", "tavily", "linkup", "perplexity"):
+            monkeypatch.setattr(search_providers.get_provider(moteur), "search",
+                                lambda *a, **k: [object()])
+
+        from app.shared import llm_client
+        monkeypatch.setattr(llm_client, "generate", lambda **k: object())
+
+        from app.shared.search import rerank as rerank_mod
+        monkeypatch.setattr(rerank_mod, "rerank_indices_avec_etat",
+                            lambda *a, **k: ([(0, 0.9)], True))
+
+        from app.shared.enrich import pappers as pappers_mod
+        monkeypatch.setattr(pappers_mod, "rechercher", lambda nom: {"siren": "123456789"})
+
+        corps = health.providers_summary(reel=True)
+        assert corps["ok"] is True
+        par_nom = {p["name"]: p for p in corps["providers"]}
+        for nom in ("exa", "tavily", "linkup", "perplexity", "llm_chat_gemini",
+                   "llm_report_claude", "rerank_cohere", "pappers"):
+            assert par_nom[nom]["ok"] is True, par_nom[nom]
+            assert par_nom[nom]["erreur"] is None
+            assert isinstance(par_nom[nom]["latence_ms"], int)
+            assert par_nom[nom]["latence_ms"] >= 0
+    finally:
+        get_settings.cache_clear()
+
+
+def test_health_reel_echec_fournisseur_masque_le_secret_et_tronque(monkeypatch):
+    from app.shared import health
+
+    _isoler_cles_reel(monkeypatch, "EXA_API_KEY")
+    try:
+        from app.shared.search import providers as search_providers
+
+        def _echoue(*a, **k):
+            raise RuntimeError("échec appel https://api.exa.ai/search?key=abc " + "x" * 300)
+
+        monkeypatch.setattr(search_providers.get_provider("exa"), "search", _echoue)
+
+        corps = health.providers_summary(reel=True)
+        exa = next(p for p in corps["providers"] if p["name"] == "exa")
+        assert exa["ok"] is False
+        assert "abc" not in exa["erreur"]
+        assert "masqué" in exa["erreur"]
+        assert len(exa["erreur"]) <= 200
+    finally:
+        get_settings.cache_clear()
+
+
+def test_health_reel_timeout_devient_ok_false(monkeypatch):
+    import time as time_mod
+
+    from app.shared import health
+
+    _isoler_cles_reel(monkeypatch, "EXA_API_KEY")
+    monkeypatch.setattr(health, "TIMEOUT_REEL_SECONDES", 0.05)
+    try:
+        from app.shared.search import providers as search_providers
+
+        def _dort(*a, **k):
+            time_mod.sleep(0.2)
+            return [object()]
+
+        monkeypatch.setattr(search_providers.get_provider("exa"), "search", _dort)
+
+        corps = health.providers_summary(reel=True)
+        exa = next(p for p in corps["providers"] if p["name"] == "exa")
+        assert exa["ok"] is False
+        assert "délai dépassé" in exa["erreur"]
+        assert exa["latence_ms"] is None
+    finally:
+        get_settings.cache_clear()
+
+
+def test_health_reel_fournisseur_non_configure_pas_appele(monkeypatch):
+    """Un fournisseur non configuré reste statique : `ok=None`, jamais
+    appelé (spec §8 : « par fournisseur CONFIGURÉ »)."""
+    from app.shared import health
+
+    _isoler_cles_reel(monkeypatch)
+    try:
+        from app.shared.search import providers as search_providers
+
+        def _jamais_appele(*a, **k):
+            raise AssertionError("ne doit pas être appelé : exa non configuré")
+
+        if search_providers.get_provider("exa") is not None:
+            monkeypatch.setattr(search_providers.get_provider("exa"), "search",
+                                _jamais_appele)
+
+        corps = health.providers_summary(reel=True)
+        exa = next(p for p in corps["providers"] if p["name"] == "exa")
+        assert exa["configured"] is False
+        assert exa["ok"] is None
+        assert exa["latence_ms"] is None
+        assert exa["erreur"] is None
+    finally:
+        get_settings.cache_clear()
+
+
+def test_health_reel_statiques_gardent_ok_none(monkeypatch):
+    """stripe/presidio/analytics/embeddings_cohere ne sont jamais réellement
+    testés (spec §8) : `ok=None`, même en mode réel, même configurés."""
+    from app.shared import health
+
+    _isoler_cles_reel(monkeypatch)
+    corps = health.providers_summary(reel=True)
+    par_nom = {p["name"]: p for p in corps["providers"]}
+    for nom in ("stripe", "presidio", "analytics", "embeddings_cohere", "serper"):
+        assert par_nom[nom]["ok"] is None
+        assert par_nom[nom]["latence_ms"] is None
+        assert par_nom[nom]["erreur"] is None
+
+
+def test_health_reel_ok_global_false_si_requis_en_echec(monkeypatch):
+    from app.shared import health
+
+    _isoler_cles_reel(monkeypatch, "GEMINI_API_KEY")
+    try:
+        from app.shared import llm_client
+
+        def _echoue(**k):
+            raise RuntimeError("panne Gemini")
+
+        monkeypatch.setattr(llm_client, "generate", _echoue)
+
+        corps = health.providers_summary(reel=True)
+        assert corps["ok"] is False
+        chat = next(p for p in corps["providers"] if p["name"] == "llm_chat_gemini")
+        assert chat["ok"] is False
+    finally:
+        get_settings.cache_clear()
+
+
+def test_health_reel_ok_global_vrai_si_seul_non_requis_en_echec(monkeypatch):
+    """`exa` n'est pas `required` individuellement (l'agrégat web_search
+    l'est en mode statique) : son échec seul ne fait pas basculer `ok`
+    global, tant que tous les fournisseurs `required` (ici configurés et
+    en succès) restent au vert."""
+    from app.shared import health
+
+    _isoler_cles_reel(monkeypatch, *_CLES_REEL)
+    try:
+        from app.shared.search import providers as search_providers
+
+        def _echoue(*a, **k):
+            raise RuntimeError("panne Exa")
+
+        monkeypatch.setattr(search_providers.get_provider("exa"), "search", _echoue)
+        for moteur in ("tavily", "linkup", "perplexity"):
+            monkeypatch.setattr(search_providers.get_provider(moteur), "search",
+                                lambda *a, **k: [object()])
+
+        from app.shared import llm_client
+        monkeypatch.setattr(llm_client, "generate", lambda **k: object())
+
+        from app.shared.search import rerank as rerank_mod
+        monkeypatch.setattr(rerank_mod, "rerank_indices_avec_etat",
+                            lambda *a, **k: ([(0, 0.9)], True))
+
+        from app.shared.enrich import pappers as pappers_mod
+        monkeypatch.setattr(pappers_mod, "rechercher", lambda nom: {"siren": "123456789"})
+
+        corps = health.providers_summary(reel=True)
+        assert corps["missing_required"] == []
+        exa = next(p for p in corps["providers"] if p["name"] == "exa")
+        assert exa["ok"] is False
+        assert exa["required"] is False
+        assert corps["ok"] is True
+    finally:
+        get_settings.cache_clear()
+
+
+def test_health_reel_sans_reel_comportement_inchange():
+    """`providers_summary()` (sans `reel`) reste la vue statique actuelle :
+    pas de clés `ok`/`latence_ms`/`erreur`, `web_search` toujours présent."""
+    from app.shared import health
+
+    corps = health.providers_summary()
+    noms = {p["name"] for p in corps["providers"]}
+    assert "web_search" in noms
+    assert "exa" not in noms
+    for p in corps["providers"]:
+        assert "ok" not in p
+        assert "latence_ms" not in p
+        assert "erreur" not in p
+
+
+def _http_health(*, is_admin: bool | None):
+    """`TestClient` sur l'app réelle, avec ou sans utilisateur admin.
+
+    `is_admin=None` simule l'absence de jeton (utilisateur anonyme) ;
+    `is_admin=True/False` simule un jeton valide pour un compte
+    admin/non-admin — les deux doivent être refusés pour `reel=1`."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app as _app
+    from app.modules.auth.schemas import AuthUser
+    from app.modules.auth.security import get_current_user_optionnel
+
+    utilisateur = (None if is_admin is None
+                  else AuthUser(id=str(uuid.uuid4()), email="u@axial-ia.fr",
+                                is_admin=is_admin))
+    _app.dependency_overrides[get_current_user_optionnel] = lambda: utilisateur
+    return _app, TestClient(_app)
+
+
+def test_health_reel_route_403_sans_jeton():
+    app_, client = _http_health(is_admin=None)
+    try:
+        r = client.get("/health/providers?reel=1")
+        assert r.status_code == 403
+    finally:
+        app_.dependency_overrides.clear()
+
+
+def test_health_reel_route_403_non_admin():
+    app_, client = _http_health(is_admin=False)
+    try:
+        r = client.get("/health/providers?reel=1")
+        assert r.status_code == 403
+    finally:
+        app_.dependency_overrides.clear()
+
+
+def test_health_reel_route_admin_ok(monkeypatch):
+    """Isole les clés réelles : sans ça, un compte de dev avec de vraies
+    clés Doppler déclencherait de vrais appels réseau depuis ce test."""
+    _isoler_cles_reel(monkeypatch)
+    app_, client = _http_health(is_admin=True)
+    try:
+        r = client.get("/health/providers?reel=1")
+        assert r.status_code == 200
+        corps = r.json()
+        assert "providers" in corps
+        assert all("ok" in p for p in corps["providers"])
+    finally:
+        app_.dependency_overrides.clear()
+        get_settings.cache_clear()
+
+
+def test_health_route_publique_sans_reel_inchangee():
+    """L'appel public sans `reel` (utilisé par la supervision) ne demande
+    toujours aucune authentification et garde la forme statique."""
+    app_, client = _http_health(is_admin=None)
+    try:
+        r = client.get("/health/providers")
+        assert r.status_code == 200
+        corps = r.json()
+        assert "ok" in corps
+        for p in corps["providers"]:
+            assert "ok" not in p
+    finally:
+        app_.dependency_overrides.clear()
