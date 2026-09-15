@@ -3080,6 +3080,74 @@ def test_kb_ingerer_url_ok_extrait_titre_html(monkeypatch):
         assert "alert(1)" not in (kb._extraire_html(html)[1])
 
 
+def test_kb_decoder_html_utilise_le_charset_de_l_entete():
+    from app.modules.kb import service as kb
+
+    brut = "Résumé économique".encode("iso-8859-1")
+    assert kb._decoder_html(brut, "text/html; charset=iso-8859-1") == "Résumé économique"
+
+
+def test_kb_decoder_html_utf8_sans_entete():
+    from app.modules.kb import service as kb
+
+    brut = "Réglementation européenne".encode("utf-8")
+    assert kb._decoder_html(brut, "text/html") == "Réglementation européenne"
+
+
+def test_kb_decoder_html_repli_cp1252_si_utf8_invalide_sans_entete():
+    """Tour 2 : pas d'en-tête charset ET pas de l'UTF-8 valide (page
+    réellement Latin-1/CP1252 mal servie) → repli `cp1252`, jamais une purge
+    silencieuse des accents (l'ancien `errors="ignore"`)."""
+    from app.modules.kb import service as kb
+
+    brut = "Prévisions confirmées".encode("cp1252")
+    assert kb._decoder_html(brut, "text/html") == "Prévisions confirmées"
+
+
+def test_kb_ingerer_url_charset_iso_8859_1_respecte(monkeypatch):
+    """Tour 2 : une page servie en `charset=iso-8859-1` (fréquent sur les
+    sites institutionnels FR) ne doit plus perdre ses accents — l'ancien
+    `data.decode("utf-8", errors="ignore")` purgeait silencieusement le
+    `é` (0xE9 en Latin-1, invalide comme suite d'octet UTF-8 isolé)."""
+    from app.modules.kb import service as kb
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    url = f"https://exemple.fr/{uuid.uuid4().hex}"
+    html_unicode = (f"<html><head><title>Résumé économique détaillé</title></head>"
+                    f"<body><p>Étude générale : {_kb_texte(600)}</p></body></html>")
+    monkeypatch.setattr(
+        "app.modules.kb.service.httpx.stream",
+        lambda *a, **k: _FauxFluxHTTP(
+            content=html_unicode.encode("iso-8859-1"),
+            headers={"content-type": "text/html; charset=iso-8859-1"}),
+    )
+    with Session(engine) as db:
+        ligne = kb.ingerer_url(db, str(uuid.uuid4()), url)
+    assert ligne.titre == "Résumé économique détaillé"
+    assert "�" not in ligne.titre
+
+
+def test_kb_ingerer_url_utf8_sans_entete_charset_reste_correct(monkeypatch):
+    """Une page UTF-8 sans `charset` dans l'en-tête (cas courant) reste
+    décodée correctement — non-régression du repli utf-8 strict."""
+    from app.modules.kb import service as kb
+
+    _kb_stub_embeddings(monkeypatch)
+    engine = _kb_engine()
+    url = f"https://exemple.fr/{uuid.uuid4().hex}"
+    html_unicode = (f"<html><head><title>Réglementation européenne</title></head>"
+                    f"<body><p>{_kb_texte(600)}</p></body></html>")
+    monkeypatch.setattr(
+        "app.modules.kb.service.httpx.stream",
+        lambda *a, **k: _FauxFluxHTTP(content=html_unicode.encode("utf-8"),
+                                      headers={"content-type": "text/html"}),
+    )
+    with Session(engine) as db:
+        ligne = kb.ingerer_url(db, str(uuid.uuid4()), url)
+    assert ligne.titre == "Réglementation européenne"
+
+
 def test_kb_ingerer_url_pdf_distant(monkeypatch):
     from app.modules.kb import service as kb
 

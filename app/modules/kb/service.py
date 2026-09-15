@@ -349,6 +349,34 @@ def _extraire_html(html: str) -> tuple[str, str]:
     return parseur.titre, parseur.texte
 
 
+def _decoder_html(data: bytes, content_type: str) -> str:
+    """Décodage respectueux du charset annoncé (tour 2).
+
+    `data.decode("utf-8", errors="ignore")` corrompait silencieusement toute
+    page servie en ISO-8859-1/Windows-1252 — fréquent sur les sites
+    institutionnels français : chaque « é » (0xE9 en Latin-1) disparaissait
+    au lieu d'être rendu. Ordre : le charset annoncé par l'en-tête
+    `Content-Type` s'il y en a un ; sinon UTF-8 strict ; en cas d'échec
+    (`UnicodeDecodeError` — page réellement en Latin-1/CP1252 sans en-tête
+    fiable), repli sur `cp1252` en remplacement plutôt qu'en purge silencieuse.
+    """
+    charset = None
+    for morceau in (content_type or "").split(";"):
+        morceau = morceau.strip()
+        if morceau.lower().startswith("charset="):
+            charset = morceau.split("=", 1)[1].strip().strip("\"'")
+            break
+    if charset:
+        try:
+            return data.decode(charset, errors="replace")
+        except LookupError:
+            pass  # charset annoncé mais inconnu de Python — on retombe ci-dessous
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode("cp1252", errors="replace")
+
+
 def _telecharger(url: str) -> tuple[bytes, str]:
     """Téléchargement en flux, coupé net au-delà de `MAX_UPLOAD_BYTES`
     (tour 1, Q1) : un admin qui colle l'URL d'un dump volumineux ne doit
@@ -397,7 +425,7 @@ def ingerer_url(db: Session, admin_id: str, url: str,
             raise AppError("PDF illisible ou corrompu.", 422, code="contenu_illisible") from e
         mime = "application/pdf"
     else:
-        titre_html, text = _extraire_html(data.decode("utf-8", errors="ignore"))
+        titre_html, text = _extraire_html(_decoder_html(data, content_type))
         titre = titre_html or url
         mime = content_type.split(";")[0].strip() or "text/html"
 
