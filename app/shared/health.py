@@ -51,6 +51,8 @@ class ProviderStatus:
         return d
 
 
+REQUETE_SONDE = "financement des startups en France"
+
 def _base_providers(reel: bool) -> list[ProviderStatus]:
     """Configuration statique de chaque fournisseur (aucun appel réseau).
 
@@ -104,7 +106,10 @@ def _verifier_recherche(nom: str) -> None:
     provider = get_provider(nom)
     if provider is None:
         raise RuntimeError("fournisseur de recherche introuvable")
-    if not provider.search("Axial Intelligence test", 1):
+    # Requête de sonde réaliste : « Axial Intelligence test » ne rend rien chez
+    # Perplexity (réponse sans `search_results`), ce qui marquait un moteur
+    # sain comme en panne (constaté le 15/09 avec la vraie clé).
+    if not provider.search(REQUETE_SONDE, 2):
         raise RuntimeError("aucun résultat")
 
 
