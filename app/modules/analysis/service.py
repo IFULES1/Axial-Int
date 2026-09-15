@@ -167,7 +167,9 @@ def _noms_depuis_reponse_llm(texte: str) -> list[str]:
                 return [str(v).strip() for v in valeurs if isinstance(v, (str, int))]
         except ValueError:
             pass
-    return [ligne for ligne in brut.splitlines()]
+    # Réponse JSON tronquée (« [\"Expensya\", \"N2F ») ou en lignes : on retire
+    # crochets et guillemets et on coupe sur les virgules comme sur les lignes.
+    return [m.strip() for m in re.split(r"[\n,]", brut.replace("[", "").replace("]", "").replace('"', ""))]
 
 
 # Puce (`-`, `•`, `*`) ou numéro (`1.`, `1)`) en tête de ligne, répétés

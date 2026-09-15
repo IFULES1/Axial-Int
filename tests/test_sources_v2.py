@@ -4473,3 +4473,9 @@ def test_grounding_garde_les_fiches_pappers_apres_le_classement(monkeypatch):
     contexte, citations = grounding.assemble("marché", web + pappers, [], top_k=3)
     assert [c["source"] for c in citations] == ["web", "web", "web", "pappers"]
     assert "(registre : pappers.fr)" in contexte
+
+
+def test_noms_depuis_reponse_llm_json_tronque():
+    from app.modules.analysis.service import _noms_depuis_reponse_llm
+    assert _noms_depuis_reponse_llm('["Expensya", "N2F') == ["Expensya", "N2F"]
+    assert _noms_depuis_reponse_llm('["Doctolib", "Alan"]') == ["Doctolib", "Alan"]
