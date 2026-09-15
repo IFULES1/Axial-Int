@@ -2598,7 +2598,12 @@ function OnbShell({ step, title, sub, children, onNext, onBack, canNext = true }
 const CARTE_IGNOREE_CLE = 'axial_carte_ignoree_a';
 const CARTE_IGNOREE_DUREE_MS = 24 * 60 * 60 * 1000;
 function memoriserCarteIgnoree() {
-  try { localStorage.setItem(CARTE_IGNOREE_CLE, String(Date.now())); } catch (e) { /* stockage indisponible */ }
+  try {
+    localStorage.setItem(CARTE_IGNOREE_CLE, String(Date.now()));
+    // Un clic « Ajouter ma carte » abandonné laissait ce drapeau, qui renvoyait
+    // sur l'écran carte à chaque rechargement malgré « Continuer sans carte ».
+    localStorage.removeItem('axial_onb_card_pending');
+  } catch (e) { /* stockage indisponible */ }
 }
 function carteIgnoreeRecemment() {
   try {
@@ -8514,7 +8519,17 @@ function App() {
   const go = (r) => { location.hash = r; setRoute(r); };
 
   // onboarding context
-  const [onbCtx, setOnbCtx] = useState({});
+  // Contexte d'onboarding conservé le temps de l'inscription : un rechargement
+  // en cours d'étape 1-3 renvoyait sur un formulaire vide (revue du 15/09).
+  const [onbCtx, setOnbCtx] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('axial_onb_ctx') || '{}') || {}; } catch (e) { return {}; }
+  });
+  useEffect(() => {
+    try {
+      if (route === 'app') localStorage.removeItem('axial_onb_ctx');
+      else if (route.startsWith('onb')) localStorage.setItem('axial_onb_ctx', JSON.stringify(onbCtx || {}));
+    } catch (e) { /* stockage indisponible */ }
+  }, [onbCtx, route]);
   const [authMode, setAuthMode] = useState('signup');
 
   // tweaks (defaults inlined — the editing panel that used to write these is gone)

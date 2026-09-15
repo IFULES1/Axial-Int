@@ -88,6 +88,11 @@ def register(data: RegisterRequest, db=None) -> TokenResponse:
         msg = str(e).lower()
         if "already" in msg and "regist" in msg:
             raise AppError("Cet email est déjà utilisé.", 400, code="email_taken") from e
+        if "weak" in msg or ("password" in msg and ("short" in msg or "least" in msg)):
+            raise AppError("Mot de passe trop faible : 8 caractères minimum, avec lettres et chiffres.",
+                           400, code="weak_password") from e
+        if "invalid" in msg and "email" in msg:
+            raise AppError("Adresse email invalide.", 400, code="email_invalide") from e
         logger.exception("Supabase create_user failed")
         raise AppError("Erreur lors de la création du compte. Réessayez.", 400,
                        code="register_failed") from e
@@ -133,6 +138,16 @@ def _sign_in(email: str, password: str):
     return resp.session
 
 
+def _refus_avere(e: BaseException) -> bool:
+    """Vrai si GoTrue a REFUSÉ le jeton (invalide, expiré, déjà utilisé, révoqué) ;
+    faux pour une panne (réseau, timeout, 5xx), qui ne dit rien du jeton."""
+    statut = getattr(e, "status", None) or getattr(e, "status_code", None)
+    msg = str(e).lower()
+    if statut in (400, 401, 403):
+        return True
+    return any(mot in msg for mot in ("invalid", "expired", "already used", "revoked", "not found", "refresh_token"))
+
+
 def refresh(refresh_token: str, db=None) -> TokenResponse:
     """Nouvelle paire de jetons à partir d'un refresh token (les access tokens
     expirent en ~1h ; sans ça, l'app passait silencieusement en 401)."""
@@ -145,8 +160,17 @@ def refresh(refresh_token: str, db=None) -> TokenResponse:
     try:
         resp = public_client().auth.refresh_session(refresh_token)
     except Exception as e:
-        raise AppError("Session expirée — reconnectez-vous.", 401,
-                       code="refresh_invalid") from e
+        # Ne conclure « session expirée » QUE sur un refus avéré de GoTrue.
+        # Un timeout, un DNS raté ou un 5xx Supabase rendait aussi 401, et le
+        # front effaçait alors un jeton parfaitement valide (« Session expirée »
+        # en pleine session, constaté le 15/09). Ici 503 : le front garde ses
+        # jetons et réessaie.
+        if _refus_avere(e):
+            raise AppError("Session expirée — reconnectez-vous.", 401,
+                           code="refresh_invalid") from e
+        logger.warning("Rafraîchissement de session indisponible : %s", e)
+        raise AppError("Service d'authentification momentanément indisponible.", 503,
+                       code="auth_indisponible") from e
     finally:
         oublier_session(public_client())
     if not resp or not resp.session or not resp.user:
