@@ -75,6 +75,13 @@ def assemble(query: str, web_results, doc_passages, top_k: int = 8,
 
     order = web_search.rerank_indices(query, [it["text"] for it in pool], top_k)
     ranked = [pool[i] for i, _ in order] or pool[:top_k]
+    # Fiches Pappers : données de registre structurées, notées bas par le
+    # reranker face à une question de marché (0,13-0,25 le 15/09) et donc
+    # toujours coupées. Elles complètent les sources classées, sans les
+    # remplacer : ajoutées après, 8 au plus, jamais en doublon.
+    deja = {id(it) for it in ranked}
+    forcees = [it for it in pool if it["cite"].get("source") == "pappers" and id(it) not in deja][:8]
+    ranked = ranked + forcees
 
     # Dedupe FIRST, then number — so the inline [N] markers the model emits from
     # the numbered context map 1:1 to the citations list the user sees.

@@ -1550,7 +1550,7 @@ def test_pappers_rechercher_ok(monkeypatch):
     trouve = pappers.rechercher("Ma Société")
     assert trouve == {"siren": "123456789", "nom_entreprise": "Ma Société"}
     assert appels[0][0] == "https://api.pappers.fr/v2/recherche"
-    assert appels[0][1] == {"q": "Ma Société", "api_token": "cle-test", "par_page": 3}
+    assert appels[0][1] == {"q": "Ma Société", "api_token": "cle-test", "par_page": 5}
     get_settings.cache_clear()
 
 
@@ -4454,3 +4454,22 @@ def test_noms_de_societes_reponse_en_lignes_toujours_acceptee(monkeypatch):
     from app.shared import llm_client
     monkeypatch.setattr(llm_client, "generate", lambda **k: type("R", (), {"text": "1. Swile\n2. Lydia\n"})())
     assert A._noms_de_societes("Concurrents ?", None, []) == ["Swile", "Lydia"]
+
+
+def test_pappers_choisit_l_editeur_plutot_que_l_homonyme_sci():
+    from app.shared.enrich.pappers import _score_candidat
+    sci = {"siren": "1", "code_naf": "68.20B", "forme_juridique": "SCI, société civile immobilière", "effectif": "0 salarié"}
+    editeur = {"siren": "2", "code_naf": "58.29C", "forme_juridique": "SAS", "effectif": "Entre 50 et 99 salariés"}
+    assert max([sci, editeur], key=_score_candidat) is editeur
+
+
+def test_grounding_garde_les_fiches_pappers_apres_le_classement(monkeypatch):
+    from app.shared import grounding, search as web_search
+    from app.shared.search.base import SearchResult
+    web = [SearchResult(title=f"Article {i}", url=f"https://ex{i}.fr/a", snippet="texte", provider="exa") for i in range(5)]
+    pappers = [SearchResult(title="Jenji", url="https://www.pappers.fr/entreprise/jenji-799321641", snippet="SAS créée en 2013", provider="pappers")]
+    # Le reranker ne retient que les 3 premiers articles : la fiche est hors top_k.
+    monkeypatch.setattr(web_search, "rerank_indices", lambda q, docs, k: [(0, .9), (1, .8), (2, .7)])
+    contexte, citations = grounding.assemble("marché", web + pappers, [], top_k=3)
+    assert [c["source"] for c in citations] == ["web", "web", "web", "pappers"]
+    assert "(registre : pappers.fr)" in contexte

@@ -76,7 +76,7 @@ def rechercher(nom: str) -> dict | None:
     try:
         r = httpx.get(
             f"{BASE_URL}/recherche",
-            params={"q": nom, "api_token": cle, "par_page": 3},
+            params={"q": nom, "api_token": cle, "par_page": 5},
             timeout=TIMEOUT,
         )
         r.raise_for_status()
@@ -85,10 +85,28 @@ def rechercher(nom: str) -> dict | None:
         logger.warning("Pappers recherche a échoué pour %r : %s", nom, sans_secret(e))
         _alerte_fournisseur(e)
         return None
-    for entreprise in data.get("resultats") or []:
-        if entreprise.get("siren"):
-            return entreprise
-    return None
+    candidats = [e for e in (data.get("resultats") or []) if e.get("siren")]
+    if not candidats:
+        return None
+    # Homonymes : « N2F » rendait en tête une SCI immobilière (15/09). On
+    # préfère une société d'édition / conseil informatique, puis la plus
+    # grosse, et on écarte les SCI et holdings quand un autre candidat existe.
+    return max(candidats, key=_score_candidat)
+
+
+_NAF_LOGICIEL = ("58.2", "62.0", "63.1", "70.2", "73.1", "58.1", "46.5", "47.9")
+
+
+def _score_candidat(e: dict) -> tuple:
+    naf = str(e.get("code_naf") or "")
+    forme = str(e.get("forme_juridique") or "").lower()
+    effectif = str(e.get("effectif") or e.get("tranche_effectif") or "")
+    chiffres = [int(x) for x in re.findall(r"\d+", effectif)]
+    return (
+        naf.startswith(_NAF_LOGICIEL),
+        not ("civile" in forme or "holding" in forme or naf.startswith("68.")),
+        max(chiffres) if chiffres else 0,
+    )
 
 
 def fiche(siren: str, compteur: dict[str, int] | None = None) -> dict | None:
@@ -170,9 +188,10 @@ def _snippet(fiche_data: dict) -> str:
     elif naf:
         parties.append(f"NAF {naf}")
 
-    effectif = fiche_data.get("effectif")
+    effectif = str(fiche_data.get("effectif") or "").strip()
     if effectif:
-        parties.append(f"{effectif} salariés")
+        # Pappers rend tantôt un nombre, tantôt « Entre 50 et 99 salariés ».
+        parties.append(effectif if "salari" in effectif.lower() else f"{effectif} salariés")
 
     ville = (fiche_data.get("siege") or {}).get("ville")
     if ville:
