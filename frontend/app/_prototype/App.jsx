@@ -2590,6 +2590,23 @@ function OnbShell({ step, title, sub, children, onNext, onBack, canNext = true }
 }
 
 /* ----- Step 4 — Activation (carte via Stripe, essai 14 jours) ----- */
+/* « Continuer sans carte » : la porte carte revient à chaque CONNEXION
+   explicite (règle produit conservée), mais pas à un simple rechargement de
+   page dans les 24 h qui suivent le choix. Sans ça, un participant qui
+   rafraîchit pendant une démo retombait sur « Activez votre essai » à chaque
+   fois et y voyait un mur de paiement (constaté le 15/09). */
+const CARTE_IGNOREE_CLE = 'axial_carte_ignoree_a';
+const CARTE_IGNOREE_DUREE_MS = 24 * 60 * 60 * 1000;
+function memoriserCarteIgnoree() {
+  try { localStorage.setItem(CARTE_IGNOREE_CLE, String(Date.now())); } catch (e) { /* stockage indisponible */ }
+}
+function carteIgnoreeRecemment() {
+  try {
+    const t = Number(localStorage.getItem(CARTE_IGNOREE_CLE) || 0);
+    return t > 0 && (Date.now() - t) < CARTE_IGNOREE_DUREE_MS;
+  } catch (e) { return false; }
+}
+
 function OnbStep4({ onBack, onSkip }) {
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState('');
@@ -8679,7 +8696,7 @@ function App() {
         // Route distincte de l'onboarding : ici l'utilisateur revient, il n'a
         // rien à découvrir. Sa sortie mène à l'app, pas à l'écran « première
         // analyse » — celui-ci ne se voit qu'une fois, à l'inscription.
-        go(s && s.active ? 'app' : 'carte');
+        go((s && s.active) || carteIgnoreeRecemment() ? 'app' : 'carte');
       } catch (e) { go('app'); /* API indisponible : ne pas bloquer l'accès */ }
     }).catch((e) => {
       // Ne déconnecter QUE sur un refus d'authentification avéré. Une panne
@@ -10248,11 +10265,11 @@ function App() {
   }
   if (route === 'onb4') {
     // Chemin d'inscription : après la carte vient la première analyse.
-    return avecBandeau(<OnbStep4 onBack={() => go('onb2')} onSkip={() => go('onb3')} />);
+    return avecBandeau(<OnbStep4 onBack={() => go('onb2')} onSkip={() => { memoriserCarteIgnoree(); go('onb3'); }} />);
   }
   if (route === 'carte') {
     // Chemin de connexion : la sortie mène directement à l'app.
-    return avecBandeau(<OnbStep4 onSkip={() => go('app')} />);
+    return avecBandeau(<OnbStep4 onSkip={() => { memoriserCarteIgnoree(); go('app'); }} />);
   }
 
   // ---- main app ----

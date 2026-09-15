@@ -86,3 +86,17 @@ test('finding 10 — plus aucun message d’exception brut dans l’interface', 
   // Le chemin des rapports rend désormais la carte d'erreur du fil.
   assert.match(app, /reportsState === 'erreur'[\s\S]{0,400}<CarteErreur/);
 });
+
+// 15/09 — « Continuer sans carte » mémorisé 24 h : un rechargement ne
+// renvoie plus sur l'écran carte, une connexion explicite si.
+import { test as testCarte } from 'node:test';
+import assertCarte from 'node:assert/strict';
+import { readFileSync as lireCarte } from 'node:fs';
+import { fileURLToPath as fpCarte } from 'node:url';
+import { dirname as dnCarte, join as jnCarte } from 'node:path';
+testCarte('le rechargement respecte carteIgnoreeRecemment, la connexion non', () => {
+  const app = lireCarte(jnCarte(dnCarte(fpCarte(import.meta.url)), '..', 'app/_prototype/App.jsx'), 'utf8');
+  assertCarte.match(app, /go\(\(s && s\.active\) \|\| carteIgnoreeRecemment\(\) \? 'app' : 'carte'\)/);
+  assertCarte.match(app, /await axLogin\(email, pwd\);[\s\S]{0,600}go\(s && s\.active \? 'app' : 'carte'\)/);
+  assertCarte.equal((app.match(/memoriserCarteIgnoree\(\); go\('(onb3|app)'\)/g) || []).length, 2);
+});
