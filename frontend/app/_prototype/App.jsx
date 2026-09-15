@@ -300,13 +300,14 @@ const STRINGS = {
 
     // Bandeau d'un rapport dégradé (spec §3)
     'reports.degrade.titre': 'Rapport incomplet',
+    'reports.degrade.titre_partiel': 'Couverture partielle',
     'reports.degrade.defaut': 'Ce rapport n\'a pas été produit dans des conditions normales. Lisez-le avec prudence.',
     'reports.degrade.truncated_generation': 'La rédaction a atteint la limite de sortie du modèle avant sa conclusion : le rapport s\'arrête en cours de route. Aucun crédit n\'a été débité — relancez la génération.',
     'reports.degrade.llm_unavailable': 'Le modèle de rédaction était indisponible. Aucun crédit n\'a été débité — relancez la génération.',
     'reports.degrade.generation_failed': 'La rédaction a échoué en cours de route. Aucun crédit n\'a été débité — relancez la génération.',
     'reports.degrade.empty_generation': 'Le modèle n\'a rien produit. Aucun crédit n\'a été débité — relancez la génération.',
     'reports.degrade.investors_unavailable': 'La base d\'investisseurs Axial était indisponible : ce rapport s\'appuie uniquement sur la recherche web.',
-    'reports.degrade.couverture_partielle': 'Sources partielles : les sources trouvées ne couvrent qu\'une partie de la question. Vérifiez les points chiffrés avant de vous en servir.',
+    'reports.degrade.couverture_partielle': 'Les sources trouvées couvrent une partie de la question : vérifiez les points chiffrés avant de vous en servir.',
     'reports.degrade.delai_depasse': 'La génération a dépassé le délai maximal et a été interrompue. Aucun crédit n\'a été débité.',
     'reports.degrade.annule_par_utilisateur': 'Génération arrêtée à votre demande. Aucun crédit n\'a été débité.',
     'reports.degrade.rapport_supprime': 'Ce rapport a été supprimé pendant sa génération. Aucun crédit n\'a été débité.',
@@ -796,13 +797,14 @@ const STRINGS = {
     'reports.sources_insuf.forcer_aide': 'The report will be produced and charged, flagged “partial coverage”.',
 
     'reports.degrade.titre': 'Incomplete report',
+    'reports.degrade.titre_partiel': 'Partial coverage',
     'reports.degrade.defaut': 'This report was not produced under normal conditions. Read it with care.',
     'reports.degrade.truncated_generation': 'Writing hit the model output limit before its conclusion: the report stops mid-way. No credits were charged — run it again.',
     'reports.degrade.llm_unavailable': 'The writing model was unavailable. No credits were charged — run it again.',
     'reports.degrade.generation_failed': 'Writing failed mid-way. No credits were charged — run it again.',
     'reports.degrade.empty_generation': 'The model produced nothing. No credits were charged — run it again.',
     'reports.degrade.investors_unavailable': 'The Axial investor database was unavailable: this report relies on web search only.',
-    'reports.degrade.couverture_partielle': 'Partial sources: the sources found only cover part of the question. Double-check every figure before using it.',
+    'reports.degrade.couverture_partielle': 'The sources found cover part of the question: double-check the figures before relying on them.',
     'reports.degrade.delai_depasse': 'Generation exceeded the maximum delay and was interrupted. No credits were charged.',
     'reports.degrade.annule_par_utilisateur': 'Generation stopped at your request. No credits were charged.',
     'reports.degrade.rapport_supprime': 'This report was deleted while it was being generated. No credits were charged.',
@@ -5574,10 +5576,14 @@ function BandeauDegrade({ etat }) {
   const t = window.useT();
   const texte = libelleRaison(etat, t);
   if (!texte) return null;
+  // Une couverture partielle n'est pas un rapport cassé : titre adouci
+  // (décision de Miradie du 15/09), les autres raisons gardent « incomplet ».
+  const raison = (etat && etat.detail && etat.detail.raison) || (etat && etat.raison) || '';
+  const partiel = raison === 'couverture_partielle';
   return (
     <div className="gap-callout" style={{ maxWidth: 820 }} role="status">
       <div className="gap-callout-head">
-        <Icon name="alert" size={13} /> {t('reports.degrade.titre')}
+        <Icon name="alert" size={13} /> {t(partiel ? 'reports.degrade.titre_partiel' : 'reports.degrade.titre')}
       </div>
       <p style={{ margin: 0 }}>{texte}</p>
     </div>
