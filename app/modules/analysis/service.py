@@ -370,8 +370,13 @@ def _evaluer_couverture(question: str, citations: list[dict]) -> str:
     except Exception as e:  # noqa: BLE001
         logger.warning("Jugement de couverture indisponible (%s) — on génère", e)
         return "oui"
-    for verdict in ("partiel", "non", "oui"):  # « partiel » avant « non » : il
-        if verdict in mot:                     # contient parfois les deux mots
+    # Le modèle répond parfois tronqué (« part », constaté le 15/09) ou en
+    # anglais : on lit les préfixes, « partiel » avant « non » (une réponse
+    # contient parfois les deux mots).
+    if mot.startswith(("part", "yes")) or " partiel" in mot:
+        return "partiel" if mot.startswith("part") or " partiel" in mot else "oui"
+    for verdict in ("partiel", "non", "oui"):
+        if verdict in mot:
             return verdict
     logger.info("Verdict de couverture illisible (%r) — on génère", mot[:60])
     return "oui"

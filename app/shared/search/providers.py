@@ -10,6 +10,8 @@ import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
+import threading
+import time
 
 from app.config import get_settings
 from app.shared.search.base import SearchResult
@@ -213,6 +215,9 @@ class LinkupProvider:
             return []
 
 
+_VERROU_PERPLEXITY = threading.Semaphore(2)
+
+
 class PerplexityProvider:
     """Perplexity Sonar comme FOURNISSEUR DE RECHERCHE : rend des
     `SearchResult`, pas une réponse générée — distinct du client
@@ -249,12 +254,24 @@ class PerplexityProvider:
                 domaines = _domaines_perplexity(contraintes)
                 if domaines:
                     body["search_domain_filter"] = domaines
-            r = httpx.post(
-                "https://api.perplexity.ai/chat/completions",
-                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-                json=body,
-                timeout=TIMEOUT,
-            )
+            # Perplexity limite le débit par clé : six angles en parallèle
+            # rendaient des 429 (constaté le 15/09). Deux appels simultanés au
+            # plus, et un second essai après 2 s sur 429.
+            with _VERROU_PERPLEXITY:
+                r = httpx.post(
+                    "https://api.perplexity.ai/chat/completions",
+                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                    json=body,
+                    timeout=TIMEOUT,
+                )
+                if getattr(r, "status_code", 200) == 429:
+                    time.sleep(2)
+                    r = httpx.post(
+                        "https://api.perplexity.ai/chat/completions",
+                        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                        json=body,
+                        timeout=TIMEOUT,
+                    )
             r.raise_for_status()
             data = r.json()
             message = ((data.get("choices") or [{}])[0].get("message") or {})
