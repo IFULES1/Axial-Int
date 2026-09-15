@@ -85,3 +85,27 @@ test('axCoutConversation : importé, et branché sur GET …/cout', () => {
   assert.match(bridge, /export\s+async\s+function\s+axCoutConversation/);
   assert.match(bridge, /\/intelligence\/conversations\/\$\{cid\}\/cout/);
 });
+
+// Sources v2, Task 4 (spec §4) : la base investisseurs et Pappers reçoivent
+// une étiquette dédiée dans `mapCitations`, la base de connaissance (kb) elle
+// n'en reçoit AUCUNE (décision de Miradie du 14/09 — reste rendue comme un
+// document/référence interne, pas nommée).
+test("mapCitations étiquette source==='investisseurs' et source==='pappers' via t()", () => {
+  assert.match(app, /source === 'investisseurs'\s*\n?\s*\?\s*t\('conv\.source\.investisseurs'\)/);
+  assert.match(app, /source === 'pappers'\s*\n?\s*\?\s*t\('conv\.source\.pappers'\)/);
+});
+
+test("les clés conv.source.investisseurs / conv.source.pappers existent en FR et EN", () => {
+  for (const cle of ["'conv.source.investisseurs'", "'conv.source.pappers'"]) {
+    const occurrences = app.split(cle).length - 1;
+    // Une déclaration dans chaque dictionnaire (FR, EN) + une lecture dans
+    // mapCitations = 3 occurrences du littéral dans le fichier.
+    assert.equal(occurrences, 3,
+      `${cle} doit apparaître exactement 3 fois (FR, EN, lecture) — trouvé ${occurrences}`);
+  }
+});
+
+test("mapCitations ne donne aucune étiquette dédiée à source==='kb'", () => {
+  assert.doesNotMatch(app, /source === 'kb'/,
+    "la base de connaissance Axial ne doit jamais être nommée côté utilisateur (décision du 14/09)");
+});

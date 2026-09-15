@@ -2277,3 +2277,361 @@ def test_run_analysis_pappers_desactive_aucun_appel_de_suivi_dedie(monkeypatch):
         user_id="11111111-2222-3333-4444-555555555555", suivi=suivi,
     )
     assert ("etape", "recherche", 22) not in suivi.appels
+
+
+# ============================================================
+# Task 4 — Base investisseurs en conversation, étiquette Pappers dans
+# `grounding`, fournisseurs réellement annoncés. Spec §4.
+# ============================================================
+
+import uuid as _uuidlib
+
+from sqlalchemy import create_engine as _create_engine
+from sqlalchemy.orm import Session as _Session
+
+from app.modules.investors import service as investors_service
+
+
+# --- question_de_levee : regex FR/EN, fonction pure -------------------------
+
+@pytest.mark.parametrize("texte", [
+    "Comment lever des fonds pour ma startup ?",
+    "On prépare notre levée de série A",
+    "Quels investisseurs cibler en seed ?",
+    "On cherche un fonds VC generaliste",
+    "Qui contacter côté business angels ?",
+    "Peux-tu m'aider sur le financement de l'entreprise ?",
+    "What's a fair valuation for our term sheet?",
+    "We are fundraising a Series B round",
+    "Looking for venture investors",
+    "What ticket size should we expect?",
+    "On doit émettre des BSA pour ce tour",
+    "How to structure our seed round?",
+])
+def test_levee_detecte_les_formulations_fr_en(texte):
+    assert investors_service.question_de_levee(texte) is True
+
+
+@pytest.mark.parametrize("texte", [
+    "Quelle est la météo à Paris demain ?",
+    "Peux-tu résumer ce document ?",
+    "Comment améliorer notre taux de conversion produit ?",
+    "",
+    None,
+])
+def test_levee_ignore_les_questions_hors_sujet(texte):
+    assert investors_service.question_de_levee(texte) is False
+
+
+def test_levee_insensible_a_la_casse():
+    assert investors_service.question_de_levee("ON VEUT LEVER DES FONDS") is True
+
+
+# --- grounding.assemble : étiquette Pappers ---------------------------------
+
+def test_grounding_pappers_etiquette_le_registre():
+    from app.shared import grounding
+
+    pappers_result = SearchResult(
+        title="ACME SAS", url="https://www.pappers.fr/entreprise/acme-123456789",
+        snippet="SAS créée en 2019, NAF 62.01Z, 12 salariés.", provider="pappers")
+    context, citations = grounding.assemble("ACME", [pappers_result], [], top_k=5)
+    assert "(registre : pappers.fr)" in context
+    assert citations[0]["source"] == "pappers"
+
+
+def test_grounding_pappers_laisse_le_web_normal_intact():
+    from app.shared import grounding
+
+    web_result = SearchResult(title="Article marché", url="https://lesechos.fr/x",
+                              snippet="Analyse du marché.", provider="exa")
+    context, citations = grounding.assemble("marché", [web_result], [], top_k=5)
+    assert "(web : lesechos.fr)" in context
+    assert citations[0]["source"] == "web"
+
+
+def test_grounding_pappers_et_web_coexistent_dans_le_meme_pool():
+    from app.shared import grounding
+
+    web_result = SearchResult(title="Article marché", url="https://lesechos.fr/x",
+                              snippet="Analyse du marché.", provider="exa")
+    pappers_result = SearchResult(
+        title="ACME SAS", url="https://www.pappers.fr/entreprise/acme-123456789",
+        snippet="SAS créée en 2019.", provider="pappers")
+    context, citations = grounding.assemble("ACME marché", [web_result, pappers_result], [],
+                                            top_k=5)
+    sources = {c["source"] for c in citations}
+    assert sources == {"web", "pappers"}
+
+
+# --- _fournisseurs_recherche : fournisseurs réellement disponibles ---------
+
+def test_fournisseurs_annonces_aplati_dans_l_ordre_des_niveaux(monkeypatch):
+    from app.modules.intelligence import service as intel
+
+    monkeypatch.setenv("SEARCH_TIERS", "perplexity,exa|tavily,linkup")
+    get_settings.cache_clear()
+
+    class _P:
+        def __init__(self, ok):
+            self._ok = ok
+
+        def available(self):
+            return self._ok
+
+    dispo = {"perplexity": True, "exa": False, "tavily": True, "linkup": True}
+    monkeypatch.setattr("app.shared.search.providers.get_provider",
+                        lambda n: _P(dispo.get(n, False)))
+    assert intel._fournisseurs_recherche() == ["perplexity", "tavily", "linkup"]
+    get_settings.cache_clear()
+
+
+def test_fournisseurs_annonces_deduplique(monkeypatch):
+    from app.modules.intelligence import service as intel
+
+    # Un même fournisseur listé dans deux niveaux ne doit apparaître qu'une fois.
+    monkeypatch.setenv("SEARCH_TIERS", "exa,tavily|exa,linkup")
+    get_settings.cache_clear()
+
+    class _P:
+        def available(self):
+            return True
+
+    monkeypatch.setattr("app.shared.search.providers.get_provider",
+                        lambda n: _P())
+    assert intel._fournisseurs_recherche() == ["exa", "tavily", "linkup"]
+    get_settings.cache_clear()
+
+
+def test_fournisseurs_annonces_ignore_les_non_configures(monkeypatch):
+    from app.modules.intelligence import service as intel
+
+    monkeypatch.setenv("SEARCH_TIERS", "perplexity,exa|tavily,linkup")
+    get_settings.cache_clear()
+
+    def _get_provider(n):
+        if n in ("perplexity", "linkup"):
+            return None  # pas de clé configurée
+        class _P:
+            def available(self):
+                return True
+        return _P()
+
+    monkeypatch.setattr("app.shared.search.providers.get_provider", _get_provider)
+    assert intel._fournisseurs_recherche() == ["exa", "tavily"]
+    get_settings.cache_clear()
+
+
+# --- Base investisseurs en conversation (_rechercher) -----------------------
+
+def _base_profils():
+    import app.modules.memory.models  # noqa: F401 — company_profiles
+
+    engine = _create_engine("sqlite://", future=True)
+    from app.db import Base as _Base
+
+    _Base.metadata.create_all(engine, tables=[
+        _Base.metadata.tables["company_profiles"],
+    ])
+    return engine
+
+
+def _profil(db, *, sector=None, funding_stage=None):
+    from app.modules.memory.models import CompanyProfile
+
+    uid = str(_uuidlib.uuid4())
+    profil = CompanyProfile(user_id=_uuidlib.UUID(uid), company_name="ACME",
+                            sector=sector, funding_stage=funding_stage)
+    db.add(profil)
+    db.commit()
+    return uid
+
+
+def _ctx_conversation(*, user_id: str, trivial: bool = False):
+    from app.modules.intelligence import service as intel
+
+    return intel._Contexte(conv=None, agent_key="axial_conseil", redirect_note=None,
+                           persona=None, conversation_libre=True, company_context="",
+                           attached_context="", history=[], trivial=trivial,
+                           user_id=user_id, conv_id=None, user_msg_id=None)
+
+
+def _neutraliser_reseau(monkeypatch, *, web_results=None):
+    from app.modules.integrations import notion_context
+    from app.modules.intelligence import service as intel
+    from app.shared import search as web_search
+
+    appels_web: list[dict] = []
+
+    def _search(query, top_k=6, contraintes=None, compteur=None):
+        appels_web.append({"query": query, "contraintes": contraintes})
+        return list(web_results or [])
+
+    monkeypatch.setattr(web_search, "search", _search)
+    monkeypatch.setattr(intel, "_retrieve_context", lambda *a, **k: ("", []))
+    monkeypatch.setattr(notion_context, "passages_pour", lambda *a, **k: [])
+    return appels_web
+
+
+def test_conversation_investisseurs_numerotees_en_tete(monkeypatch):
+    """Spec §4 : la base investisseurs, quand elle répond, occupe les premiers
+    numéros — le web reprend la numérotation après elle (comme le rapport de
+    cartographie investisseurs)."""
+    from app.modules.intelligence import service as intel
+
+    engine = _base_profils()
+    with _Session(engine) as db:
+        uid = _profil(db, sector="Fintech", funding_stage="Seed")
+
+        web = [SearchResult(title="Actu marché", url="https://lesechos.fr/z",
+                            snippet="Contexte marché.", provider="exa")]
+        appels_web = _neutraliser_reseau(monkeypatch, web_results=web)
+
+        mapping = {"funds": [{"nom": "Fonds Alpha", "site_web": "https://alpha.vc",
+                              "score": 0.9, "n_vehicules": 2, "zone": "France",
+                              "secteurs": ["Fintech"], "stades": ["Seed"]}],
+                  "networks": [], "note": None}
+        appels_mapping: list[dict] = []
+
+        def _map(profile, *, limit):
+            appels_mapping.append({"profile": profile, "limit": limit})
+            return mapping
+
+        monkeypatch.setattr(investors_service, "map_for_profile", _map)
+
+        ctx = _ctx_conversation(user_id=uid)
+        rech = intel._rechercher(db, uid, "Comment lever des fonds en seed ?", ctx)
+
+    assert appels_mapping and appels_mapping[0]["limit"] == 10
+    assert appels_web  # la recherche web tourne EN PARALLÈLE, pas à la place
+    assert rech.citations[0]["source"] == "investisseurs"
+    assert rech.citations[0]["title"] == "Fonds Alpha"
+    assert rech.citations[1]["source"] == "web"
+    assert rech.combined_context.index("[1]") < rech.combined_context.index("[2]")
+    assert "Fonds Alpha" in rech.combined_context.split("[2]")[0]
+
+
+def test_conversation_investisseurs_propage_les_contraintes(monkeypatch):
+    """`_rechercher` passe `contraintes_pour(question, None)` à `web_search.search`
+    (spec §1) — pas de filtre de type de rapport, seulement les mots de la
+    question."""
+    from app.modules.intelligence import service as intel
+    from app.shared.search.contraintes import Contraintes
+
+    engine = _base_profils()
+    with _Session(engine) as db:
+        uid = _profil(db, sector=None, funding_stage=None)
+        appels_web = _neutraliser_reseau(monkeypatch)
+        ctx = _ctx_conversation(user_id=uid)
+        intel._rechercher(db, uid, "Actualité réglementaire RGPD cette semaine", ctx)
+
+    assert len(appels_web) == 1
+    c = appels_web[0]["contraintes"]
+    assert isinstance(c, Contraintes)
+    # « RGPD » + « cette semaine » : la règle la plus restrictive gagne (90 j).
+    assert c.fraicheur_jours == 90
+
+
+def test_conversation_investisseurs_ignoree_si_pas_de_levee(monkeypatch):
+    """Une question sans rapport avec le financement ne déclenche jamais la
+    base investisseurs, même avec un profil complet."""
+    from app.modules.intelligence import service as intel
+
+    engine = _base_profils()
+    with _Session(engine) as db:
+        uid = _profil(db, sector="Fintech", funding_stage="Seed")
+        _neutraliser_reseau(monkeypatch)
+
+        appele = []
+        monkeypatch.setattr(investors_service, "map_for_profile",
+                            lambda *a, **k: appele.append(1) or {})
+
+        ctx = _ctx_conversation(user_id=uid)
+        rech = intel._rechercher(db, uid, "Comment améliorer notre roadmap produit ?", ctx)
+
+    assert not appele
+    assert not any(c.get("source") == "investisseurs" for c in rech.citations)
+
+
+def test_conversation_investisseurs_ignoree_si_profil_incomplet(monkeypatch):
+    """Question de levée mais profil sans secteur ni stade : `map_for_profile`
+    ne serait qu'une note d'échec, on ne l'appelle pas (spec §4)."""
+    from app.modules.intelligence import service as intel
+
+    engine = _base_profils()
+    with _Session(engine) as db:
+        uid = _profil(db, sector=None, funding_stage=None)
+        _neutraliser_reseau(monkeypatch)
+
+        appele = []
+        monkeypatch.setattr(investors_service, "map_for_profile",
+                            lambda *a, **k: appele.append(1) or {})
+
+        ctx = _ctx_conversation(user_id=uid)
+        rech = intel._rechercher(db, uid, "On veut lever des fonds", ctx)
+
+    assert not appele
+    assert not any(c.get("source") == "investisseurs" for c in rech.citations)
+
+
+def test_conversation_investisseurs_echec_silencieux(monkeypatch, caplog):
+    """`map_for_profile` qui explose ne bloque jamais la réponse — journal
+    seulement, jamais d'erreur utilisateur (spec §4)."""
+    from app.modules.intelligence import service as intel
+
+    engine = _base_profils()
+    with _Session(engine) as db:
+        uid = _profil(db, sector="Fintech", funding_stage="Seed")
+        _neutraliser_reseau(monkeypatch)
+
+        def _boom(*a, **k):
+            raise RuntimeError("base investisseurs indisponible")
+
+        monkeypatch.setattr(investors_service, "map_for_profile", _boom)
+
+        ctx = _ctx_conversation(user_id=uid)
+        with caplog.at_level("WARNING", logger="axial.intelligence"):
+            rech = intel._rechercher(db, uid, "On veut lever des fonds en seed", ctx)
+
+    assert not any(c.get("source") == "investisseurs" for c in rech.citations)
+    assert "indisponible" in caplog.text.lower() or "investisseurs" in caplog.text.lower()
+
+
+def test_conversation_investisseurs_mapping_vide_reste_silencieux(monkeypatch):
+    """Mapping renvoyé mais sans fonds ni réseaux (secteur non couvert) : rien
+    n'est ajouté au contexte, pas d'entrée factice."""
+    from app.modules.intelligence import service as intel
+
+    engine = _base_profils()
+    with _Session(engine) as db:
+        uid = _profil(db, sector="Fintech", funding_stage="Seed")
+        _neutraliser_reseau(monkeypatch)
+
+        monkeypatch.setattr(investors_service, "map_for_profile",
+                            lambda *a, **k: {"funds": [], "networks": [],
+                                             "note": "aucun investisseur couvrant ce secteur"})
+
+        ctx = _ctx_conversation(user_id=uid)
+        rech = intel._rechercher(db, uid, "On veut lever des fonds en seed", ctx)
+
+    assert not any(c.get("source") == "investisseurs" for c in rech.citations)
+
+
+def test_conversation_investisseurs_pas_de_recherche_si_message_trivial(monkeypatch):
+    """Message trivial (« merci ») : ni web, ni RAG, ni base investisseurs."""
+    from app.modules.intelligence import service as intel
+
+    engine = _base_profils()
+    with _Session(engine) as db:
+        uid = _profil(db, sector="Fintech", funding_stage="Seed")
+        _neutraliser_reseau(monkeypatch)
+
+        appele = []
+        monkeypatch.setattr(investors_service, "map_for_profile",
+                            lambda *a, **k: appele.append(1) or {})
+
+        ctx = _ctx_conversation(user_id=uid, trivial=True)
+        rech = intel._rechercher(db, uid, "merci", ctx)
+
+    assert not appele
+    assert rech.citations == []

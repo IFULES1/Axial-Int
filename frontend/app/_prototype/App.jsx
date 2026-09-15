@@ -513,6 +513,10 @@ const STRINGS = {
     'conv.etape.attente': 'Préparation…',
     'conv.etape.recherche': 'Recherche web…',
     'conv.etape.sources': 'sources lues',
+    // Étiquettes d'origine des citations (spec §4/§3) — la base de connaissance
+    // Axial (kb) n'en a volontairement AUCUNE (décision de Miradie du 14/09).
+    'conv.source.investisseurs': 'Base investisseurs Axial',
+    'conv.source.pappers': 'Registre des entreprises (Pappers)',
     'conv.etape.redaction': 'Rédaction…',
     'conv.etape.secondes': 's',
     'conv.scroll.bas': 'Nouveaux messages',
@@ -944,6 +948,10 @@ const STRINGS = {
     'conv.etape.attente': 'Preparing…',
     'conv.etape.recherche': 'Web search…',
     'conv.etape.sources': 'sources read',
+    // Citation origin labels (spec §4/§3) — the Axial knowledge base (kb) gets
+    // NONE on purpose (Miradie's 14/09 decision).
+    'conv.source.investisseurs': 'Axial investor database',
+    'conv.source.pappers': 'Company registry (Pappers)',
     'conv.etape.redaction': 'Writing…',
     'conv.etape.secondes': 's',
     'conv.scroll.bas': 'New messages',
@@ -8976,6 +8984,10 @@ function App() {
     title: c.title || c.domain || 'Source',
     source: c.source === 'web'
       ? ('Web · ' + (c.domain || ''))
+      : c.source === 'investisseurs'
+      ? t('conv.source.investisseurs')
+      : c.source === 'pappers'
+      ? t('conv.source.pappers')
       : (c.source === 'document' ? 'Votre document' : ('Base de connaissance Axial' + (c.reference ? ' · ' + c.reference : ''))),
     excerpt: c.excerpt || '',
     link: c.url || null,

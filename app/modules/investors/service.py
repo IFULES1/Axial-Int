@@ -17,10 +17,29 @@ scores are not comparable.
 from __future__ import annotations
 
 import logging
+import re
 
 from app.modules.investors import client
 
 logger = logging.getLogger("axial.investors")
+
+
+# Spec §4 : mots FR/EN qui signalent qu'une question de conversation porte sur
+# une levée de fonds, des investisseurs, ou du financement — insensible à la
+# casse. Fonction pure, testée, sans appel modèle : la base investisseurs ne
+# doit pas dépendre d'un jugement LLM pour savoir si elle doit répondre.
+_LEVEE_PATTERN = re.compile(
+    r"lev(er|ée)|investisseur|fonds|\bvc\b|venture|business angel|seed|"
+    r"s[ée]rie\s*[abc]\b|series\s*[abc]\b|financement|fundrais|ticket|"
+    r"valorisation|term\s*sheet|\bbsa\b",
+    re.IGNORECASE,
+)
+
+
+def question_de_levee(texte: str) -> bool:
+    """Vrai si la question parle de levée de fonds, d'investisseurs ou de
+    financement (spec §4 — regex FR/EN, insensible à la casse)."""
+    return bool(_LEVEE_PATTERN.search(texte or ""))
 
 
 def referentials() -> dict:

@@ -465,11 +465,33 @@ def _retrieve_context(query: str, user_id: str, top_k: int = 6):
         return "", []
 
 
-def _assemble_sources(query: str, web_results, doc_passages, top_k: int = 8):
-    """Pool unifié web + interne (implémentation partagée avec les rapports)."""
+def _assemble_sources(query: str, web_results, doc_passages, top_k: int = 8,
+                      start_at: int = 1):
+    """Pool unifié web + interne (implémentation partagée avec les rapports).
+
+    `start_at` : les citations investisseurs (spec §4), quand il y en a, sont
+    numérotées EN TÊTE — le reste du pool reprend la numérotation après elles,
+    comme pour le rapport de cartographie investisseurs.
+    """
     from app.shared import grounding
 
-    return grounding.assemble(query, web_results, doc_passages, top_k)
+    return grounding.assemble(query, web_results, doc_passages, top_k, start_at=start_at)
+
+
+def _profil_pour_investisseurs(db: Session, user_id: str) -> dict:
+    """Profil entreprise en dict — mêmes clés que ce que `investors.map_for_profile`
+    attend (miroir de `analysis.service._profile_dict`, gardé local pour ne pas
+    dépendre des internes du module rapports)."""
+    from app.modules.memory import service as memory
+
+    p = memory.get_profile(db, user_id)
+    if p is None:
+        return {}
+    return {
+        "sector": p.sector, "funding_stage": p.funding_stage,
+        "target_market": p.target_market, "country": getattr(p, "country", None),
+        "company_name": p.company_name,
+    }
 
 
 AGENT_MESSAGE_ACTION = "agent_message"
@@ -813,13 +835,26 @@ def verifier_credits(db: Session, user_id: str, *, is_admin: bool) -> None:
 
 def _fournisseurs_recherche() -> list[str]:
     """Fournisseurs qui vont être interrogés — pour l'annoncer AVANT la
-    recherche (le compteur, lui, n'est rempli qu'après)."""
+    recherche (le compteur, lui, n'est rempli qu'après).
+
+    Reflète la recherche à niveaux (spec §2) : `search_tier_list`, aplati dans
+    l'ordre des niveaux et dédupliqué, plutôt que l'ancien `search_provider_list`
+    qui ne connaissait pas Perplexity ni les niveaux 2/3.
+    """
     try:
         from app.config import get_settings
         from app.shared.search.providers import get_provider
 
-        return [n for n in get_settings().search_provider_list
-                if (p := get_provider(n)) and p.available()]
+        vus: set[str] = set()
+        fournisseurs: list[str] = []
+        for niveau in get_settings().search_tier_list:
+            for n in niveau:
+                if n in vus:
+                    continue
+                vus.add(n)
+                if (p := get_provider(n)) and p.available():
+                    fournisseurs.append(n)
+        return fournisseurs
     except Exception as e:  # noqa: BLE001
         logger.warning("Liste des fournisseurs de recherche indisponible : %s", e)
         return []
@@ -931,31 +966,60 @@ def requete_de_recherche(ctx: _Contexte, content: str) -> str:
 
 def _rechercher(db: Session, user_id: str, content: str,
                 ctx: _Contexte) -> _Recherche:
-    """La partie lente : web, RAG, Notion, rerank. Le flux l'annonce."""
+    """La partie lente : web, RAG, Notion, base investisseurs, rerank. Le flux
+    l'annonce."""
     from app.shared import search as web_search
+    from app.shared.search.contraintes import contraintes_pour
+    from app.modules.investors import service as investors
 
     # Rempli par l'orchestrateur, un compte par fournisseur interrogé : le coût
     # de recherche d'une conversation n'apparaît sur aucune facture ventilée,
     # il faut le compter à la source (même mécanique que `analysis`).
     appels_recherche: dict[str, int] = {}
     requete = requete_de_recherche(ctx, content)
+    # Spec §1 : les conversations passent aussi des contraintes (fraîcheur/
+    # domaines dérivés des mots de la question) — `analysis_type=None` = pas de
+    # filtre par type de rapport, seuls les mots de la question s'appliquent.
+    contraintes = contraintes_pour(requete, None)
 
+    investor_mapping = None
     if ctx.trivial:
         doc_passages, web_results = [], []
     else:
-        # RAG et recherche web en PARALLÈLE (elles ne partagent pas la session DB).
+        # RAG, recherche web et (le cas échéant) base investisseurs en
+        # PARALLÈLE (elles ne partagent pas la session DB) — la base
+        # investisseurs ne doit ajouter aucune latence au tour.
         from concurrent.futures import ThreadPoolExecutor
 
-        with ThreadPoolExecutor(max_workers=2) as ex:
+        profile = _profil_pour_investisseurs(db, user_id)
+        # Spec §4 : la base investisseurs répond aussi en conversation quand la
+        # question parle de levée/investisseurs/financement — mais seulement si
+        # le profil donne de quoi la rattacher à un secteur ou un stade, sinon
+        # `map_for_profile` ne renverrait qu'une note d'échec.
+        veut_investisseurs = bool(
+            investors.question_de_levee(content)
+            and (profile.get("sector") or profile.get("funding_stage"))
+        )
+
+        with ThreadPoolExecutor(max_workers=3 if veut_investisseurs else 2) as ex:
             f_docs = ex.submit(_retrieve_context, requete, user_id)
             f_web = ex.submit(web_search.search, requete, 6,
-                              compteur=appels_recherche)
+                              contraintes=contraintes, compteur=appels_recherche)
+            f_inv = (ex.submit(investors.map_for_profile, profile, limit=10)
+                     if veut_investisseurs else None)
             try:
                 web_results = f_web.result()
             except Exception as e:
                 logger.warning("Agent web search failed: %s", e)
                 web_results = []
             _, doc_passages = f_docs.result()
+            if f_inv is not None:
+                try:
+                    investor_mapping = f_inv.result()
+                except Exception as e:  # noqa: BLE001 — échec silencieux (spec §4)
+                    logger.warning("Base investisseurs indisponible en "
+                                   "conversation : %s", e)
+                    investor_mapping = None
 
     # Espace Notion de l'utilisateur : ses pages rejoignent le même pool que le
     # web et ses documents, donc elles sont rerankées et citées comme le reste.
@@ -968,8 +1032,26 @@ def _rechercher(db: Session, user_id: str, content: str,
         except Exception as e:  # noqa: BLE001 — un outil injoignable ne bloque rien
             logger.warning("Espace Notion indisponible : %s", e)
 
+    # Base investisseurs (spec §4) : numérotée EN TÊTE, comme pour le rapport de
+    # cartographie investisseurs (`analysis.service.run_analysis`) — le reste du
+    # pool (web/RAG/Notion) reprend la numérotation après elle. Mapping vide ou
+    # en échec → rien, jamais de blocage ni d'erreur utilisateur, pas de débit
+    # supplémentaire (ce n'est qu'un enrichissement de la conversation).
+    investor_context, investor_citations = "", []
+    if investor_mapping is not None:
+        investor_citations = investors.citations(investor_mapping)
+        if investor_citations:
+            investor_context = investors.format_context(investor_mapping)
+        else:
+            logger.warning("Cartographie investisseurs vide pour cette conversation")
+
     # Rerank web + internal together → one relevance-ordered context + citations.
-    combined_context, citations = _assemble_sources(requete, web_results, doc_passages)
+    combined_context, citations = _assemble_sources(
+        requete, web_results, doc_passages, start_at=len(investor_citations) + 1)
+    if investor_context:
+        combined_context = investor_context + (
+            "\n\n" + combined_context if combined_context else "")
+        citations = investor_citations + citations
     return _Recherche(combined_context=combined_context, citations=citations,
                       doc_passages=list(doc_passages),
                       appels_recherche=_appels(appels_recherche),

@@ -52,7 +52,7 @@ def _hors_reseau(monkeypatch, *, compteur_faux=None):
     monkeypatch.setattr(intel, "_assemble_sources", lambda *a, **k: ("", []))
     monkeypatch.setattr(notion_context, "passages_pour", lambda *a, **k: [])
 
-    def _recherche(query, top_k=6, compteur=None):
+    def _recherche(query, top_k=6, contraintes=None, compteur=None):
         if compteur is not None and compteur_faux:
             for nom, n in compteur_faux.items():
                 compteur[nom] = compteur.get(nom, 0) + n
@@ -2870,7 +2870,7 @@ def test_grounding_assemble_depuis_le_pipeline(monkeypatch):
                         doc_id="d1", source="user",
                         meta={"filename": "paie.pdf"})]
     monkeypatch.setattr(web_search, "search",
-                        lambda q, k=6, compteur=None: list(web))
+                        lambda q, k=6, contraintes=None, compteur=None: list(web))
     monkeypatch.setattr(intel, "_retrieve_context",
                         lambda *a, **k: ("", list(passages)))
     # Ordre imposé : l'interne d'abord, puis le doublon web, puis l'autre web.

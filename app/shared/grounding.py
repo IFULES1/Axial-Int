@@ -23,11 +23,17 @@ def assemble(query: str, web_results, doc_passages, top_k: int = 8,
 
     pool: list[dict] = []
     for r in web_results:
+        # Pappers (spec §3) : fiches du registre des entreprises, mêlées au pool
+        # web par `run_analysis`/`_noms_de_societes` — elles portent leur propre
+        # étiquette et source de citation, pas « (web : …) ».
+        est_pappers = getattr(r, "provider", None) == "pappers"
         pool.append({
             "text": f"{r.title}\n{r.snippet}",
-            "tag": f"(web : {r.domain})" if r.domain else "(web)",
+            "tag": ("(registre : pappers.fr)" if est_pappers
+                    else (f"(web : {r.domain})" if r.domain else "(web)")),
             "body": r.snippet or r.title,
-            "cite": {"title": r.title, "url": r.url, "domain": r.domain, "source": "web",
+            "cite": {"title": r.title, "url": r.url, "domain": r.domain,
+                     "source": "pappers" if est_pappers else "web",
                      "excerpt": (r.snippet or "")[:350]},
             "key": f"web::{r.domain}::{r.title.strip().lower()}",
         })
