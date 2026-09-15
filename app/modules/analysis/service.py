@@ -625,6 +625,7 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
                 noms = _noms_de_societes(query, profile, web_results)
                 pappers_results = pappers.sources_pappers(noms, compteur=appels_recherche)
                 web_results = list(web_results) + pappers_results
+                logger.info("Pappers : %d nom(s) de société → %d fiche(s)", len(noms), len(pappers_results))
             except ArretGeneration:
                 raise
             except Exception as e:  # noqa: BLE001 — enrichissement best-effort
