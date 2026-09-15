@@ -648,6 +648,7 @@ const STRINGS = {
     'kb.categorie.label': 'Catégorie',
     'kb.deposer_fichier': 'Déposer un fichier',
     'kb.url.placeholder': 'https://…',
+    'kb.url.label': 'Adresse de la page à ajouter',
     'kb.url.ajouter': 'Ajouter',
     'kb.indexation_en_cours': 'Indexation en cours…',
     'kb.vide': 'Aucun document dans la base de connaissance.',
@@ -1107,6 +1108,7 @@ const STRINGS = {
     'kb.categorie.label': 'Category',
     'kb.deposer_fichier': 'Upload a file',
     'kb.url.placeholder': 'https://…',
+    'kb.url.label': 'Address of the page to add',
     'kb.url.ajouter': 'Add',
     'kb.indexation_en_cours': 'Indexing…',
     'kb.vide': 'No document in the knowledge base.',
@@ -4406,31 +4408,44 @@ function PilotageSurface() {
   const [kbCategorie, setKbCategorie] = React.useState(DEFAULT_CATEGORIE);
   const [kbUrl, setKbUrl] = React.useState('');
   const kbFileRef = React.useRef(null);
-  const kbLoad = () => axKbLister().then(setKb).catch((e) => setKbErr((e && e.message) || 'Erreur'));
+  // `garderErreur` : ne pas écraser une erreur d'action fraîchement posée par
+  // le catch de l'appelant (upload/URL/suppression) — seul un rechargement
+  // SANS erreur d'action en cours doit effacer `kbErr` à son succès.
+  const kbLoad = (garderErreur = false) => axKbLister()
+    .then((r) => { setKb(r); if (!garderErreur) setKbErr(''); })
+    .catch((e) => setKbErr(decrireErreur(e, t).detail));
   React.useEffect(() => { kbLoad(); }, []);
   const kbOnFile = async (e) => {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     setKbBusy(true); setKbErr('');
+    let echoue = false;
     try { await axKbAjouterFichier(f, kbCategorie); }
-    catch (ex) { setKbErr(decrireErreur(ex, t).detail); }
-    setKbBusy(false);
+    catch (ex) { echoue = true; setKbErr(decrireErreur(ex, t).detail); }
     if (kbFileRef.current) kbFileRef.current.value = '';
-    kbLoad();
+    await kbLoad(echoue);
+    setKbBusy(false);
   };
   const kbAjouterUrl = async () => {
     const url = kbUrl.trim();
     if (!url || kbBusy) return;
     setKbBusy(true); setKbErr('');
+    let echoue = false;
     try { await axKbAjouterUrl(url, kbCategorie); setKbUrl(''); }
-    catch (ex) { setKbErr(decrireErreur(ex, t).detail); }
+    catch (ex) { echoue = true; setKbErr(decrireErreur(ex, t).detail); }
+    await kbLoad(echoue);
     setKbBusy(false);
-    kbLoad();
   };
   const kbSupprimer = async (doc) => {
     if (!window.confirm(t('kb.supprimer.confirmation'))) return;
-    try { await axKbSupprimer(doc.id); } catch (ex) { setKbErr((ex && ex.message) || 'Erreur'); }
-    kbLoad();
+    setKbErr('');
+    let echoue = false;
+    // `doc.doc_id` (identifiant Qdrant, lu par la route), PAS `doc.id`
+    // (clé primaire de la table `kb_documents`) — deux valeurs distinctes du
+    // modèle (`app/modules/kb/models.py`) : envoyer `doc.id` fait échouer la
+    // suppression à 100 % des cas (`service.supprimer` cherche `doc_id`).
+    try { await axKbSupprimer(doc.doc_id); } catch (ex) { echoue = true; setKbErr(decrireErreur(ex, t).detail); }
+    await kbLoad(echoue);
   };
   const kbFmtDate = (iso) => (iso ? fmtDate(iso, window.AXIAL_LANG || 'fr') : '—');
   const kbTotalChunks = kb ? kb.items.reduce((s, it) => s + (it.nb_chunks || 0), 0) : 0;
@@ -4624,6 +4639,7 @@ function PilotageSurface() {
           <input ref={kbFileRef} type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.md" style={{ display: 'none' }}
             onChange={kbOnFile} disabled={kbBusy} />
           <input value={kbUrl} onChange={(e) => setKbUrl(e.target.value)} placeholder={t('kb.url.placeholder')}
+            aria-label={t('kb.url.label')}
             disabled={kbBusy}
             style={{ flex: '1 1 220px', minWidth: 0, background: 'var(--surface-2)', border: '1px solid var(--border)',
                      borderRadius: 8, color: 'var(--fg)', fontSize: 12.5, padding: '7px 10px', outline: 'none' }} />

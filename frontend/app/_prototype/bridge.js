@@ -594,7 +594,7 @@ export async function axKbAjouterFichier(file, categorie, _retried = false) {
   return res.json();
 }
 export async function axKbSupprimer(docId) {
-  return axFetch(`/admin/kb/${docId}`, { method: "DELETE" });
+  return axFetch(`/admin/kb/${encodeURIComponent(docId)}`, { method: "DELETE" });
 }
 
 // --- reports ---

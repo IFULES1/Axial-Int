@@ -12,6 +12,7 @@ import { dirname, join } from 'node:path';
 const racine = join(dirname(fileURLToPath(import.meta.url)), '..');
 const app = readFileSync(join(racine, 'app/_prototype/App.jsx'), 'utf8');
 const bridge = readFileSync(join(racine, 'app/_prototype/bridge.js'), 'utf8');
+const pagePartage = readFileSync(join(racine, 'app/p/[pseudo]/[slug]/page.tsx'), 'utf8');
 
 /* Extrait le corps d'une fonction top-level `function nom(...) { … }` par
  * comptage d'accolades (les fonctions imbriquées de PilotageSurface ne
@@ -83,12 +84,31 @@ test('bridge.js : axKbAjouterUrl → POST /admin/kb/urls', () => {
   assert.match(corps, /method:\s*["']POST["']/);
 });
 
-test("bridge.js : axKbSupprimer → DELETE /admin/kb/{docId}", () => {
+test("bridge.js : axKbSupprimer → DELETE /admin/kb/${encodeURIComponent(docId)}", () => {
   const m = bridge.match(/export\s+async\s+function\s+axKbSupprimer\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
   assert.ok(m, 'axKbSupprimer introuvable dans bridge.js');
   const corps = m[0];
-  assert.match(corps, /\/admin\/kb\/\$\{[^}]+\}/);
+  // Chaîne précise, pas un motif générique sur l'interpolation (revue Task 6,
+  // tour 1, Q1) : la revue a montré qu'un motif générique laisse passer un
+  // identifiant faux (doc.id au lieu de doc.doc_id) sans faire échouer le test.
+  assert.match(corps, /`\/admin\/kb\/\$\{encodeURIComponent\(docId\)\}`/,
+    'axKbSupprimer doit construire exactement `/admin/kb/${encodeURIComponent(docId)}`');
   assert.match(corps, /method:\s*["']DELETE["']/);
+});
+
+test('bridge.js : axKbAjouterFichier pose le jeton sur le multipart, sans forcer Content-Type', () => {
+  const m = bridge.match(/export\s+async\s+function\s+axKbAjouterFichier\s*\([^)]*\)\s*\{[\s\S]*?\n\}/);
+  assert.ok(m, 'axKbAjouterFichier introuvable dans bridge.js');
+  const corps = m[0];
+  // Le jeton doit être posé (même mécanique qu'axUploadDocument) : sans lui,
+  // le premier essai échouerait toujours en 401/403 avant même le refresh.
+  assert.match(corps, /Authorization:\s*["']Bearer\s*["']\s*\+\s*tok/,
+    "le jeton d'authentification doit être posé sur la requête multipart");
+  // `Content-Type` ne doit JAMAIS être fixé à la main sur un envoi FormData :
+  // le navigateur doit écrire lui-même la frontière multipart, sinon le
+  // backend ne peut plus parser le corps.
+  assert.doesNotMatch(corps, /["']Content-Type["']/,
+    "axKbAjouterFichier ne doit pas fixer Content-Type sur l'envoi multipart");
 });
 
 test('les 4 fonctions KB sont exportées de bridge.js', () => {
@@ -110,6 +130,26 @@ test('PilotageSurface appelle bien les 4 fonctions KB (pas un autre écran)', ()
   for (const nom of ['axKbLister', 'axKbAjouterFichier', 'axKbAjouterUrl', 'axKbSupprimer']) {
     assert.match(pilotage.corps, new RegExp(`\\b${nom}\\s*\\(`), `PilotageSurface doit appeler ${nom}(…)`);
   }
+});
+
+test("la suppression envoie doc.doc_id (identifiant Qdrant), pas doc.id (PK de la table)", () => {
+  // Revue Task 6, tour 1, C1 : `id` est la clé primaire de `kb_documents`,
+  // `doc_id` est l'identifiant Qdrant que la route DELETE attend
+  // (`service.supprimer` cherche une ligne par `doc_id`, pas par `id`) —
+  // envoyer `doc.id` fait échouer la suppression à 100 % des cas.
+  assert.match(pilotage.corps, /\baxKbSupprimer\s*\(\s*doc\.doc_id\s*\)/,
+    'axKbSupprimer doit être appelé avec doc.doc_id, pas doc.id');
+  assert.doesNotMatch(pilotage.corps, /\baxKbSupprimer\s*\(\s*doc\.id\s*\)/,
+    'axKbSupprimer ne doit jamais être appelé avec doc.id (mauvais identifiant)');
+});
+
+test('kbLoad et kbSupprimer passent par decrireErreur, comme les deux ajouts (revue, C2)', () => {
+  // Les 4 chemins KB de PilotageSurface doivent produire un message localisé
+  // (titre/detail via t()), pas le `.message` brut du backend (souvent en
+  // français uniquement, sans titre ni action).
+  const occurrences = (pilotage.corps.match(/decrireErreur\s*\(/g) || []).length;
+  assert.ok(occurrences >= 4,
+    `decrireErreur doit être utilisé sur les 4 chemins KB (ajout fichier, ajout URL, listage, suppression) — trouvé ${occurrences} appel(s)`);
 });
 
 test("les clés d'i18n kb.* existent en FR et en EN, avec le même ensemble", () => {
@@ -136,4 +176,23 @@ test("aucune mention de la base de connaissance en dehors de PilotageSurface (ho
   reste = reste.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   assert.doesNotMatch(reste, motif,
     'la base de connaissance ne doit apparaître nulle part hors de PilotageSurface (décision de visibilité du 14/09)');
+});
+
+test("bridge.js : aucune mention de la base de connaissance hors des commentaires", () => {
+  // Revue Task 6, tour 1 (non bloquant) : bridge.js et page.tsx n'ont pas de
+  // dictionnaire i18n — aucune exemption `kb.*` à faire ici, seuls les
+  // commentaires sont tolérés (bridge.js:574 porte le nom en commentaire de
+  // section, ce qui est attendu et sans conséquence pour un utilisateur).
+  const motif = /base de connaissance|knowledge base/i;
+  const sansCommentaires = bridge.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  assert.doesNotMatch(sansCommentaires, motif,
+    'bridge.js ne doit jamais nommer la base de connaissance en dehors d’un commentaire');
+});
+
+test("page.tsx (partage public) : aucune mention de la base de connaissance, même en commentaire", () => {
+  // Cette page est publique (visiteurs sans compte) : aucune tolérance, même
+  // pour un commentaire — zéro occurrence attendue, comme le constate la revue.
+  const motif = /base de connaissance|knowledge base/i;
+  assert.doesNotMatch(pagePartage, motif,
+    'la page de partage publique ne doit jamais nommer la base de connaissance');
 });
