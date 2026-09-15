@@ -3803,6 +3803,40 @@ def test_health_reel_timeout_devient_ok_false(monkeypatch):
         get_settings.cache_clear()
 
 
+def test_health_reel_ne_retient_pas_la_reponse_au_dela_du_delai(monkeypatch):
+    """Tour 1, revue Task 8 : `_verifications_reelles` ne doit pas attendre
+    la fin réelle d'un thread bloqué au-delà de `TIMEOUT_REEL_SECONDES` — un
+    `with ThreadPoolExecutor(...)` attendrait sa sortie que le thread
+    dormant se termine. Bouchon qui dort 1 s, timeout patché à 0,1 s :
+    `providers_summary(reel=True)` doit rendre la main bien avant 1 s."""
+    import time as time_mod
+
+    from app.shared import health
+
+    _isoler_cles_reel(monkeypatch, "EXA_API_KEY")
+    monkeypatch.setattr(health, "TIMEOUT_REEL_SECONDES", 0.1)
+    try:
+        from app.shared.search import providers as search_providers
+
+        def _dort_longtemps(*a, **k):
+            time_mod.sleep(1)
+            return [object()]
+
+        monkeypatch.setattr(search_providers.get_provider("exa"), "search",
+                            _dort_longtemps)
+
+        debut = time_mod.monotonic()
+        corps = health.providers_summary(reel=True)
+        duree = time_mod.monotonic() - debut
+
+        assert duree < 0.5, f"a attendu {duree:.2f} s — retient la réponse au thread bloqué"
+        exa = next(p for p in corps["providers"] if p["name"] == "exa")
+        assert exa["ok"] is False
+        assert "délai dépassé" in exa["erreur"]
+    finally:
+        get_settings.cache_clear()
+
+
 def test_health_reel_fournisseur_non_configure_pas_appele(monkeypatch):
     """Un fournisseur non configuré reste statique : `ok=None`, jamais
     appelé (spec §8 : « par fournisseur CONFIGURÉ »)."""
@@ -3983,3 +4017,272 @@ def test_health_route_publique_sans_reel_inchangee():
             assert "ok" not in p
     finally:
         app_.dependency_overrides.clear()
+
+
+# --- Task 7 : Drive comme source (spec §6) ----------------------------------
+# `telecharger_drive` télécharge/exporte un fichier Drive choisi via le
+# Picker et le remet dans le même format que `documents.ingest` attend.
+
+import httpx  # noqa: E402
+
+from app.errors import AppError  # noqa: E402
+
+
+class _RepDrive:
+    """Réponse `httpx.stream(...)` bouchonnée (context manager)."""
+
+    def __init__(self, status_code=200, morceaux=(b"contenu",)):
+        self.status_code = status_code
+        self._morceaux = list(morceaux)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def iter_bytes(self):
+        yield from self._morceaux
+
+    def raise_for_status(self):
+        if self.status_code >= 300:
+            raise httpx.HTTPStatusError("erreur", request=None, response=self)
+
+
+def _drive_stub_stream(monkeypatch, *, status_code=200, morceaux=(b"contenu",), capture=None):
+    def _stream(method, url, headers=None, params=None, timeout=None):
+        if capture is not None:
+            capture.append({"method": method, "url": url, "headers": headers,
+                            "params": params, "timeout": timeout})
+        return _RepDrive(status_code=status_code, morceaux=morceaux)
+
+    monkeypatch.setattr(
+        "app.modules.integrations.service.httpx.stream", _stream)
+
+
+def test_drive_sans_jeton_google_non_connecte(monkeypatch):
+    from app.modules.integrations import service as integrations
+
+    monkeypatch.setattr(integrations, "jeton_actif", lambda db, uid, provider: None)
+    with pytest.raises(AppError) as e:
+        integrations.telecharger_drive(None, str(uuid.uuid4()), "file123",
+                                       "Pitch deck", "application/pdf")
+    assert e.value.code == "google_non_connecte"
+    assert e.value.status_code == 400
+
+
+def test_drive_export_google_doc_devient_txt(monkeypatch):
+    from app.modules.integrations import service as integrations
+
+    monkeypatch.setattr(integrations, "jeton_actif", lambda db, uid, provider: "TOKEN")
+    capture: list[dict] = []
+    _drive_stub_stream(monkeypatch, morceaux=(b"Bonjour ", b"le monde"), capture=capture)
+
+    nom, data, mime = integrations.telecharger_drive(
+        None, str(uuid.uuid4()), "doc123", "Notes de réunion",
+        "application/vnd.google-apps.document")
+
+    assert nom == "Notes de réunion.txt"
+    assert data == b"Bonjour le monde"
+    assert mime == "text/plain"
+    assert capture[0]["url"] == f"{integrations.DRIVE_API}/files/doc123/export"
+    assert capture[0]["params"] == {"mimeType": "text/plain"}
+    assert capture[0]["headers"]["Authorization"] == "Bearer TOKEN"
+
+
+def test_drive_export_sheet_devient_csv():
+    from app.modules.integrations import service as integrations
+
+    assert integrations.GOOGLE_DOC_EXPORTS["application/vnd.google-apps.spreadsheet"] == (
+        "text/csv", ".csv")
+
+
+def test_drive_export_slides_devient_pdf():
+    from app.modules.integrations import service as integrations
+
+    assert integrations.GOOGLE_DOC_EXPORTS["application/vnd.google-apps.presentation"] == (
+        "application/pdf", ".pdf")
+
+
+def test_drive_binaire_garde_le_nom_d_origine(monkeypatch):
+    from app.modules.integrations import service as integrations
+
+    monkeypatch.setattr(integrations, "jeton_actif", lambda db, uid, provider: "TOKEN")
+    capture: list[dict] = []
+    _drive_stub_stream(monkeypatch, morceaux=(b"%PDF-1.4 ...",), capture=capture)
+
+    nom, data, mime = integrations.telecharger_drive(
+        None, str(uuid.uuid4()), "bin456", "Business plan.pdf", "application/pdf")
+
+    assert nom == "Business plan.pdf"
+    assert data == b"%PDF-1.4 ..."
+    assert mime == "application/pdf"
+    assert capture[0]["url"] == f"{integrations.DRIVE_API}/files/bin456"
+    assert capture[0]["params"] == {"alt": "media"}
+
+
+def test_drive_404_google_devient_erreur_nommee(monkeypatch):
+    from app.modules.integrations import service as integrations
+
+    monkeypatch.setattr(integrations, "jeton_actif", lambda db, uid, provider: "TOKEN")
+    _drive_stub_stream(monkeypatch, status_code=404)
+
+    with pytest.raises(AppError) as e:
+        integrations.telecharger_drive(None, str(uuid.uuid4()), "manquant",
+                                       "Fichier disparu.pdf", "application/pdf")
+    assert e.value.code == "drive_fichier_inaccessible"
+
+
+def test_drive_403_google_devient_aussi_inaccessible(monkeypatch):
+    from app.modules.integrations import service as integrations
+
+    monkeypatch.setattr(integrations, "jeton_actif", lambda db, uid, provider: "TOKEN")
+    _drive_stub_stream(monkeypatch, status_code=403)
+
+    with pytest.raises(AppError) as e:
+        integrations.telecharger_drive(None, str(uuid.uuid4()), "interdit",
+                                       "Fichier interdit.pdf", "application/pdf")
+    assert e.value.code == "drive_fichier_inaccessible"
+
+
+def test_drive_trop_volumineux_coupe_le_flux(monkeypatch):
+    from app.modules.documents.service import MAX_UPLOAD_BYTES
+    from app.modules.integrations import service as integrations
+
+    monkeypatch.setattr(integrations, "jeton_actif", lambda db, uid, provider: "TOKEN")
+    gros_morceau = b"0" * (MAX_UPLOAD_BYTES // 2 + 1)
+    _drive_stub_stream(monkeypatch, morceaux=(gros_morceau, gros_morceau))
+
+    with pytest.raises(AppError) as e:
+        integrations.telecharger_drive(None, str(uuid.uuid4()), "gros",
+                                       "Trop gros.pdf", "application/pdf")
+    assert e.value.code == "fichier_trop_volumineux"
+    assert e.value.status_code == 413
+
+
+def test_drive_etat_expose_selecteur_selon_client_id(monkeypatch):
+    """`etat()` expose `google.selecteur` indépendamment de `configure()` :
+    le Picker n'a besoin que de l'identifiant client, pas du secret ni de
+    `integrations_secret_key` (spec §6)."""
+    from app.modules.integrations import service as integrations
+
+    engine = _kb_engine_integrations()
+    with Session(engine) as db:
+        monkeypatch.setenv("GOOGLE_CLIENT_ID", "abc123")
+        monkeypatch.delenv("GOOGLE_CLIENT_SECRET", raising=False)
+        monkeypatch.delenv("INTEGRATIONS_SECRET_KEY", raising=False)
+        get_settings.cache_clear()
+        try:
+            out = integrations.etat(db, str(uuid.uuid4()))
+            assert out["google"]["selecteur"] is True
+            # Non configuré côté serveur (secret manquant) : le bouton de
+            # connexion reste masqué, seul le sélecteur diffère.
+            assert out["google"]["configure"] is False
+        finally:
+            monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+            get_settings.cache_clear()
+
+
+def test_drive_etat_selecteur_faux_sans_client_id(monkeypatch):
+    from app.modules.integrations import service as integrations
+
+    engine = _kb_engine_integrations()
+    with Session(engine) as db:
+        monkeypatch.delenv("GOOGLE_CLIENT_ID", raising=False)
+        get_settings.cache_clear()
+        try:
+            out = integrations.etat(db, str(uuid.uuid4()))
+            assert out["google"]["selecteur"] is False
+        finally:
+            get_settings.cache_clear()
+
+
+def _kb_engine_integrations():
+    """Base en mémoire suffisante pour `service.get()` (table `user_connections`)."""
+    import app.modules.integrations.models  # noqa: F401
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
+
+    from app.db import Base as _Base
+
+    engine = create_engine("sqlite://", future=True,
+                           connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    _Base.metadata.create_all(engine, tables=[_Base.metadata.tables["user_connections"]])
+    return engine
+
+
+def test_drive_route_importer_appelle_ingest(monkeypatch):
+    """`POST /integrations/google/importer` enchaîne `telecharger_drive` puis
+    `documents.ingest` et renvoie le document créé, comme l'upload local."""
+    import datetime as _dt
+
+    from fastapi.testclient import TestClient
+
+    from app.db import get_db
+    from app.main import app as _app
+    from app.modules.auth.schemas import AuthUser
+    from app.modules.auth.security import get_current_user
+    from app.modules.integrations import service as integrations
+
+    user_id = str(uuid.uuid4())
+    monkeypatch.setattr(integrations, "telecharger_drive",
+                        lambda db, uid, fid, name, mime: ("notes.txt", b"contenu", "text/plain"))
+
+    class _DocStub:
+        id = uuid.uuid4()
+        filename = "notes.txt"
+        mime_type = "text/plain"
+        size_bytes = 7
+        chunk_count = 1
+        created_at = _dt.datetime.now(_dt.timezone.utc)
+
+    capture: dict = {}
+
+    def _ingest_stub(db, *, user_id, filename, data, mime_type=None):
+        capture.update(user_id=user_id, filename=filename, data=data, mime_type=mime_type)
+        return _DocStub()
+
+    monkeypatch.setattr("app.modules.documents.service.ingest", _ingest_stub)
+
+    _app.dependency_overrides[get_current_user] = lambda: AuthUser(
+        id=user_id, email="u@axial-ia.fr", is_admin=False)
+    _app.dependency_overrides[get_db] = lambda: iter([None])
+    client = TestClient(_app)
+    try:
+        r = client.post("/integrations/google/importer",
+                        json={"file_id": "abc", "name": "Notes", "mime_type": "application/pdf"})
+        assert r.status_code == 200
+        corps = r.json()
+        assert corps["filename"] == "notes.txt"
+        assert corps["chunk_count"] == 1
+        assert capture["filename"] == "notes.txt"
+        assert capture["data"] == b"contenu"
+        assert capture["mime_type"] == "text/plain"
+    finally:
+        _app.dependency_overrides.clear()
+
+
+def test_drive_route_sans_jeton_renvoie_400(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.db import get_db
+    from app.main import app as _app
+    from app.modules.auth.schemas import AuthUser
+    from app.modules.auth.security import get_current_user
+    from app.modules.integrations import service as integrations
+
+    user_id = str(uuid.uuid4())
+    monkeypatch.setattr(integrations, "jeton_actif", lambda db, uid, provider: None)
+
+    _app.dependency_overrides[get_current_user] = lambda: AuthUser(
+        id=user_id, email="u@axial-ia.fr", is_admin=False)
+    _app.dependency_overrides[get_db] = lambda: iter([None])
+    client = TestClient(_app)
+    try:
+        r = client.post("/integrations/google/importer",
+                        json={"file_id": "abc", "name": "Notes", "mime_type": "application/pdf"})
+        assert r.status_code == 400
+        assert r.json()["error"]["code"] == "google_non_connecte"
+    finally:
+        _app.dependency_overrides.clear()

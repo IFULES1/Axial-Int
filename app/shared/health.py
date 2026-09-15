@@ -151,7 +151,14 @@ def _verifications_reelles(noms: list[str]) -> dict[str, dict]:
     resultats: dict[str, dict] = {}
     if not noms:
         return resultats
-    with ThreadPoolExecutor(max_workers=len(noms)) as executeur:
+    # Pas de `with` : sa sortie attend que TOUS les threads soumis se
+    # terminent, même ceux dont on a déjà abandonné le résultat sur timeout —
+    # un fournisseur qui reste bloqué 30 s retiendrait la réponse 30 s.
+    # `shutdown(wait=False)` rend la main dès que chaque `future.result(...)`
+    # a tranché (succès, erreur ou délai dépassé) ; les threads encore
+    # bloqués se terminent en arrière-plan, sans bloquer l'appelant.
+    executeur = ThreadPoolExecutor(max_workers=len(noms))
+    try:
         debuts = {nom: time.monotonic() for nom in noms}
         futures = {nom: executeur.submit(_VERIFICATIONS[nom]) for nom in noms}
         for nom, future in futures.items():
@@ -174,6 +181,8 @@ def _verifications_reelles(noms: list[str]) -> dict[str, dict]:
                     "latence_ms": int((time.monotonic() - debuts[nom]) * 1000),
                     "erreur": sans_secret(str(e))[:_LONGUEUR_MAX_ERREUR],
                 }
+    finally:
+        executeur.shutdown(wait=False)
     return resultats
 
 
