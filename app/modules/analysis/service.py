@@ -704,12 +704,12 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
     # verified data is the subject of the report; web results only add timing
     # context, and are numbered after so every [N] still maps to one citation.
     investor_context, investor_citations = "", []
+    mapping = None
     if sources_dir["investisseurs"]:
         from app.modules.investors import service as investors
 
-        mapping = None
         try:
-            mapping = investors.map_for_profile(profile or {})
+            mapping = investors.map_for_profile(profile or {}, question=query)
             investor_context = investors.format_context(mapping)
             investor_citations = investors.citations(mapping)
         except Exception as e:
@@ -752,6 +752,8 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
     if suivi:
         suivi.etape("selection", 35, sources_retenues=len(citations),
                     sources=apercu_sources(citations),
+                    levee=(mapping or {}).get("levee"),
+                    demande=(mapping or {}).get("demande"),
                     message=f"{len(citations)} source(s) retenue(s).")
 
     # --- Aperçu des sources avant débit (spec §2) --------------------------
@@ -787,7 +789,14 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
                     message="Couverture suffisante." if verdict == "oui"
                             else "Couverture partielle — génération poursuivie.")
 
-    prompt = get_prompt_template(analysis_type).format(context=context or "Aucun.")
+    consigne_supplementaire = ""
+    if mapping:
+        from app.modules.investors import service as investors
+
+        consigne_supplementaire = investors.consigne_pour(mapping)
+    prompt = get_prompt_template(
+        analysis_type, consigne_supplementaire=consigne_supplementaire,
+    ).format(context=context or "Aucun.")
     if company_context:
         prompt = f"{company_context}\n\n{prompt}"
     prompt = f"{prompt}\n\nQuestion de l'utilisateur : {query}"
@@ -882,6 +891,8 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
             "cout": mesure,
             "couverture": verdict,
             "raison": raison_couverture,
+            "levee": (mapping or {}).get("levee"),
+            "demande": (mapping or {}).get("demande"),
             "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         },
     )

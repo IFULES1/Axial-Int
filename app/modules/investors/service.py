@@ -73,6 +73,310 @@ def question_de_levee(texte: str) -> bool:
     return bool(_LEVEE_PATTERN.search(texte or ""))
 
 
+# --- Ciblage v2 (spec 2026-09-18) : nombre demandé, montant, stade, exclusions ---
+#
+# Fonctions pures, sans appel modèle : le ciblage ne doit pas dépendre d'un
+# jugement LLM pour lire un nombre ou un montant écrit en clair.
+
+_MOTS_NOMBRE: dict[str, int] = {
+    "dizaine": 10, "douzaine": 12, "vingtaine": 20, "trentaine": 30,
+    "quarantaine": 40, "cinquantaine": 50,
+}
+
+_NOMBRE_RANGE_RE = re.compile(
+    r"\b(\d+)\s*(?:à|-|–|to)\s*(\d+)\s*investisseurs?\b"
+    r"|\b(\d+)\s*(?:à|-|–|to)\s*(\d+)\s*investors?\b",
+    re.IGNORECASE,
+)
+_NOMBRE_COUNT_RE = re.compile(
+    r"\b(\d+)\s*investisseurs?\b|\b(\d+)\s*investors?\b", re.IGNORECASE,
+)
+_NOMBRE_MOT_RE = re.compile(
+    r"\bune?\s+(dizaine|douzaine|vingtaine|trentaine|quarantaine|cinquantaine)\b",
+    re.IGNORECASE,
+)
+_NOMBRE_TOP_RE = re.compile(r"\btop\s*(\d+)\b", re.IGNORECASE)
+
+
+def nombre_demande(question: str | None) -> int | None:
+    """Lit « N investisseurs », « 5 à 10 investisseurs » (→10), « une
+    dizaine » (10), « une vingtaine » (20), « top 15 », FR et EN (spec §1).
+    `None` si rien n'est lu."""
+    if not question:
+        return None
+    m = _NOMBRE_RANGE_RE.search(question)
+    if m:
+        groupes = [g for g in m.groups() if g]
+        return int(groupes[-1])
+    m = _NOMBRE_COUNT_RE.search(question)
+    if m:
+        return int(m.group(1) or m.group(2))
+    m = _NOMBRE_MOT_RE.search(question)
+    if m:
+        return _MOTS_NOMBRE[m.group(1).lower()]
+    m = _NOMBRE_TOP_RE.search(question)
+    if m:
+        return int(m.group(1))
+    return None
+
+
+# Plausibilité par stade (spec §2) : au-delà, un montant lu littéralement est
+# considéré ambigu et la lecture la plus faible (sans le facteur d'échelle) est
+# retenue à sa place.
+_PLAFOND_PAR_STADE: dict[str, int] = {
+    "pre_seed": 2_000_000,
+    "seed": 8_000_000,
+    "serie_a_plus": 30_000_000,
+}
+
+
+def _categorie_stade(stade: str | None) -> str:
+    """Regroupe un libellé de stade libre dans l'une des trois catégories de
+    composition du §4 (« pre_seed » couvre aussi l'idéation, « serie_a_plus »
+    couvre série A et B+)."""
+    s = (stade or "").strip().lower()
+    if not s:
+        return "seed"
+    if any(m in s for m in ("pre-seed", "pré-seed", "preseed", "idéation",
+                            "ideation", "amorçage", "amorcage")):
+        return "pre_seed"
+    if "seed" in s:
+        return "seed"
+    return "serie_a_plus"
+
+
+_MONTANT_RE = re.compile(
+    r"(?P<nombre>\d{1,3}(?:[  ]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?)"
+    r"\s*(?P<suffixe>millions?|mille|k|m)?"
+    r"\s*(?P<euro>€|euros?)?",
+    re.IGNORECASE,
+)
+
+_MULTIPLICATEURS: dict[str, int] = {
+    "k": 1_000, "mille": 1_000,
+    "m": 1_000_000, "million": 1_000_000, "millions": 1_000_000,
+}
+
+
+def _parse_nombre_fr(brut: str) -> float:
+    """« 300 000 » ou « 1,5 » → nombre flottant (virgule ou point décimal,
+    espace insécable ou normal comme séparateur de milliers)."""
+    s = brut.replace(" ", " ").strip()
+    m = re.match(r"^([\d ]+)(?:[.,](\d+))?$", s)
+    if not m:
+        return float(s.replace(" ", "").replace(",", "."))
+    entier = m.group(1).replace(" ", "")
+    decimal = m.group(2)
+    return float(f"{entier}.{decimal}") if decimal else float(entier)
+
+
+def _format_eur(montant: int) -> str:
+    """Ré-écrit un montant en euros dans la forme la plus courte et lisible
+    (« 300 M€ », « 300 k€ », « 300 € ») — utilisé par les consignes dynamiques."""
+    if montant % 1_000_000 == 0:
+        return f"{montant // 1_000_000} M€"
+    if montant % 1_000 == 0:
+        return f"{montant // 1_000} k€"
+    return f"{montant} €"
+
+
+def montant_de_levee(question: str | None, stade: str | None = None) -> dict | None:
+    """Lit un montant de levée écrit en clair (spec §2) : « 300 K€ », « 300k »,
+    « 1,5 M€ », « 2 millions », « 500 000 € ». `None` si rien n'est lu.
+
+    Un montant à la fois séparé en milliers ET affublé d'un suffixe k/mille
+    (« 300 000k€ ») est ambigu : la lecture littérale (300 M€) et la lecture
+    plausible (300 k€, le suffixe pris comme du bruit) sont toutes deux
+    renvoyées dans `lectures`, la plausible en second.
+    """
+    if not question:
+        return None
+    for m in _MONTANT_RE.finditer(question):
+        suffixe = (m.group("suffixe") or "").lower()
+        euro = m.group("euro")
+        if not suffixe and not euro:
+            continue  # un nombre nu n'est pas un montant (ex. « 15 investisseurs »)
+        texte = m.group(0).strip()
+        valeur = _parse_nombre_fr(m.group("nombre"))
+        multiplicateur = _MULTIPLICATEURS.get(suffixe, 1)
+        litteral = round(valeur * multiplicateur)
+
+        ambigu = bool(suffixe) and multiplicateur > 1 and valeur >= 1000
+        if not ambigu:
+            return {"montant_eur": litteral, "texte": texte,
+                    "lectures": [litteral], "ambigu": False}
+
+        plausible = round(valeur)
+        plafond = _PLAFOND_PAR_STADE.get(_categorie_stade(stade))
+        # Si le stade est connu et que la lecture littérale reste plausible
+        # (rare, mais un plafond n'exclut jamais formellement), on la garde.
+        retenu = plausible
+        if plafond is not None and litteral <= plafond:
+            retenu = litteral
+        return {"montant_eur": retenu, "texte": texte,
+                "lectures": [litteral, plausible], "ambigu": True}
+    return None
+
+
+_DEJA_CONTACTE_RE = re.compile(
+    r"(?:déjà\s+contact[ée]s?|déjà\s+identifi[ée]s?|\bhors\b)\s*:?\s*"
+    r"([^.;\n]+)",
+    re.IGNORECASE,
+)
+
+
+def deja_contactes(question: str | None) -> list[str]:
+    """Noms cités après « déjà contacté », « déjà identifié » ou « hors »
+    (spec §4) — à retirer de la liste remise au modèle."""
+    if not question:
+        return []
+    noms: list[str] = []
+    for m in _DEJA_CONTACTE_RE.finditer(question):
+        segment = m.group(1)
+        for part in re.split(r",| et ", segment, flags=re.IGNORECASE):
+            nom = part.strip(" \t.;:")
+            nom = re.sub(r"^(par|avec)\s+", "", nom, flags=re.IGNORECASE).strip()
+            if nom:
+                noms.append(nom)
+    return noms
+
+
+def _exclu(nom: str, noms_exclus: list[str]) -> bool:
+    """Comparaison insensible à la casse, tolérante à la sous-chaîne (« Alpha »
+    exclut « Fonds Alpha »)."""
+    n = (nom or "").strip().lower()
+    if not n:
+        return False
+    for excl in noms_exclus:
+        e = (excl or "").strip().lower()
+        if e and (e in n or n in e):
+            return True
+    return False
+
+
+_STADE_QUESTION_RE = re.compile(
+    r"\b(pre-?seed|pré-?seed|id[ée]ation|amor[çc]age|seed|s[ée]rie\s*[ab]\+?|"
+    r"series\s*[ab]\+?)\b",
+    re.IGNORECASE,
+)
+
+
+def stade_depuis(question: str | None, profile: dict | None = None) -> str | None:
+    """Le stade de la QUESTION prime sur celui du profil (décision) — un
+    fondateur qui précise « pour un tour seed » outrepasse son profil
+    enregistré en série A."""
+    if question:
+        m = _STADE_QUESTION_RE.search(question)
+        if m:
+            return m.group(1)
+    if profile:
+        return profile.get("funding_stage") or None
+    return None
+
+
+def composer_par_stade(funds: list[dict], networks: list[dict], stade: str | None,
+                       limit: int) -> tuple[list[dict], list[dict]]:
+    """Compose la liste remise au modèle selon la table du §4, sans dépasser
+    `limit` acteurs au total (fonds + réseaux confondus)."""
+    limit = max(int(limit or 0), 0)
+    cat = _categorie_stade(stade)
+
+    if cat == "pre_seed":
+        # Réseaux de BA et plateformes d'amorçage d'abord, puis fonds.
+        kept_networks = networks[:limit]
+        kept_funds = funds[:max(limit - len(kept_networks), 0)]
+        return kept_funds, kept_networks
+
+    if cat == "seed":
+        # Réseaux + fonds à parts égales (l'éventuel siège impair va aux
+        # réseaux) ; le pool le plus court cède sa place à l'autre.
+        moitie = (limit + 1) // 2
+        kept_networks = networks[:min(moitie, len(networks))]
+        kept_funds = funds[:max(limit - len(kept_networks), 0)]
+        return kept_funds, kept_networks
+
+    # Série A / B+ : fonds d'abord, réseaux seulement s'il reste de la place.
+    kept_funds = funds[:limit]
+    kept_networks = networks[:max(limit - len(kept_funds), 0)]
+    return kept_funds, kept_networks
+
+
+_CONSIGNE_COMPOSITION: dict[str, str] = {
+    "pre_seed": (
+        "Stade pré-seed / idéation : priorise les réseaux de business angels et "
+        "les plateformes d'amorçage, puis les fonds tagués pre-seed / amorçage. "
+        "Mentionne le non dilutif (Bpifrance Bourse French Tech, prêts "
+        "d'honneur, concours, aides régionales) comme premier levier."
+    ),
+    "seed": (
+        "Stade seed : compose la liste à parts égales entre réseaux de "
+        "business angels et fonds d'amorçage."
+    ),
+    "serie_a_plus": (
+        "Stade série A ou plus : présente les fonds d'abord, les réseaux de "
+        "business angels seulement s'il reste de la place."
+    ),
+}
+
+
+def consigne_pour(mapping: dict) -> str:
+    """Consigne dynamique (spec §1, §2, §4) construite par le moteur — le TEXTE
+    des directives figées n'est jamais modifié, cette chaîne s'y ajoute."""
+    parties: list[str] = []
+
+    demande = mapping.get("demande")
+    if demande and demande.get("n"):
+        n = demande["n"]
+        disponibles = demande.get("disponibles") or 0
+        if disponibles >= n:
+            parties.append(
+                f"Le fondateur demande {n} investisseurs : présente exactement "
+                f"{n} acteurs, par ordre de priorité, tous issus des sources "
+                "numérotées."
+            )
+        else:
+            parties.append(
+                f"Le fondateur demande {n} investisseurs ; la base Axial n'en "
+                f"référence que {disponibles} qui correspondent à son secteur "
+                "et à son stade. Présente-les tous et dis, dès l'introduction, "
+                "que cette liste réunit l'exhaustivité et la pertinence de la "
+                "base pour sa situation, sans compléter avec des noms venus du "
+                "web."
+            )
+
+    stade = mapping.get("stade_retenu")
+    if stade:
+        parties.append(_CONSIGNE_COMPOSITION[_categorie_stade(stade)])
+
+    exclus = mapping.get("exclus")
+    if exclus:
+        parties.append(
+            "Déjà contactés, à exclure de la liste : " + ", ".join(exclus) + "."
+        )
+
+    levee = mapping.get("levee")
+    if levee:
+        montant = levee.get("montant_eur")
+        texte = levee.get("texte")
+        suffixe_stade = f" · stade {stade}" if stade else ""
+        parties.append(
+            f"Paramètres de la levée retenus : montant {montant} € "
+            f"(« {texte} »){suffixe_stade}. Restitue ces paramètres dans la "
+            "première phrase de la synthèse."
+        )
+        lectures = levee.get("lectures") or []
+        if levee.get("ambigu") and len(lectures) >= 2:
+            litteral, plausible = lectures[0], lectures[1]
+            parties.append(
+                f"Le montant écrit (« {texte} ») se lit {_format_eur(litteral)} ; "
+                f"pour un {stade or 'ce stade'}, {_format_eur(plausible)} est "
+                f"plus vraisemblable : le rapport retient {_format_eur(plausible)} "
+                "et le signale."
+            )
+
+    return "\n".join(parties)
+
+
 def referentials() -> dict:
     """Sector / stage / zone vocabularies, for the UI and for name resolution."""
     d = client.dataset()
@@ -356,8 +660,15 @@ def _broaden(sector_ids: list[int]) -> tuple[list[int], list[str], str]:
     return [], [], "aucun"
 
 
-def map_for_profile(profile: dict, *, limit: int = 15) -> dict:
-    """Full mapping for a company profile: resolve, search, rank, summarise."""
+def map_for_profile(profile: dict, *, limit: int = 15,
+                    question: str | None = None) -> dict:
+    """Full mapping for a company profile: resolve, search, rank, summarise.
+
+    `question` (spec ciblage v2, 18/09) — quand fournie, lit le nombre
+    d'investisseurs demandé, le stade, le montant de levée et les exclusions
+    directement dans la question, et compose `funds`/`networks` selon le
+    stade (§4) sous un plafond combiné (§1). Facultatif : absente, le
+    comportement est inchangé (premier rapport offert, sans question chiffrée)."""
     d = client.dataset()
     refs = referentials()
 
@@ -418,26 +729,68 @@ def map_for_profile(profile: dict, *, limit: int = 15) -> dict:
         note = (f"Élargissement : {reason} ({', '.join(asked)} → "
                 f"{', '.join(broadened_names)}).")
 
-    return {
-        "resolved": {
-            "secteurs": [sector_name[i] for i in sector_ids if i in sector_name],
-            "secteurs_demandes": asked,
-            "stades": [stage_name[i] for i in stage_ids if i in stage_name],
-            "zone": raw_zone,
-            "via_llm": bool(mapped_sectors or mapped_stages),
-            "elargissement": broadening or None,
-        },
-        "funds": funds[:limit],
-        "networks": networks[:limit],
-        "total_funds": len(funds),
-        "total_networks": len(networks),
+    resolved = {
+        "secteurs": [sector_name[i] for i in sector_ids if i in sector_name],
+        "secteurs_demandes": asked,
+        "stades": [stage_name[i] for i in stage_ids if i in stage_name],
+        "zone": raw_zone,
+        "via_llm": bool(mapped_sectors or mapped_stages),
+        "elargissement": broadening or None,
+    }
+
+    resultat = {
+        "resolved": resolved,
         "note": note,
     }
+
+    if question:
+        stade_retenu = stade_depuis(question, profile) or (resolved["stades"][0]
+                                                            if resolved["stades"] else None)
+        exclusions = deja_contactes(question)
+        if exclusions:
+            funds = [f for f in funds if not _exclu(f["nom"], exclusions)]
+            networks = [r for r in networks if not _exclu(r["nom"], exclusions)]
+        n_demande = nombre_demande(question)
+        limite_effective = n_demande if n_demande else limit
+        kept_funds, kept_networks = composer_par_stade(
+            funds, networks, stade_retenu, limite_effective)
+        resultat["demande"] = {"n": n_demande,
+                               "disponibles": len(funds) + len(networks)}
+        resultat["exclus"] = exclusions
+        resultat["levee"] = montant_de_levee(question, stade_retenu)
+        resultat["stade_retenu"] = stade_retenu
+    else:
+        kept_funds, kept_networks = funds[:limit], networks[:limit]
+
+    resultat["funds"] = kept_funds
+    resultat["networks"] = kept_networks
+    resultat["total_funds"] = len(funds)
+    resultat["total_networks"] = len(networks)
+    return resultat
 
 
 def format_context(mapping: dict) -> str:
     """Numbered context block — the same [N] citation contract as web sources."""
     lines: list[str] = []
+    levee = mapping.get("levee")
+    stade = mapping.get("stade_retenu")
+    if levee or stade:
+        morceaux = []
+        if levee and levee.get("montant_eur") is not None:
+            morceaux.append(f"montant {levee['montant_eur']} €")
+        if stade:
+            morceaux.append(f"stade {stade}")
+        if morceaux:
+            lines.append("Paramètres de la levée retenus : " + " · ".join(morceaux))
+        lectures = (levee or {}).get("lectures") or []
+        if levee and levee.get("ambigu") and len(lectures) >= 2:
+            litteral, plausible = lectures[0], lectures[1]
+            lines.append(
+                f"Le montant écrit (« {levee.get('texte')} ») se lit "
+                f"{_format_eur(litteral)} ; pour un {stade or 'ce stade'}, "
+                f"{_format_eur(plausible)} est plus vraisemblable : le rapport "
+                f"retient {_format_eur(plausible)} et le signale."
+            )
     if mapping.get("note"):
         # En tête, pour que le rapport annonce l'élargissement au lieu de le taire.
         lines.append(f"(avertissement méthodologique) {mapping['note']}")

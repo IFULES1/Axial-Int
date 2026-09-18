@@ -334,16 +334,26 @@ ENRICH_SYSTEM_PROMPT = (
 )
 
 
-def get_prompt_template(analysis_type: str) -> str:
-    """Assemblage V4 : directive du type + slot {context} (profil + sources)."""
+def get_prompt_template(analysis_type: str, *,
+                        consigne_supplementaire: str = "") -> str:
+    """Assemblage V4 : directive du type + slot {context} (profil + sources).
+
+    `consigne_supplementaire` (ciblage v2, 18/09) — une consigne construite
+    par le moteur (nombre d'investisseurs demandé, composition par stade,
+    paramètres de levée…), ajoutée APRÈS `special_instructions` sans toucher
+    au texte figé des directives. Vide par défaut : comportement inchangé.
+    """
     d = ANALYSIS_DIRECTIVES.get(_canonical(analysis_type),
                                 ANALYSIS_DIRECTIVES["synthese_executive"])
     angles = "\n".join(f"- {a}" for a in d["key_angles"])
+    consigne = f"Consigne complémentaire : {consigne_supplementaire}\n" \
+        if consigne_supplementaire else ""
     return (
         "DIRECTIVE D'ANALYSE\n"
         f"Objectif : {d['objective']}\n"
         f"Angles clés à instruire (si pertinents pour la question) :\n{angles}\n"
         f"Instructions spécifiques : {d['special_instructions']}\n"
+        f"{consigne}"
         f"Volume attendu : {d['target_words']} mots. C'est un rapport de fond, "
         "pas une note de synthèse : développe chaque section en profondeur plutôt "
         "que de survoler. N'atteins ce volume qu'avec de la matière réelle issue "
