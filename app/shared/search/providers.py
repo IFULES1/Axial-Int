@@ -146,7 +146,10 @@ class TavilyProvider:
         if not key:
             return []
         try:
-            body = {"api_key": key, "query": query, "max_results": limit,
+            # Tavily refuse (400) toute requête de plus de 400 caractères : le
+            # 16/09, un participant a collé son pitch entier (7 024 caractères)
+            # et les six angles ont échoué. Les autres moteurs acceptent plus.
+            body = {"api_key": key, "query": query[:TAVILY_REQUETE_MAX], "max_results": limit,
                     "search_depth": "advanced"}
             if contraintes is not None:
                 if contraintes.fraicheur_jours:
@@ -216,6 +219,7 @@ class LinkupProvider:
 
 
 _VERROU_PERPLEXITY = threading.Semaphore(2)
+TAVILY_REQUETE_MAX = 400
 
 
 class PerplexityProvider:

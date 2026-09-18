@@ -4479,3 +4479,16 @@ def test_noms_depuis_reponse_llm_json_tronque():
     from app.modules.analysis.service import _noms_depuis_reponse_llm
     assert _noms_depuis_reponse_llm('["Expensya", "N2F') == ["Expensya", "N2F"]
     assert _noms_depuis_reponse_llm('["Doctolib", "Alan"]') == ["Doctolib", "Alan"]
+
+
+def test_tavily_tronque_les_requetes_trop_longues(monkeypatch):
+    """Tavily rend 400 au-delà de 400 caractères (pitch collé en entier le 16/09)."""
+    from app.shared.search import providers as P
+    monkeypatch.setenv("TAVILY_API_KEY", "cle-de-test"); get_settings.cache_clear()
+    appels = []
+    class R:
+        def raise_for_status(self): pass
+        def json(self): return {"results": []}
+    monkeypatch.setattr(P.httpx, "post", lambda url, json=None, **k: appels.append(json) or R())
+    P.TavilyProvider().search("x" * 7000, 5)
+    assert len(appels[0]["query"]) == 400
