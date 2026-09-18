@@ -27,3 +27,12 @@ flux fermée, pool 15+25, Perplexity niveau 2). Dernier build front
 - En attente : retours du workshop (Miradie), décision sur les livres du
   commerce en KB, remise de `CREDITS_ESSAI` à 40, wording et prompts de rapport,
   coût du rerank Cohere non compté, clés Google pour Drive.
+
+## Complément 18/09 après-midi — ciblage investisseurs v2 en prod
+Retours du workshop classés (`docs/superpowers/specs/2026-09-18-retours-workshop.md`),
+puis chantier livré et déployé (récap `2026-09-18-recap-ciblage-v2.md`) :
+nombre demandé respecté, montant de levée retenu et affiché, composition par
+stade, flux RSS visibles et vérifiés (26 flux, 0 en erreur). Tavily borné à
+400 caractères. Restent : BA individuels (autre discussion), bons
+interlocuteurs par fonds, `CREDITS_ESSAI` toujours à 100, livres du commerce
+en KB, prompts de rapport.
