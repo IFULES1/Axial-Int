@@ -120,14 +120,25 @@ def nombre_demande(question: str | None) -> int | None:
     return None
 
 
-# Plausibilité par stade (spec §2) : au-delà, un montant lu littéralement est
-# considéré ambigu et la lecture la plus faible (sans le facteur d'échelle) est
-# retenue à sa place.
+# Plausibilité par stade (spec §2) : au-delà, un montant est considéré ambigu
+# et la lecture divisée par 1 000 est proposée en second, retenue par défaut.
 _PLAFOND_PAR_STADE: dict[str, int] = {
     "pre_seed": 2_000_000,
     "seed": 8_000_000,
     "serie_a_plus": 30_000_000,
 }
+
+# Espaces « spéciaux » qu'un traitement de texte ou un clavier macOS FR
+# produit couramment comme séparateur de milliers : insécable (U+00A0) et fine
+# insécable (U+202F) — en plus de l'espace normale. Tour de correction 1
+# (revue Q5) : un montant collé depuis Word ne doit pas perdre son montant.
+_ESPACES = " \u00a0\u202f"
+
+# Tour de correction 1 (revue C1) : « pre seed » / « pré seed » écrits avec une
+# espace (au lieu d'un trait d'union) tombaient sur l'alternance `seed` un
+# caractère plus loin. `[-\s\u00a0\u202f]?` couvre trait d'union, espace(s)
+# normales/spéciales et l'absence de séparateur (« preseed »).
+_PRE_SEED_RE = re.compile(r"pr[eé][-\s\u00a0\u202f]?seed", re.IGNORECASE)
 
 
 def _categorie_stade(stade: str | None) -> str:
@@ -137,18 +148,26 @@ def _categorie_stade(stade: str | None) -> str:
     s = (stade or "").strip().lower()
     if not s:
         return "seed"
-    if any(m in s for m in ("pre-seed", "pré-seed", "preseed", "idéation",
-                            "ideation", "amorçage", "amorcage")):
+    if _PRE_SEED_RE.search(s) or any(m in s for m in
+                                     ("idéation", "ideation", "amorçage", "amorcage")):
         return "pre_seed"
     if "seed" in s:
         return "seed"
     return "serie_a_plus"
 
 
+# Tour de correction 1 (revue C3) : le suffixe nu `k`/`m` ne doit matcher que
+# collé au nombre (« 2M », « 300k ») ou juste avant `€`/`euro(s)`/`EUR` (« 1,5
+# M€ ») — jamais l'initiale d'un autre mot (« 6 mois », « 12 marchés », « 3
+# mètres »). Le `\b` DANS le groupe (et non après) garde ce garde-fou pour la
+# seule branche suffixe, sans imposer de frontière quand aucun suffixe n'est
+# écrit (cas « 500 000 € »).
 _MONTANT_RE = re.compile(
-    r"(?P<nombre>\d{1,3}(?:[  ]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?)"
-    r"\s*(?P<suffixe>millions?|mille|k|m)?"
-    r"\s*(?P<euro>€|euros?)?",
+    r"(?P<nombre>\d{1,3}(?:[" + _ESPACES + r"]\d{3})+(?:[.,]\d+)?|\d+(?:[.,]\d+)?)"
+    r"(?P<espace1>[" + _ESPACES + r"]*)"
+    r"(?P<suffixe>(?:millions?|mille|k|m)\b)?"
+    r"(?P<espace2>[" + _ESPACES + r"]*)"
+    r"(?P<euro>€|euros?|EUR)?",
     re.IGNORECASE,
 )
 
@@ -157,11 +176,26 @@ _MULTIPLICATEURS: dict[str, int] = {
     "m": 1_000_000, "million": 1_000_000, "millions": 1_000_000,
 }
 
+# Tour de correction 1 (revue C2) : parmi plusieurs montants dans une même
+# question, celui qui suit un verbe de levée (ou précède « en <stade> ») est
+# retenu plutôt que le premier rencontré — « Notre marché pèse 300 millions,
+# nous levons 800 K€ en pre-seed » doit retenir 800 K€, pas 300 M€.
+_LEVEE_VERBE_RE = re.compile(
+    r"(?:nous\s+levons|levons|l[èe]ven?t|l[èe]ve|lever|lev[ée]e\s+d[e']|"
+    r"raising|raise|we\s+are\s+raising)\s*$",
+    re.IGNORECASE,
+)
+_EN_STADE_RE = re.compile(
+    r"^\s*(?:en|for a|for an)\s+(?:pr[eé][-\s\u00a0\u202f]?seed|seed|id[ée]ation|"
+    r"amor[çc]age|s[ée]rie\s*[ab]\+?|series\s*[ab]\+?)\b",
+    re.IGNORECASE,
+)
+
 
 def _parse_nombre_fr(brut: str) -> float:
     """« 300 000 » ou « 1,5 » → nombre flottant (virgule ou point décimal,
-    espace insécable ou normal comme séparateur de milliers)."""
-    s = brut.replace(" ", " ").strip()
+    espace normale/insécable/fine comme séparateur de milliers)."""
+    s = "".join(" " if c in _ESPACES else c for c in brut).strip()
     m = re.match(r"^([\d ]+)(?:[.,](\d+))?$", s)
     if not m:
         return float(s.replace(" ", "").replace(",", "."))
@@ -172,7 +206,7 @@ def _parse_nombre_fr(brut: str) -> float:
 
 def _format_eur(montant: int) -> str:
     """Ré-écrit un montant en euros dans la forme la plus courte et lisible
-    (« 300 M€ », « 300 k€ », « 300 € ») — utilisé par les consignes dynamiques."""
+    (« 300 M€ », « 300 k€ », « 300 € ») — utilisé pour la phrase d'ambiguïté."""
     if montant % 1_000_000 == 0:
         return f"{montant // 1_000_000} M€"
     if montant % 1_000 == 0:
@@ -180,83 +214,143 @@ def _format_eur(montant: int) -> str:
     return f"{montant} €"
 
 
+def _format_montant_espace(montant: int) -> str:
+    """« 300000 » → « 300 000 € » — le bloc lu par le modèle utilise cette
+    forme complète avec séparateurs (revue Q5), pas la forme compacte M/k."""
+    return f"{montant:,}".replace(",", " ") + " €"
+
+
 def montant_de_levee(question: str | None, stade: str | None = None) -> dict | None:
     """Lit un montant de levée écrit en clair (spec §2) : « 300 K€ », « 300k »,
     « 1,5 M€ », « 2 millions », « 500 000 € ». `None` si rien n'est lu.
 
-    Un montant à la fois séparé en milliers ET affublé d'un suffixe k/mille
-    (« 300 000k€ ») est ambigu : la lecture littérale (300 M€) et la lecture
-    plausible (300 k€, le suffixe pris comme du bruit) sont toutes deux
-    renvoyées dans `lectures`, la plausible en second.
+    Parmi plusieurs montants candidats, celui adjacent à un verbe de levée (ou
+    suivi de « en <stade> ») est préféré au premier rencontré (revue C2).
+
+    La plausibilité par stade (§2) s'applique à TOUTE lecture retenue, pas
+    seulement à celle déjà ambiguë par construction (« 300 000k€ ») : un
+    montant qui dépasse le plafond de son stade est `ambigu = True`, la
+    lecture divisée par 1 000 est proposée en second et retenue par défaut ;
+    si elle n'existe pas (montant nul), le montant brut est gardé tel quel,
+    « à vérifier » (le bandeau front lit `ambigu`).
     """
     if not question:
         return None
+
+    candidats = []
     for m in _MONTANT_RE.finditer(question):
         suffixe = (m.group("suffixe") or "").lower()
         euro = m.group("euro")
-        if not suffixe and not euro:
+        espace1 = m.group("espace1") or ""
+        if suffixe in ("k", "m"):
+            colle = espace1 == ""
+            if not colle and not euro:
+                continue  # « 300 K » isolé, sans €\xa0: pas un montant sûr
+        elif not suffixe and not euro:
             continue  # un nombre nu n'est pas un montant (ex. « 15 investisseurs »)
-        texte = m.group(0).strip()
-        valeur = _parse_nombre_fr(m.group("nombre"))
-        multiplicateur = _MULTIPLICATEURS.get(suffixe, 1)
-        litteral = round(valeur * multiplicateur)
+        candidats.append(m)
 
-        ambigu = bool(suffixe) and multiplicateur > 1 and valeur >= 1000
-        if not ambigu:
-            return {"montant_eur": litteral, "texte": texte,
-                    "lectures": [litteral], "ambigu": False}
+    if not candidats:
+        return None
 
-        plausible = round(valeur)
-        plafond = _PLAFOND_PAR_STADE.get(_categorie_stade(stade))
-        # Si le stade est connu et que la lecture littérale reste plausible
-        # (rare, mais un plafond n'exclut jamais formellement), on la garde.
-        retenu = plausible
-        if plafond is not None and litteral <= plafond:
-            retenu = litteral
-        return {"montant_eur": retenu, "texte": texte,
+    precedent_texte = [question[max(0, m.start() - 40):m.start()] for m in candidats]
+    suivant_texte = [question[m.end():m.end() + 40] for m in candidats]
+
+    meilleur = None
+    meilleur_score = -1
+    for i, m in enumerate(candidats):
+        score = 0
+        if _LEVEE_VERBE_RE.search(precedent_texte[i]):
+            score = 2
+        elif _EN_STADE_RE.match(suivant_texte[i]):
+            score = 1
+        if score > meilleur_score:
+            meilleur_score = score
+            meilleur = m
+
+    suffixe = (meilleur.group("suffixe") or "").lower()
+    texte = meilleur.group(0).strip()
+    valeur = _parse_nombre_fr(meilleur.group("nombre"))
+    multiplicateur = _MULTIPLICATEURS.get(suffixe, 1)
+    litteral = round(valeur * multiplicateur)
+
+    plafond = _PLAFOND_PAR_STADE.get(_categorie_stade(stade), _PLAFOND_PAR_STADE["seed"])
+    if litteral <= plafond:
+        return {"montant_eur": litteral, "texte": texte,
+                "lectures": [litteral], "ambigu": False}
+
+    plausible = round(litteral / 1000)
+    if plausible > 0:
+        return {"montant_eur": plausible, "texte": texte,
                 "lectures": [litteral, plausible], "ambigu": True}
-    return None
+    # Aucune lecture plausible : le montant brut est gardé, marqué à vérifier.
+    return {"montant_eur": litteral, "texte": texte,
+            "lectures": [litteral], "ambigu": True}
 
 
-_DEJA_CONTACTE_RE = re.compile(
-    r"(?:déjà\s+contact[ée]s?|déjà\s+identifi[ée]s?|\bhors\b)\s*:?\s*"
-    r"([^.;\n]+)",
+# Tour de correction 1 (revue Q3) : seuls les verbes de « déjà rencontré » ce
+# fonds/réseau déclenchent une exclusion — un « hors » nu (« hors de France »)
+# capturait n'importe quel complément et l'envoyait tel quel au modèle comme
+# nom à exclure.
+_DEJA_VERBE_RE = re.compile(
+    r"d[ée]j[àa]\s+(?:contact[ée]s?|identifi[ée]s?|approch[ée]s?|rencontr[ée]s?)"
+    r"\s*:?\s*([^.;\n]+)",
     re.IGNORECASE,
+)
+# « hors » n'exclut que s'il est suivi d'un nom propre (majuscule) — « hors de
+# France » (minuscule) n'est plus capturé.
+_HORS_NOM_RE = re.compile(
+    r"\b[Hh]ors\s+((?:[A-ZÀ-Ý][\w'’-]*(?:\s+[A-ZÀ-Ý][\w'’-]*)*))"
 )
 
 
-def deja_contactes(question: str | None) -> list[str]:
-    """Noms cités après « déjà contacté », « déjà identifié » ou « hors »
-    (spec §4) — à retirer de la liste remise au modèle."""
-    if not question:
-        return []
+def _decoupe_noms(segment: str) -> list[str]:
     noms: list[str] = []
-    for m in _DEJA_CONTACTE_RE.finditer(question):
-        segment = m.group(1)
-        for part in re.split(r",| et ", segment, flags=re.IGNORECASE):
-            nom = part.strip(" \t.;:")
-            nom = re.sub(r"^(par|avec)\s+", "", nom, flags=re.IGNORECASE).strip()
-            if nom:
-                noms.append(nom)
+    for part in re.split(r",| et ", segment, flags=re.IGNORECASE):
+        nom = part.strip(" \t.;:")
+        nom = re.sub(r"^(par|avec)\s+", "", nom, flags=re.IGNORECASE).strip()
+        if nom:
+            noms.append(nom)
     return noms
 
 
+def deja_contactes(question: str | None) -> list[str]:
+    """Noms cités après « déjà contacté(s)/identifié(s)/approché(s)/
+    rencontré(s) », ou après « hors <Nom propre> » (spec §4, resserré revue
+    Q3) — à retirer de la liste remise au modèle."""
+    if not question:
+        return []
+    noms: list[str] = []
+    for m in _DEJA_VERBE_RE.finditer(question):
+        noms.extend(_decoupe_noms(m.group(1)))
+    for m in _HORS_NOM_RE.finditer(question):
+        nom = m.group(1).strip()
+        if nom:
+            noms.append(nom)
+    return noms
+
+
+def _normalise_nom(s: str) -> str:
+    import unicodedata
+
+    s = unicodedata.normalize("NFKD", s or "")
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return s.strip().lower()
+
+
 def _exclu(nom: str, noms_exclus: list[str]) -> bool:
-    """Comparaison insensible à la casse, tolérante à la sous-chaîne (« Alpha »
-    exclut « Fonds Alpha »)."""
-    n = (nom or "").strip().lower()
+    """Comparaison sur le NOM COMPLET, insensible à la casse et aux accents
+    (revue Q3) — une exclusion « Alpha » n'élimine plus « Fonds Alpha » par
+    inclusion partielle, il faut le nom complet."""
+    n = _normalise_nom(nom)
     if not n:
         return False
-    for excl in noms_exclus:
-        e = (excl or "").strip().lower()
-        if e and (e in n or n in e):
-            return True
-    return False
+    return any(_normalise_nom(excl) == n for excl in noms_exclus)
 
 
 _STADE_QUESTION_RE = re.compile(
-    r"\b(pre-?seed|pré-?seed|id[ée]ation|amor[çc]age|seed|s[ée]rie\s*[ab]\+?|"
-    r"series\s*[ab]\+?)\b",
+    r"\b(pr[eé][-\s\u00a0\u202f]?seed|id[ée]ation|amor[çc]age|seed|"
+    r"s[ée]rie\s*[ab]\+?|series\s*[ab]\+?)\b",
     re.IGNORECASE,
 )
 
@@ -264,7 +358,12 @@ _STADE_QUESTION_RE = re.compile(
 def stade_depuis(question: str | None, profile: dict | None = None) -> str | None:
     """Le stade de la QUESTION prime sur celui du profil (décision) — un
     fondateur qui précise « pour un tour seed » outrepasse son profil
-    enregistré en série A."""
+    enregistré en série A.
+
+    « pre seed/seed » (deux stades cités dans la même phrase, tour de
+    correction 1 §C1) : le plus précoce des deux l'emporte — `re.search`
+    trouve naturellement le match le plus à gauche, et « pre seed » commence
+    avant le « seed » isolé qui le suit."""
     if question:
         m = _STADE_QUESTION_RE.search(question)
         if m:
@@ -277,13 +376,21 @@ def stade_depuis(question: str | None, profile: dict | None = None) -> str | Non
 def composer_par_stade(funds: list[dict], networks: list[dict], stade: str | None,
                        limit: int) -> tuple[list[dict], list[dict]]:
     """Compose la liste remise au modèle selon la table du §4, sans dépasser
-    `limit` acteurs au total (fonds + réseaux confondus)."""
+    `limit` acteurs au total (fonds + réseaux confondus).
+
+    Tour de correction 1 (revue Q2) : la catégorie majoritaire ne mange plus
+    tout le budget — un plancher de `min(3, disponibles)` est réservé à la
+    catégorie secondaire (fonds en pre-seed, réseaux en série A+), dans la
+    limite globale."""
     limit = max(int(limit or 0), 0)
     cat = _categorie_stade(stade)
 
     if cat == "pre_seed":
-        # Réseaux de BA et plateformes d'amorçage d'abord, puis fonds.
-        kept_networks = networks[:limit]
+        # Réseaux de BA et plateformes d'amorçage d'abord, puis fonds — avec
+        # un plancher de fonds réservé.
+        plancher_fonds = min(3, len(funds))
+        budget_reseaux = max(limit - plancher_fonds, 0)
+        kept_networks = networks[:budget_reseaux]
         kept_funds = funds[:max(limit - len(kept_networks), 0)]
         return kept_funds, kept_networks
 
@@ -295,10 +402,44 @@ def composer_par_stade(funds: list[dict], networks: list[dict], stade: str | Non
         kept_funds = funds[:max(limit - len(kept_networks), 0)]
         return kept_funds, kept_networks
 
-    # Série A / B+ : fonds d'abord, réseaux seulement s'il reste de la place.
-    kept_funds = funds[:limit]
+    # Série A / B+ : fonds d'abord, réseaux seulement s'il reste de la
+    # place — avec un plancher de réseaux réservé.
+    plancher_reseaux = min(3, len(networks))
+    budget_fonds = max(limit - plancher_reseaux, 0)
+    kept_funds = funds[:budget_fonds]
     kept_networks = networks[:max(limit - len(kept_funds), 0)]
     return kept_funds, kept_networks
+
+
+def _sequence_acteurs(mapping: dict) -> list[tuple[str, dict]]:
+    """Ordre de présentation des sources numérotées — tour de correction 1
+    (revue Q1) : la composition par stade ne doit pas rester une consigne
+    textuelle contredite par l'ordre brut « fonds puis réseaux » que le
+    modèle voit dans ses sources. Sans `stade_retenu` (pas de question, ou
+    appel direct sans elle) : ordre inchangé, fonds puis réseaux."""
+    funds = mapping.get("funds") or []
+    networks = mapping.get("networks") or []
+    stade = mapping.get("stade_retenu")
+    if not stade:
+        return [("fonds", f) for f in funds] + [("reseau", r) for r in networks]
+
+    cat = _categorie_stade(stade)
+    if cat == "pre_seed":
+        return [("reseau", r) for r in networks] + [("fonds", f) for f in funds]
+    if cat == "serie_a_plus":
+        return [("fonds", f) for f in funds] + [("reseau", r) for r in networks]
+
+    # Seed : alterné, réseau puis fonds, jusqu'à épuisement des deux pools.
+    seq: list[tuple[str, dict]] = []
+    i = j = 0
+    while i < len(networks) or j < len(funds):
+        if i < len(networks):
+            seq.append(("reseau", networks[i]))
+            i += 1
+        if j < len(funds):
+            seq.append(("fonds", funds[j]))
+            j += 1
+    return seq
 
 
 _CONSIGNE_COMPOSITION: dict[str, str] = {
@@ -360,7 +501,7 @@ def consigne_pour(mapping: dict) -> str:
         texte = levee.get("texte")
         suffixe_stade = f" · stade {stade}" if stade else ""
         parties.append(
-            f"Paramètres de la levée retenus : montant {montant} € "
+            f"Paramètres de la levée retenus : montant {_format_montant_espace(montant)} "
             f"(« {texte} »){suffixe_stade}. Restitue ces paramètres dans la "
             "première phrase de la synthèse."
         )
@@ -369,7 +510,7 @@ def consigne_pour(mapping: dict) -> str:
             litteral, plausible = lectures[0], lectures[1]
             parties.append(
                 f"Le montant écrit (« {texte} ») se lit {_format_eur(litteral)} ; "
-                f"pour un {stade or 'ce stade'}, {_format_eur(plausible)} est "
+                f"à ce stade, {_format_eur(plausible)} est "
                 f"plus vraisemblable : le rapport retient {_format_eur(plausible)} "
                 "et le signale."
             )
@@ -777,7 +918,7 @@ def format_context(mapping: dict) -> str:
     if levee or stade:
         morceaux = []
         if levee and levee.get("montant_eur") is not None:
-            morceaux.append(f"montant {levee['montant_eur']} €")
+            morceaux.append(f"montant {_format_montant_espace(levee['montant_eur'])}")
         if stade:
             morceaux.append(f"stade {stade}")
         if morceaux:
@@ -787,7 +928,7 @@ def format_context(mapping: dict) -> str:
             litteral, plausible = lectures[0], lectures[1]
             lines.append(
                 f"Le montant écrit (« {levee.get('texte')} ») se lit "
-                f"{_format_eur(litteral)} ; pour un {stade or 'ce stade'}, "
+                f"{_format_eur(litteral)} ; à ce stade, "
                 f"{_format_eur(plausible)} est plus vraisemblable : le rapport "
                 f"retient {_format_eur(plausible)} et le signale."
             )
@@ -795,46 +936,55 @@ def format_context(mapping: dict) -> str:
         # En tête, pour que le rapport annonce l'élargissement au lieu de le taire.
         lines.append(f"(avertissement méthodologique) {mapping['note']}")
     n = 0
-    for f in mapping.get("funds") or []:
+    # Tour de correction 1 (revue Q1) : l'ordre des sources numérotées suit la
+    # composition par stade (réseaux d'abord en pre-seed) — `citations()` ci-
+    # dessous itère exactement la même séquence, donc [N] reste bijectif.
+    for type_acteur, item in _sequence_acteurs(mapping):
         n += 1
-        site = f" — {f['site_web']}" if f["site_web"] else ""
-        lines.append(
-            f"[{n}] (base Axial — société de gestion) {f['nom']}{site}\n"
-            f"Score de pertinence : {f['score']} · {f['n_vehicules']} véhicule(s) "
-            f"référencé(s) · Couverture : {f['zone']}\n"
-            f"Secteurs tagués : {', '.join(f['secteurs'])}\n"
-            f"Stades tagués : {', '.join(f['stades'])}"
-        )
-    for r in mapping.get("networks") or []:
-        n += 1
-        lines.append(
-            f"[{n}] (base Axial — {r['nature']}) {r['nom']}\n"
-            f"Score de pertinence : {r['score']}\n"
-            f"Secteurs : {', '.join(r['secteurs'])} · Stades : {', '.join(r['stades'])}"
-        )
+        if type_acteur == "fonds":
+            f = item
+            site = f" — {f['site_web']}" if f["site_web"] else ""
+            lines.append(
+                f"[{n}] (base Axial — société de gestion) {f['nom']}{site}\n"
+                f"Score de pertinence : {f['score']} · {f['n_vehicules']} véhicule(s) "
+                f"référencé(s) · Couverture : {f['zone']}\n"
+                f"Secteurs tagués : {', '.join(f['secteurs'])}\n"
+                f"Stades tagués : {', '.join(f['stades'])}"
+            )
+        else:
+            r = item
+            lines.append(
+                f"[{n}] (base Axial — {r['nature']}) {r['nom']}\n"
+                f"Score de pertinence : {r['score']}\n"
+                f"Secteurs : {', '.join(r['secteurs'])} · Stades : {', '.join(r['stades'])}"
+            )
     return "\n\n".join(lines)
 
 
 def citations(mapping: dict) -> list[dict]:
-    """Citation entries matching the [N] numbering of format_context()."""
+    """Citation entries matching the [N] numbering of format_context() — même
+    séquence `_sequence_acteurs`, tour de correction 1 (revue Q1)."""
     out: list[dict] = []
-    for f in mapping.get("funds") or []:
-        out.append({
-            "title": f["nom"],
-            "url": f["site_web"] or None,
-            "source": "investisseurs",
-            "reference": f"Base investisseurs Axial · score {f['score']}",
-            "excerpt": (f"Secteurs : {', '.join(f['secteurs'])}. "
-                        f"Stades : {', '.join(f['stades'])}. "
-                        f"{f['n_vehicules']} véhicule(s). {f['zone']}."),
-        })
-    for r in mapping.get("networks") or []:
-        out.append({
-            "title": r["nom"],
-            "url": None,
-            "source": "investisseurs",
-            "reference": f"Base investisseurs Axial · {r['nature']}",
-            "excerpt": (f"Secteurs : {', '.join(r['secteurs'])}. "
-                        f"Stades : {', '.join(r['stades'])}."),
-        })
+    for type_acteur, item in _sequence_acteurs(mapping):
+        if type_acteur == "fonds":
+            f = item
+            out.append({
+                "title": f["nom"],
+                "url": f["site_web"] or None,
+                "source": "investisseurs",
+                "reference": f"Base investisseurs Axial · score {f['score']}",
+                "excerpt": (f"Secteurs : {', '.join(f['secteurs'])}. "
+                            f"Stades : {', '.join(f['stades'])}. "
+                            f"{f['n_vehicules']} véhicule(s). {f['zone']}."),
+            })
+        else:
+            r = item
+            out.append({
+                "title": r["nom"],
+                "url": None,
+                "source": "investisseurs",
+                "reference": f"Base investisseurs Axial · {r['nature']}",
+                "excerpt": (f"Secteurs : {', '.join(r['secteurs'])}. "
+                            f"Stades : {', '.join(r['stades'])}."),
+            })
     return out

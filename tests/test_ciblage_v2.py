@@ -158,10 +158,12 @@ def _reseaux(n: int) -> list[dict]:
 
 
 def test_composer_par_stade_pre_seed_reseaux_puis_fonds():
+    """Tour de correction 1 (revue Q2) : un plancher de min(3, disponibles)
+    fonds est réservé — les réseaux ne mangent plus tout le budget."""
     funds, networks = investors_service.composer_par_stade(
         _fonds(10), _reseaux(10), "pre-seed", limit=6)
-    assert len(networks) == 6
-    assert len(funds) == 0
+    assert len(networks) == 3
+    assert len(funds) == 3
     assert len(funds) + len(networks) == 6
 
 
@@ -181,10 +183,12 @@ def test_composer_par_stade_seed_parts_egales():
 
 
 def test_composer_par_stade_serie_a_fonds_dabord():
+    """Tour de correction 1 (revue Q2) : plancher symétrique de min(3,
+    disponibles) réseaux réservé en série A."""
     funds, networks = investors_service.composer_par_stade(
         _fonds(10), _reseaux(10), "série A", limit=6)
-    assert len(funds) == 6
-    assert len(networks) == 0
+    assert len(funds) == 3
+    assert len(networks) == 3
 
 
 def test_composer_par_stade_serie_b_plus_reseaux_completent_si_place():
@@ -273,9 +277,10 @@ def test_format_context_bloc_levee_en_tete():
         "funds": [], "networks": [],
     }
     ctx = investors_service.format_context(mapping)
-    assert ctx.startswith("Paramètres de la levée retenus : montant 300000 € · stade pre-seed") \
-        or "Paramètres de la levée retenus" in ctx.splitlines()[0]
-    assert "montant 300000 €" in ctx.splitlines()[0] or "300000" in ctx
+    # Tour de correction 1 (revue Q5) : le montant est formaté avec séparateurs
+    # de milliers dans le bloc lu par le modèle (« 300 000 € », pas « 300000 »).
+    assert ctx.startswith(
+        "Paramètres de la levée retenus : montant 300 000 € · stade pre-seed")
 
 
 def test_format_context_sans_levee_ni_stade_inchange():
@@ -544,3 +549,172 @@ def test_get_prompt_template_avec_consigne_apres_special_instructions():
     idx_special = prompt.index(directive["special_instructions"])
     idx_consigne = prompt.index("Fais ceci.")
     assert idx_consigne > idx_special
+
+
+# =============================================================================
+# Tour de correction 1 (revue `.superpowers/sdd/2026-09-18-ciblage-v2/
+# t1-review.md`) : C1 (pre seed avec espace), C2 (plausibilité générale +
+# choix du bon montant), C3 (faux montants « 6 mois »), Q1 (ordre des
+# sources), Q2 (plancher catégorie secondaire), Q3 (`hors` et exclusion par
+# nom complet). Les questions citées ci-dessous reprennent, aussi
+# fidèlement que le permettent les extraits du rapport de revue, les
+# formulations réelles du batch du 16/09 (le batch complet des 11 questions
+# n'est pas rejouable hors ligne : seules celles citées verbatim dans la
+# revue le sont ici).
+# =============================================================================
+
+def test_c1_stade_depuis_pre_seed_avec_espace_questions_reelles():
+    """Revue C1 : « pre seed » / « pré seed » écrits avec une espace (et non
+    un trait d'union) étaient lus « seed ». Trois questions réelles citées
+    par la revue."""
+    cas = [
+        "Nous levons 4 millions en pre seed/seed, quels investisseurs ?",
+        "Nous visons 2 millions en pre seed/seed pour démarrer.",
+        "On prépare un tour, 300k euros en pré seed.",
+    ]
+    for question in cas:
+        stade = investors_service.stade_depuis(question, {})
+        assert investors_service._categorie_stade(stade) == "pre_seed", question
+
+
+def test_c1_categorie_stade_pre_seed_avec_espace():
+    assert investors_service._categorie_stade("Pre seed") == "pre_seed"
+    assert investors_service._categorie_stade("pré seed") == "pre_seed"
+    assert investors_service._categorie_stade("preseed") == "pre_seed"
+
+
+def test_c2_plausibilite_appliquee_a_tout_montant_retenu():
+    """Revue C2 : le plafond de plausibilité s'applique à TOUT montant, pas
+    seulement au motif « milliers groupés + suffixe » — « 4 millions » en
+    pre-seed doit être signalé, pas accepté tel quel."""
+    r = investors_service.montant_de_levee(
+        "Nous levons 4 millions en pre seed/seed, quels investisseurs ?", "pre-seed")
+    assert r["ambigu"] is True
+    assert r["lectures"][0] == 4_000_000
+
+
+def test_c2_montant_adjacent_au_verbe_de_levee_prefere_au_premier():
+    """Revue C2, cas exact cité : « Notre marché pèse 300 millions, nous
+    levons 800 K€ en pre-seed » doit retenir 800 000 €, pas 300 M€."""
+    r = investors_service.montant_de_levee(
+        "Notre marché pèse 300 millions, nous levons 800 K€ en pre-seed.",
+        "pre-seed")
+    assert r["montant_eur"] == 800_000
+    assert r["ambigu"] is False
+
+
+def test_c3_faux_montant_6_mois_le_vrai_montant_est_lu():
+    """Revue C3, cas exact cité : « 6 mois » n'est pas 6 M€ ; le vrai montant
+    (500 K€) est bien lu."""
+    r = investors_service.montant_de_levee(
+        "Nous sommes 6 mois après la création, nous levons 500 K€ en seed.",
+        "seed")
+    assert r["montant_eur"] == 500_000
+    assert "mois" not in r["texte"]
+
+
+@pytest.mark.parametrize("bruit", ["6 mois", "12 marchés", "2 mois", "3 mètres"])
+def test_c3_faux_montants_seuls_jamais_lus(bruit):
+    assert investors_service.montant_de_levee(f"Nous sommes {bruit} après le lancement.") is None
+
+
+def test_c3_suffixe_colle_ou_suivi_deuro_reste_valide():
+    assert investors_service.montant_de_levee("Objectif 2M pour la suite.")["montant_eur"] == 2_000_000
+    assert investors_service.montant_de_levee("On vise 1,5 M€ en série A.")["montant_eur"] == 1_500_000
+
+
+def test_q3_hors_de_france_nest_plus_une_exclusion():
+    assert investors_service.deja_contactes("Trouve 10 investisseurs, hors de France.") == []
+
+
+def test_q3_hors_nom_propre_reste_une_exclusion():
+    assert investors_service.deja_contactes(
+        "Trouve des investisseurs, hors Delta Capital.") == ["Delta Capital"]
+
+
+def test_q3_exclusion_par_nom_complet_pas_par_sous_chaine():
+    """Revue Q3 : « Alpha » ne doit plus exclure « Fonds Alpha » par simple
+    inclusion — seul le nom complet (insensible casse/accents) compte."""
+    assert investors_service._exclu("Fonds Alpha", ["Alpha"]) is False
+    assert investors_service._exclu("Alpha", ["Alpha"]) is True
+    assert investors_service._exclu("ALPHA VENTURES", ["Alpha Ventures"]) is True
+    assert investors_service._exclu("Alpha Ventures", ["alpha ventures"]) is True
+    assert investors_service._exclu("Alphà Ventures", ["Alpha Ventures"]) is True
+
+
+# --- Q1 : l'ordre des sources numérotées suit la composition par stade -----
+
+def _fonds_ctx(n=1, nom="Fonds"):
+    return [{"nom": f"{nom} {i}", "site_web": "", "score": 1.0, "n_vehicules": 1,
+            "zone": "France", "secteurs": [], "stades": []} for i in range(n)]
+
+
+def _reseaux_ctx(n=1, nom="Reseau"):
+    return [{"nom": f"{nom} {i}", "nature": "business angels", "score": 0.9,
+            "secteurs": [], "stades": []} for i in range(n)]
+
+
+def test_q1_ordre_pre_seed_reseaux_avant_fonds():
+    mapping = {"funds": _fonds_ctx(1), "networks": _reseaux_ctx(1),
+              "stade_retenu": "pre-seed", "note": None}
+    ctx = investors_service.format_context(mapping)
+    cits = investors_service.citations(mapping)
+    assert "[1]" in ctx.split("[2]")[0]
+    assert "Reseau 0" in ctx.split("[2]")[0]
+    assert cits[0]["title"] == "Reseau 0"
+    assert cits[1]["title"] == "Fonds 0"
+
+
+def test_q1_ordre_serie_a_fonds_avant_reseaux():
+    mapping = {"funds": _fonds_ctx(1), "networks": _reseaux_ctx(1),
+              "stade_retenu": "série A", "note": None}
+    cits = investors_service.citations(mapping)
+    assert cits[0]["title"] == "Fonds 0"
+    assert cits[1]["title"] == "Reseau 0"
+
+
+def test_q1_ordre_seed_alterne():
+    mapping = {"funds": _fonds_ctx(2), "networks": _reseaux_ctx(2),
+              "stade_retenu": "seed", "note": None}
+    cits = investors_service.citations(mapping)
+    assert [c["title"] for c in cits] == ["Reseau 0", "Fonds 0", "Reseau 1", "Fonds 1"]
+
+
+def test_q1_ordre_inchange_sans_stade_retenu():
+    """Sans `stade_retenu` (appel direct sans `question`), l'ordre reste
+    fonds-puis-réseaux : aucune régression sur le contrat existant."""
+    mapping = {"funds": _fonds_ctx(1), "networks": _reseaux_ctx(1), "note": None}
+    cits = investors_service.citations(mapping)
+    assert cits[0]["title"] == "Fonds 0"
+    assert cits[1]["title"] == "Reseau 0"
+
+
+# --- Batterie de questions réelles du 16/09 (spec §5, revue Q5) ------------
+
+_QUESTIONS_REELLES_16_09 = [
+    # (question, catégorie de stade attendue, montant_eur attendu, ambigu attendu)
+    ("Nous levons 4 millions en pre seed/seed, quels investisseurs ?",
+     "pre_seed", 4_000, True),
+    ("Nous visons 2 millions en pre seed/seed pour démarrer.",
+     "pre_seed", 2_000_000, False),
+    ("On prépare un tour, 300k euros en pré seed.",
+     "pre_seed", 300_000, False),
+    ("Notre marché pèse 300 millions, nous levons 800 K€ en pre-seed.",
+     "pre_seed", 800_000, False),
+    ("Nous sommes 6 mois après la création, nous levons 500 K€ en seed.",
+     "seed", 500_000, False),
+    ("Je prépare une levée de 300 000k€ en pre-seed.",
+     "pre_seed", 300_000, True),
+]
+
+
+@pytest.mark.parametrize("question,categorie_attendue,montant_attendu,ambigu_attendu",
+                         _QUESTIONS_REELLES_16_09)
+def test_questions_reelles_16_09_stade_et_montant(
+        question, categorie_attendue, montant_attendu, ambigu_attendu):
+    stade = investors_service.stade_depuis(question, {})
+    assert investors_service._categorie_stade(stade) == categorie_attendue, question
+    r = investors_service.montant_de_levee(question, stade)
+    assert r is not None, question
+    assert r["montant_eur"] == montant_attendu, question
+    assert r["ambigu"] is ambigu_attendu, question
