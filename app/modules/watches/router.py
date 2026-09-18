@@ -94,6 +94,11 @@ class FeedVerifOut(BaseModel):
     erreur: str | None
 
 
+class FeedsVerifOut(BaseModel):
+    resultats: list[FeedVerifOut]
+    reste: int  # flux non traités dans cet appel (borne `service.VERIF_LIMITE_PAR_APPEL`)
+
+
 class WatchFeedOut(BaseModel):
     url: str
     title: str | None
@@ -189,14 +194,21 @@ def delete_feed(feed_id: str, user: AuthUser = Depends(get_current_user),
     return Response(status_code=204)
 
 
-@router.post("/feeds/verifier", response_model=list[FeedVerifOut])
+@router.post("/feeds/verifier", response_model=FeedsVerifOut)
 def verifier_feeds(user: AuthUser = Depends(get_current_admin),
-                   db: Session = Depends(get_db)) -> list[FeedVerifOut]:
-    """Vérifie tous les flux (utilisateurs + catalogue) — admin uniquement
-    (spec §3), même vérification que `scripts/tester_flux_rss.py`."""
-    return [FeedVerifOut(url=r["url"], ok=r["ok"], statut_http=r["statut_http"],
-                         entrees=r["entrees"], dernier=r["dernier"], erreur=r["erreur"])
-            for r in service.verifier_tous(db)]
+                   db: Session = Depends(get_db)) -> FeedsVerifOut:
+    """Vérifie les flux (utilisateurs + catalogue) — admin uniquement (spec
+    §3), même vérification que `scripts/tester_flux_rss.py`. Bornée à
+    `VERIF_LIMITE_PAR_APPEL` flux par appel (revue tour 1, Q1) pour que la
+    route rende la main bien avant un timeout nginx ; `reste` indique s'il
+    faut rappeler la route pour finir le lot."""
+    sortie = service.verifier_tous(db, limit=service.VERIF_LIMITE_PAR_APPEL)
+    return FeedsVerifOut(
+        resultats=[FeedVerifOut(url=r["url"], ok=r["ok"], statut_http=r["statut_http"],
+                                entrees=r["entrees"], dernier=r["dernier"], erreur=r["erreur"])
+                  for r in sortie["resultats"]],
+        reste=sortie["reste"],
+    )
 
 
 # --- Watches (agents) ------------------------------------------------------

@@ -6642,7 +6642,6 @@ const FLUX_ETAT_COULEUR = { ok: '#3ecf6a', erreur: '#e5484d', inconnu: 'var(--fg
 
 function AgentFeedsLine({ agentId, onGererFlux }) {
   const t = window.useT();
-  const lang = window.AXIAL_LANG || 'fr';
   const [open, setOpen] = React.useState(false);
   const [feeds, setFeeds] = React.useState(null); // null = pas encore chargé
 
@@ -6657,16 +6656,18 @@ function AgentFeedsLine({ agentId, onGererFlux }) {
 
   const n = feeds === null ? null : feeds.length;
   const libelle = t('agents.flux.count').replace('{n}', n === null ? '…' : String(n));
+  const panelId = `agent-flux-${agentId}`;
 
   return (
     <div className="agent-card-flux" onClick={(e) => e.stopPropagation()}>
       <button type="button" className="agent-card-flux-toggle" onClick={toggle}
+        aria-expanded={open} aria-controls={panelId}
         style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 0, color: 'var(--fg-2)', fontSize: 12, padding: '6px 0', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
         {libelle}
       </button>
       {open && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 6 }}>
+        <div id={panelId} style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 6 }}>
           {feeds === null && <p style={{ color: 'var(--fg-3)', fontSize: 12 }}>…</p>}
           {feeds !== null && feeds.length === 0 && (
             <p style={{ color: 'var(--fg-3)', fontSize: 12 }}>{t('agents.flux.vide')}</p>

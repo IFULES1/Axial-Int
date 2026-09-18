@@ -21,7 +21,12 @@ from app.modules.watches import service
 
 def main() -> int:
     with SessionLocal() as db:
-        resultats = service.verifier_tous(db)
+        # Pas de `limit` ici : un script CLI n'a pas la contrainte de délai
+        # d'une requête HTTP (route admin `/watches/feeds/verifier`, bornée
+        # à `VERIF_LIMITE_PAR_APPEL` — revue tour 1, Q1), il vérifie tout en
+        # un seul passage.
+        sortie = service.verifier_tous(db)
+    resultats = sortie["resultats"]
 
     resultats.sort(key=lambda r: (r["ok"], r["url"]))  # erreurs d'abord
 

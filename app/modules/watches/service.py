@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -22,9 +25,30 @@ _CADENCE_DELTA = {
 # masque le user-agent et le timeout) suivi d'un parse feedparser du contenu
 # reçu — le même parseur que `rss.py` utilise déjà pour lire les entrées.
 HTTP_TIMEOUT_VERIFICATION = 10.0
-HTTP_TIMEOUT_TITRE = 5.0
+# Revue tour 1, Q2 : `timeout=5.0` donnait 5 s à CHAQUE phase (connect, read,
+# write, pool) et `follow_redirects=True` reconduisait ce budget à chaque
+# saut — un site lent à connecter puis à répondre pouvait bloquer l'ajout
+# d'une URL libre 15-20 s. `httpx.Timeout(5.0, connect=2.0)` borne la
+# connexion à 2 s ; `max_redirects=3` borne le nombre de sauts suivis.
+HTTP_TIMEOUT_TITRE = httpx.Timeout(5.0, connect=2.0)
+MAX_REDIRECTS_TITRE = 3
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
              "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
+# Revue tour 1, Q1 : parallélisme borné pour `verifier_tous` — 8 GET en vol
+# au maximum, chaque future bornée à 12 s (le GET lui-même est déjà borné à
+# `HTTP_TIMEOUT_VERIFICATION`, la marge couvre l'attente de thread).
+VERIF_MAX_WORKERS = 8
+VERIF_TIMEOUT_FUTURE = 12.0
+VERIF_LIMITE_PAR_APPEL = 60  # borne haute pour que la route admin reste sous ~60 s
+
+# Revue tour 1, Q6 : un flux jamais vérifié, ou vérifié il y a plus de 7 j,
+# déclenche une vérification d'arrière-plan des flux du user au premier
+# chargement de sa fiche agent — sans quoi rien (hors script/route admin)
+# n'alimente jamais l'état affiché et tous les points restent gris.
+SEUIL_REVERIFICATION = dt.timedelta(days=7)
+_verification_en_cours: set[str] = set()
+_verification_lock = threading.Lock()
 
 
 def _now() -> dt.datetime:
@@ -40,7 +64,25 @@ def _next_run(cadence: str, base: dt.datetime | None = None) -> dt.datetime | No
 
 # --- Vérification des flux --------------------------------------------------
 
-def verifier_flux(url: str, *, timeout: float = HTTP_TIMEOUT_VERIFICATION) -> dict:
+def _get_flux(url: str, *, timeout, max_redirects: int | None = None) -> httpx.Response:
+    """Le GET qu'utilisent `verifier_flux` et `lire_titre_flux`.
+
+    `httpx.get(...)` (fonction de module, celle que les tests bouchonnent) ne
+    sait pas borner le nombre de redirections suivies. Quand `max_redirects`
+    est demandé (lecture de titre à l'ajout, Q2), on ouvre un `httpx.Client`
+    de courte durée qui le peut ; sinon on reste sur `httpx.get` — chemin le
+    plus emprunté (vérification, `verifier_tous`), inchangé.
+    """
+    if max_redirects is None:
+        return httpx.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout,
+                         follow_redirects=True)
+    with httpx.Client(timeout=timeout, follow_redirects=True,
+                      max_redirects=max_redirects) as client:
+        return client.get(url, headers={"User-Agent": USER_AGENT})
+
+
+def verifier_flux(url: str, *, timeout=HTTP_TIMEOUT_VERIFICATION,
+                  max_redirects: int | None = None) -> dict:
     """Vérifie un flux RSS/Atom en le récupérant réellement (spec §3).
 
     `{url, ok, statut_http, entrees, dernier, erreur}` — plus `titre`, lu au
@@ -48,14 +90,12 @@ def verifier_flux(url: str, *, timeout: float = HTTP_TIMEOUT_VERIFICATION) -> di
     second aller-retour réseau). Ne lève jamais : un flux mort renvoie
     `ok=False` avec `erreur` renseignée, il n'arrête pas l'appelant.
     """
-    import httpx
     import feedparser
 
     resultat: dict = {"url": url, "ok": False, "statut_http": None,
                       "entrees": 0, "dernier": None, "erreur": None, "titre": None}
     try:
-        reponse = httpx.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout,
-                            follow_redirects=True)
+        reponse = _get_flux(url, timeout=timeout, max_redirects=max_redirects)
         resultat["statut_http"] = reponse.status_code
         reponse.raise_for_status()
         parsed = feedparser.parse(reponse.content)
@@ -80,33 +120,152 @@ def verifier_flux(url: str, *, timeout: float = HTTP_TIMEOUT_VERIFICATION) -> di
 
 
 def lire_titre_flux(url: str) -> str | None:
-    """Best-effort, court (5 s) : utilisé à l'ajout d'une URL libre pour
-    enregistrer un titre lisible plutôt que l'URL brute."""
+    """Best-effort, court : utilisé à l'ajout d'une URL libre pour enregistrer
+    un titre lisible plutôt que l'URL brute. Connexion bornée à 2 s, lecture
+    totale à 5 s, au plus 3 redirections suivies (Q2)."""
     try:
-        return verifier_flux(url, timeout=HTTP_TIMEOUT_TITRE)["titre"]
+        return verifier_flux(url, timeout=HTTP_TIMEOUT_TITRE,
+                             max_redirects=MAX_REDIRECTS_TITRE)["titre"]
     except Exception:  # noqa: BLE001 — un titre manquant n'empêche pas l'ajout
         return None
 
 
-def verifier_tous(db: Session) -> list[dict]:
-    """Vérifie TOUS les flux utilisateurs (met à jour `derniere_verification_at`
-    et `derniere_erreur`) puis, sans écriture, tous les flux du catalogue.
-    Utilisé par la route admin `/watches/feeds/verifier`."""
+def verifier_tous(db: Session, *, limit: int | None = None,
+                  max_workers: int = VERIF_MAX_WORKERS,
+                  timeout_future: float = VERIF_TIMEOUT_FUTURE) -> dict:
+    """Vérifie les flux (utilisateurs d'abord, puis catalogue) en parallèle,
+    borné, et rend la main vite (Q1 — un GET séquentiel de 46+ flux à 10 s
+    pièce dépassait le timeout nginx et perdait tout le lot au premier
+    worker recyclé).
+
+    - Parallélisme : `max_workers` requêtes en vol (`ThreadPoolExecutor`).
+    - Chaque flux utilisateur est commité dès que SON résultat arrive, pas à
+      la fin du lot.
+    - `limit` borne le nombre de flux traités dans CET appel ; `reste`
+      indique combien restent à traiter (la route admin s'en sert pour ne
+      jamais dépasser ~60 s par appel). Le script CLI appelle sans `limit`.
+    - Le catalogue n'est jamais écrit (seuls les `RssFeed` le sont).
+
+    Renvoie `{"resultats": [...], "reste": N}`.
+    """
     from app.modules.watches.catalogue import catalogue
 
-    resultats: list[dict] = []
-    for feed in db.scalars(select(RssFeed)):
-        r = verifier_flux(feed.url)
-        feed.derniere_verification_at = _now()
-        feed.derniere_erreur = None if r["ok"] else (r["erreur"] or "erreur inconnue")
-        resultats.append(r)
-    db.commit()
+    flux_utilisateurs = list(db.scalars(select(RssFeed)))
+    urls_utilisateurs = {f.url for f in flux_utilisateurs}
+    entrees_catalogue = [f for f in catalogue() if f["url"] not in urls_utilisateurs]
 
-    deja = {r["url"] for r in resultats}
-    for f in catalogue():
-        if f["url"] in deja:
-            continue
-        resultats.append(verifier_flux(f["url"]))
+    # Flux utilisateurs d'abord : ce sont eux qu'on écrit, et en cas de lot
+    # tronqué par `limit` ils priment sur le catalogue (jamais persisté).
+    a_traiter: list[tuple[str, RssFeed | None]] = (
+        [(f.url, f) for f in flux_utilisateurs] + [(f["url"], None) for f in entrees_catalogue]
+    )
+    total = len(a_traiter)
+    lot = a_traiter[:limit] if limit else a_traiter
+    reste = max(0, total - len(lot))
+
+    resultats: list[dict] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        soumis = [(url, feed, executor.submit(verifier_flux, url)) for url, feed in lot]
+        for url, feed, future in soumis:
+            try:
+                r = future.result(timeout=timeout_future)
+            except FutureTimeoutError:
+                r = {"url": url, "ok": False, "statut_http": None, "entrees": 0,
+                     "dernier": None, "erreur": "délai de vérification dépassé", "titre": None}
+            except Exception as e:  # noqa: BLE001 — jamais fatal pour le lot
+                r = {"url": url, "ok": False, "statut_http": None, "entrees": 0,
+                     "dernier": None, "erreur": str(e), "titre": None}
+            resultats.append(r)
+            if feed is not None:
+                feed.derniere_verification_at = _now()
+                feed.derniere_erreur = None if r["ok"] else (r["erreur"] or "erreur inconnue")
+                db.commit()  # par flux (Q1), pas un seul commit final
+
+    return {"resultats": resultats, "reste": reste}
+
+
+def _flux_a_reverifier(mes_flux: list[RssFeed]) -> bool:
+    seuil = _now() - SEUIL_REVERIFICATION
+
+    def _aware(valeur: dt.datetime) -> dt.datetime:
+        # SQLite (tests) rend un datetime naïf même pour une colonne
+        # `DateTime(timezone=True)` — Postgres (prod) le rend déjà aware.
+        # Sans cette normalisation, la comparaison lève sur SQLite.
+        return valeur if valeur.tzinfo is not None else valeur.replace(tzinfo=dt.timezone.utc)
+
+    return any(f.derniere_verification_at is None or _aware(f.derniere_verification_at) < seuil
+              for f in mes_flux)
+
+
+def _lancer_fil_verification(cible, *, user_id: str) -> None:
+    """Indirection SEULE responsable de démarrer le fil démon de la
+    vérification d'arrière-plan (Q6) — factorisée pour que les tests la
+    substituent (exécution synchrone, ou simple comptage) sans jamais
+    monkeypatcher `threading.Thread` lui-même : ce dernier est aussi ce que
+    `ThreadPoolExecutor` utilise en interne pour SES propres threads
+    (`verifier_tous`/`verifier_tous_pour`), et le patcher globalement les
+    casse."""
+    threading.Thread(target=cible, daemon=True, name=f"verif-flux-{user_id}").start()
+
+
+def _verifier_utilisateur_en_arriere_plan(user_id: str) -> None:
+    """Q6 : lancé en fil démon, best effort, depuis `GET /watches/{id}/feeds`
+    quand au moins un flux de l'utilisateur n'a jamais été vérifié ou l'a été
+    il y a plus de 7 jours. Rien d'autre (pas de cron) n'alimente ces deux
+    colonnes hors script local / route admin — sans ça, un utilisateur qui
+    n'a jamais ouvert Pilotage verrait tous ses points gris indéfiniment.
+
+    Ouvre sa PROPRE session (jamais celle, liée à la requête, de l'appelant :
+    elle serait fermée avant que ce fil ait fini). Un verrou en mémoire
+    évite de relancer une vérification déjà en cours pour ce user_id (la
+    fiche agent peut être rechargée plusieurs fois avant que le premier
+    passage ne se termine).
+    """
+    with _verification_lock:
+        if user_id in _verification_en_cours:
+            return
+        _verification_en_cours.add(user_id)
+
+    def _run() -> None:
+        from app.db import SessionLocal
+
+        try:
+            with SessionLocal() as db_arriere_plan:
+                mes_flux = list(db_arriere_plan.scalars(
+                    select(RssFeed).where(RssFeed.user_id == uuid.UUID(user_id))))
+                verifier_tous_pour(db_arriere_plan, mes_flux)
+        except Exception:  # noqa: BLE001 — best effort, ne doit jamais remonter
+            logger.warning("Vérification d'arrière-plan des flux de %s échouée",
+                           user_id, exc_info=True)
+        finally:
+            with _verification_lock:
+                _verification_en_cours.discard(user_id)
+
+    _lancer_fil_verification(_run, user_id=user_id)
+
+
+def verifier_tous_pour(db: Session, flux: list[RssFeed], *,
+                       max_workers: int = VERIF_MAX_WORKERS,
+                       timeout_future: float = VERIF_TIMEOUT_FUTURE) -> list[dict]:
+    """Même mécanique que `verifier_tous` (parallèle, bornée, commit par
+    flux) mais sur une liste de `RssFeed` déjà choisie par l'appelant —
+    factorisée pour que la vérification d'arrière-plan (Q6, tous les flux
+    d'UN utilisateur) et `verifier_tous` (TOUS les flux) partagent le même
+    code d'exécution."""
+    resultats: list[dict] = []
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        soumis = [(f, executor.submit(verifier_flux, f.url)) for f in flux]
+        for feed, future in soumis:
+            try:
+                r = future.result(timeout=timeout_future)
+            except FutureTimeoutError:
+                r = {"url": feed.url, "ok": False, "erreur": "délai de vérification dépassé"}
+            except Exception as e:  # noqa: BLE001
+                r = {"url": feed.url, "ok": False, "erreur": str(e)}
+            feed.derniere_verification_at = _now()
+            feed.derniere_erreur = None if r.get("ok") else (r.get("erreur") or "erreur inconnue")
+            db.commit()
+            resultats.append(r)
     return resultats
 
 
@@ -118,10 +277,15 @@ def _etat_flux(*, verifie_at, erreur) -> str:
 
 def feeds_pour_watch(db: Session, user_id: str, watch: Watch) -> list[dict]:
     """Flux visibles sur la fiche d'un agent (spec §3) : ceux de l'utilisateur
-    dont la catégorie ∈ `skill.rss_categories`, plus le catalogue de ces
-    catégories — chaque flux catalogue reprend l'état d'un flux utilisateur
-    de même URL s'il existe, sinon `inconnu` (aucune vérification catalogue
-    propre n'est faite ici, `verifier_tous` s'en charge côté admin)."""
+    (actifs — Q3, même filtre que `_feeds_for`) dont la catégorie ∈
+    `skill.rss_categories`, plus le catalogue de ces catégories — chaque flux
+    catalogue reprend l'état d'un flux utilisateur de même URL s'il existe
+    PARMI CEUX AFFICHÉS (Q4 : un flux personnel classé hors des catégories du
+    skill ne doit pas prêter son état à l'entrée catalogue de même URL),
+    sinon `inconnu`.
+
+    Déclenche aussi, best effort, la vérification d'arrière-plan des flux de
+    l'utilisateur si nécessaire (Q6)."""
     from app.modules.watches import skills
     from app.modules.watches.catalogue import catalogue
 
@@ -129,7 +293,8 @@ def feeds_pour_watch(db: Session, user_id: str, watch: Watch) -> list[dict]:
     categories = set(skill.rss_categories)
 
     mes_flux = list(db.scalars(
-        select(RssFeed).where(RssFeed.user_id == uuid.UUID(user_id))
+        select(RssFeed).where(RssFeed.user_id == uuid.UUID(user_id), RssFeed.active.is_(True),
+                              RssFeed.category.in_(categories))
         .order_by(RssFeed.created_at.desc())))
     etat_par_url = {f.url: _etat_flux(verifie_at=f.derniere_verification_at,
                                       erreur=f.derniere_erreur) for f in mes_flux}
@@ -138,8 +303,6 @@ def feeds_pour_watch(db: Session, user_id: str, watch: Watch) -> list[dict]:
     items: list[dict] = []
     vues: set[str] = set()
     for f in mes_flux:
-        if f.category not in categories:
-            continue
         items.append({
             "url": f.url, "title": f.title, "category": f.category,
             "origine": "moi", "etat": etat_par_url[f.url],
@@ -156,6 +319,11 @@ def feeds_pour_watch(db: Session, user_id: str, watch: Watch) -> list[dict]:
             "derniere_verification_at": verifie_at_par_url.get(f["url"]),
         })
         vues.add(f["url"])
+
+    tous_mes_flux = list(db.scalars(select(RssFeed).where(RssFeed.user_id == uuid.UUID(user_id))))
+    if _flux_a_reverifier(tous_mes_flux):
+        _verifier_utilisateur_en_arriere_plan(user_id)
+
     return items
 
 

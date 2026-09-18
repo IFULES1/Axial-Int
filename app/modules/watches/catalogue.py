@@ -4,8 +4,12 @@ Ajouter un flux demandait jusqu'ici de connaître son URL — un fondateur ne
 connaît pas l'adresse RSS de Sifted ou de la CNIL. Le catalogue expose des
 sources vérifiées, classées par thème, qu'on ajoute en un clic.
 
-La liste vit dans `data/rss_feeds.csv` plutôt qu'en base : elle est éditoriale,
-elle se relit dans une revue de code, et elle n'a pas à être migrée.
+La liste vit dans `data/rss_feeds.csv` plutôt qu'en base : elle est éditoriale
+et n'a pas à être migrée. Revue tour 1 (C1) : `data/` est gitignoré
+(`.gitignore:30`), ce fichier n'est PAS versionné — c'est une donnée de
+configuration du serveur, modifiée directement sur disque (ou via le script
+`scripts/tester_flux_rss.py` pour la vérifier), jamais relue dans une pull
+request.
 """
 from __future__ import annotations
 

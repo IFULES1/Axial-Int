@@ -1,19 +1,24 @@
 """Task 2 — flux RSS visibles et testés (spec ciblage-investisseurs-v2 §3).
 
 Couvre : vérification d'un flux (bouchonnée : ok / 404 / XML invalide /
-timeout), la route admin `/watches/feeds/verifier` (403 pour un non-admin),
-`GET /watches/{id}/feeds` (filtre par catégories du skill + fusion du
-catalogue), et le titre lu à l'ajout d'une URL libre.
+timeout), transmission du timeout/User-Agent aux faux `httpx.get`/`httpx.
+Client`, parallélisme + borne de `verifier_tous` (revue tour 1, Q1), la route
+admin `/watches/feeds/verifier` (403 pour un non-admin, `reste`),
+`GET /watches/{id}/feeds` (filtre par catégories + actif, fusion du
+catalogue, déclenchement best-effort de la vérification d'arrière-plan —
+Q3/Q6), et le titre lu à l'ajout d'une URL libre.
 """
 from __future__ import annotations
 
+import datetime as dt
+import time
 import types
 import uuid
 
 import httpx
 import pytest
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db import Base
@@ -36,12 +41,32 @@ def _engine():
     return engine
 
 
-def _feed(db, user_id, *, url, category, title=None, verif_at=None, erreur=None):
+def _feed(db, user_id, *, url, category, title=None, verif_at=None, erreur=None, active=True):
     f = RssFeed(id=uuid.uuid4(), user_id=user_id, url=url, category=category,
-               title=title, derniere_verification_at=verif_at, derniere_erreur=erreur)
+               title=title, derniere_verification_at=verif_at, derniere_erreur=erreur,
+               active=active)
     db.add(f)
     db.commit()
     return f
+
+
+def _fil_noop(cible, *, user_id):
+    """Ne lance jamais la cible. Défaut pour tous les tests de ce fichier —
+    sans ça, un test qui ne porte pas sur Q6 déclencherait quand même la
+    vérification d'arrière-plan, qui ouvre une VRAIE `SessionLocal` liée à
+    la base de prod configurée par `DATABASE_URL`.
+
+    On patch `service._lancer_fil_verification` (l'indirection dédiée), PAS
+    `threading.Thread` : ce dernier est aussi ce que `ThreadPoolExecutor`
+    utilise en interne pour ses propres threads (`verifier_tous`), et le
+    patcher globalement casse le pool."""
+
+
+@pytest.fixture(autouse=True)
+def _fils_demon_neutralises(monkeypatch):
+    monkeypatch.setattr(service, "_lancer_fil_verification", _fil_noop)
+    yield
+    service._verification_en_cours.clear()
 
 
 # --- réponses HTTP bouchonnées ------------------------------------------------
@@ -64,6 +89,45 @@ class _FauxReponse:
         if self._raise_status:
             raise self._raise_status
 
+
+class _FauxClient:
+    """Bouchon de `httpx.Client(...)` utilisé par `lire_titre_flux` (Q2,
+    `max_redirects`) — capture les kwargs du constructeur ET de `.get()`
+    dans les dictionnaires passés au constructeur de la classe (via
+    `fabrique_client`) pour que les tests puissent les inspecter."""
+
+    kwargs_constructeur: dict = {}
+    kwargs_get: dict = {}
+    reponse = None
+
+    def __init__(self, **kw):
+        type(self).kwargs_constructeur = kw
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def get(self, url, **kw):
+        type(self).kwargs_get = kw
+        return type(self).reponse
+
+
+def _client_repondant(monkeypatch, reponse):
+    _FauxClient.kwargs_constructeur = {}
+    _FauxClient.kwargs_get = {}
+    _FauxClient.reponse = reponse
+    monkeypatch.setattr(httpx, "Client", _FauxClient)
+    return _FauxClient
+
+
+class _ClientBoom:
+    def __init__(self, **kw):
+        raise AssertionError("httpx.Client ne doit pas être construit ici")
+
+
+# --- verifier_flux : bouchonnée ok / 404 / XML invalide / timeout -----------
 
 def test_verifier_flux_ok(monkeypatch):
     monkeypatch.setattr(httpx, "get",
@@ -107,14 +171,47 @@ def test_verifier_flux_timeout(monkeypatch):
     assert "timeout" in r["erreur"].lower()
 
 
+# --- Q2 : timeout et User-Agent réellement transmis --------------------------
+
+def test_verifier_flux_transmet_timeout_et_user_agent(monkeypatch):
+    capture = {}
+
+    def _get(url, **kw):
+        capture.update(kw)
+        return _FauxReponse(200, _FLUX_VALIDE.encode("utf-8"))
+    monkeypatch.setattr(httpx, "get", _get)
+    service.verifier_flux("http://ex.fr/feed")
+    assert capture["timeout"] == service.HTTP_TIMEOUT_VERIFICATION
+    assert capture["headers"]["User-Agent"] == service.USER_AGENT
+    assert capture["follow_redirects"] is True
+
+
+def test_http_timeout_titre_borne_la_connexion_a_2s():
+    # Q2 : `timeout=5.0` seul donnait 5 s à CHAQUE phase (connect compris) ;
+    # `httpx.Timeout(5.0, connect=2.0)` borne spécifiquement la connexion.
+    assert isinstance(service.HTTP_TIMEOUT_TITRE, httpx.Timeout)
+    assert service.HTTP_TIMEOUT_TITRE.connect == 2.0
+    assert service.HTTP_TIMEOUT_TITRE.read == 5.0
+    assert service.MAX_REDIRECTS_TITRE == 3
+
+
+def test_lire_titre_flux_transmet_timeout_borne_redirections_et_user_agent(monkeypatch):
+    client_cls = _client_repondant(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+    assert service.lire_titre_flux("http://ex.fr/feed") == "Flux Test"
+    assert client_cls.kwargs_constructeur["timeout"] == service.HTTP_TIMEOUT_TITRE
+    assert client_cls.kwargs_constructeur["max_redirects"] == service.MAX_REDIRECTS_TITRE
+    assert client_cls.kwargs_constructeur["follow_redirects"] is True
+    assert client_cls.kwargs_get["headers"]["User-Agent"] == service.USER_AGENT
+
+
 def test_lire_titre_flux_best_effort(monkeypatch):
-    monkeypatch.setattr(httpx, "get",
-                        lambda url, **kw: _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+    _client_repondant(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
     assert service.lire_titre_flux("http://ex.fr/feed") == "Flux Test"
 
-    def _boom(url, **kw):
-        raise RuntimeError("réseau down")
-    monkeypatch.setattr(httpx, "get", _boom)
+    class _ClientBoomReseau:
+        def __init__(self, **kw):
+            raise RuntimeError("réseau down")
+    monkeypatch.setattr(httpx, "Client", _ClientBoomReseau)
     assert service.lire_titre_flux("http://ex.fr/feed") is None
 
 
@@ -134,7 +231,9 @@ def test_verifier_tous_met_a_jour_les_flux_utilisateurs(monkeypatch):
         monkeypatch.setattr(httpx, "get", _get)
         monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
 
-        resultats = service.verifier_tous(db)
+        sortie = service.verifier_tous(db)
+        resultats = sortie["resultats"]
+        assert sortie["reste"] == 0
         assert {r["url"] for r in resultats} == {"http://ex.fr/ok", "http://ex.fr/ko"}
 
         db.refresh(f_ok)
@@ -153,13 +252,57 @@ def test_verifier_tous_inclut_le_catalogue_sans_ecrire(monkeypatch):
         monkeypatch.setattr("app.modules.watches.catalogue.catalogue",
                             lambda: [{"url": "http://cat.fr/feed", "category": "tech",
                                      "title": "Cat", "category_label": "Technologie"}])
-        resultats = service.verifier_tous(db)
-        assert any(r["url"] == "http://cat.fr/feed" for r in resultats)
+        sortie = service.verifier_tous(db)
+        assert any(r["url"] == "http://cat.fr/feed" for r in sortie["resultats"])
         # aucun RssFeed n'a été créé pour l'entrée catalogue
         assert db.scalars(select(RssFeed)).first() is None
 
 
-# --- feeds_pour_watch : filtre par catégories + fusion catalogue ------------
+# --- Q1 : parallélisme borné -------------------------------------------------
+
+def test_verifier_tous_est_parallele_et_reste_rapide(monkeypatch):
+    """20 flux qui dorment chacun 0,3 s : en séquentiel ça ferait 6 s. Avec
+    8 threads en vol (`VERIF_MAX_WORKERS`), 3 vagues suffisent (~0,9 s)."""
+    engine = _engine()
+    uid = uuid.uuid4()
+    with Session(engine) as db:
+        for i in range(20):
+            _feed(db, uid, url=f"http://ex.fr/{i}", category="tech")
+
+        def _get(url, **kw):
+            time.sleep(0.3)
+            return _FauxReponse(200, _FLUX_VALIDE.encode("utf-8"))
+        monkeypatch.setattr(httpx, "get", _get)
+        monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
+
+        debut = time.monotonic()
+        sortie = service.verifier_tous(db)
+        duree = time.monotonic() - debut
+
+        assert len(sortie["resultats"]) == 20
+        assert duree < 2.0, f"20 flux à 0,3 s en 8 threads a pris {duree:.2f}s (attendu < 2 s)"
+
+
+def test_verifier_tous_respecte_limit_et_rapporte_reste(monkeypatch):
+    engine = _engine()
+    uid = uuid.uuid4()
+    with Session(engine) as db:
+        for i in range(5):
+            _feed(db, uid, url=f"http://ex.fr/{i}", category="tech")
+        monkeypatch.setattr(httpx, "get",
+                            lambda url, **kw: _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+        monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
+
+        sortie = service.verifier_tous(db, limit=3)
+        assert len(sortie["resultats"]) == 3
+        assert sortie["reste"] == 2
+        # les flux traités ont bien été écrits, ceux hors du lot pas encore
+        traites = {f.url for f in db.scalars(select(RssFeed))
+                  if f.derniere_verification_at is not None}
+        assert len(traites) == 3
+
+
+# --- feeds_pour_watch : filtre par catégories, actif, fusion catalogue ------
 
 def test_feeds_pour_watch_filtre_par_categorie_et_fusionne_catalogue(monkeypatch):
     engine = _engine()
@@ -200,7 +343,6 @@ def test_feeds_pour_watch_etat_catalogue_reprend_celui_du_flux_utilisateur(monke
     engine = _engine()
     uid = uuid.uuid4()
     with Session(engine) as db:
-        import datetime as dt
         now = dt.datetime.now(dt.timezone.utc)
         _feed(db, uid, url="http://cat.fr/tech", category="tech", title="Déjà suivi",
              verif_at=now, erreur="mort")
@@ -217,6 +359,145 @@ def test_feeds_pour_watch_etat_catalogue_reprend_celui_du_flux_utilisateur(monke
         item = items[0]
         assert item["origine"] == "moi"
         assert item["etat"] == "erreur"
+
+
+def test_feeds_pour_watch_etat_catalogue_ignore_un_flux_utilisateur_hors_categorie(monkeypatch):
+    """Q4 (corollaire du filtre Q3) : un flux personnel classé HORS des
+    catégories du skill ne doit pas prêter son état à l'entrée catalogue de
+    même URL — sinon un flux rangé par erreur dans la mauvaise catégorie
+    « ressusciterait » une entrée catalogue qu'il ne représente pas vraiment
+    pour cet agent."""
+    engine = _engine()
+    uid = uuid.uuid4()
+    with Session(engine) as db:
+        now = dt.datetime.now(dt.timezone.utc)
+        # rangé en 'juridique' (hors skill produit_tech), mais en erreur
+        _feed(db, uid, url="http://cat.fr/tech", category="juridique",
+             verif_at=now, erreur="mort")
+
+        monkeypatch.setattr(
+            "app.modules.watches.catalogue.catalogue",
+            lambda: [{"url": "http://cat.fr/tech", "category": "tech", "title": "Cat Tech",
+                     "category_label": "Technologie"}],
+        )
+        watch = types.SimpleNamespace(skill="produit_tech")
+        items = service.feeds_pour_watch(db, str(uid), watch)
+        assert len(items) == 1
+        assert items[0]["origine"] == "catalogue"
+        assert items[0]["etat"] == "inconnu"  # pas "erreur" emprunté au flux hors catégorie
+
+
+def test_feeds_pour_watch_ignore_les_flux_inactifs(monkeypatch):
+    """Q3 : même filtre `active` que `service._feeds_for` (ce que `run_watch`
+    lit réellement) — sinon la carte affiche comme lue une source que
+    l'agent ignore."""
+    engine = _engine()
+    uid = uuid.uuid4()
+    with Session(engine) as db:
+        _feed(db, uid, url="http://moi.fr/actif", category="tech")
+        _feed(db, uid, url="http://moi.fr/inactif", category="tech", active=False)
+        monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
+        watch = types.SimpleNamespace(skill="produit_tech")
+        items = service.feeds_pour_watch(db, str(uid), watch)
+        urls = {i["url"] for i in items}
+        assert "http://moi.fr/actif" in urls
+        assert "http://moi.fr/inactif" not in urls
+
+
+# --- Q6 : vérification d'arrière-plan au premier chargement -----------------
+
+def _fil_espion(compteur):
+    """Compte les déclenchements sans jamais exécuter la cible — pour
+    vérifier QUAND la vérification d'arrière-plan part, pas encore ce
+    qu'elle fait (couvert par le test synchrone ci-dessous)."""
+    def _fil(cible, *, user_id):
+        compteur["n"] += 1
+    return _fil
+
+
+def _fil_synchrone(cible, *, user_id):
+    """Exécute la cible immédiatement, dans le fil courant — pour observer
+    l'effet (écriture en base) sans dépendre d'un vrai thread."""
+    cible()
+
+
+def test_pas_de_verification_arriere_plan_si_tout_est_recent(monkeypatch):
+    engine = _engine()
+    uid = uuid.uuid4()
+    with Session(engine) as db:
+        _feed(db, uid, url="http://moi.fr/frais", category="tech",
+             verif_at=dt.datetime.now(dt.timezone.utc))
+        compteur = {"n": 0}
+        monkeypatch.setattr(service, "_lancer_fil_verification", _fil_espion(compteur))
+        monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
+        watch = types.SimpleNamespace(skill="produit_tech")
+        service.feeds_pour_watch(db, str(uid), watch)
+        assert compteur["n"] == 0
+
+
+def test_verification_arriere_plan_declenchee_si_jamais_verifie(monkeypatch):
+    engine = _engine()
+    uid = uuid.uuid4()
+    with Session(engine) as db:
+        _feed(db, uid, url="http://moi.fr/jamais-verifie", category="tech")  # verif_at=None
+        compteur = {"n": 0}
+        monkeypatch.setattr(service, "_lancer_fil_verification", _fil_espion(compteur))
+        monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
+        watch = types.SimpleNamespace(skill="produit_tech")
+        service.feeds_pour_watch(db, str(uid), watch)
+        assert compteur["n"] == 1
+
+
+def test_verification_arriere_plan_declenchee_si_perimee_plus_de_7_jours(monkeypatch):
+    engine = _engine()
+    uid = uuid.uuid4()
+    with Session(engine) as db:
+        perime = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=8)
+        _feed(db, uid, url="http://moi.fr/perime", category="tech", verif_at=perime)
+        compteur = {"n": 0}
+        monkeypatch.setattr(service, "_lancer_fil_verification", _fil_espion(compteur))
+        monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
+        watch = types.SimpleNamespace(skill="produit_tech")
+        service.feeds_pour_watch(db, str(uid), watch)
+        assert compteur["n"] == 1
+
+
+def test_verification_arriere_plan_ne_relance_pas_si_deja_en_cours(monkeypatch):
+    engine = _engine()
+    uid = uuid.uuid4()
+    with Session(engine) as db:
+        _feed(db, uid, url="http://moi.fr/jamais-verifie", category="tech")
+        compteur = {"n": 0}
+        monkeypatch.setattr(service, "_lancer_fil_verification", _fil_espion(compteur))
+        monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
+        service._verification_en_cours.add(str(uid))
+        watch = types.SimpleNamespace(skill="produit_tech")
+        service.feeds_pour_watch(db, str(uid), watch)
+        assert compteur["n"] == 0
+
+
+def test_verification_arriere_plan_ecrit_bien_l_etat_du_flux(monkeypatch):
+    """Bout en bout (fil synchrone + `SessionLocal` redirigée vers le
+    moteur de test) : le point gris doit devenir vert/rouge après le passage."""
+    engine = _engine()
+    uid = uuid.uuid4()
+    with Session(engine) as db:
+        _feed(db, uid, url="http://moi.fr/jamais-verifie", category="tech")
+        monkeypatch.setattr(service, "_lancer_fil_verification", _fil_synchrone)
+        monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
+        monkeypatch.setattr(httpx, "get",
+                            lambda url, **kw: _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+        fausse_session_locale = sessionmaker(bind=engine, autoflush=False, autocommit=False,
+                                             future=True)
+        monkeypatch.setattr("app.db.SessionLocal", fausse_session_locale)
+
+        watch = types.SimpleNamespace(skill="produit_tech")
+        service.feeds_pour_watch(db, str(uid), watch)
+
+    with Session(engine) as verif:
+        flux = verif.scalars(select(RssFeed).where(RssFeed.user_id == uid)).one()
+        assert flux.derniere_verification_at is not None
+        assert flux.derniere_erreur is None
 
 
 # --- routes HTTP -------------------------------------------------------------
@@ -270,7 +551,31 @@ def test_route_verifier_feeds_admin_ok(monkeypatch):
         r = client.post("/watches/feeds/verifier")
         assert r.status_code == 200, r.text
         corps = r.json()
-        assert any(item["url"] == "http://ex.fr/a" and item["ok"] for item in corps)
+        assert corps["reste"] == 0
+        assert any(item["url"] == "http://ex.fr/a" and item["ok"] for item in corps["resultats"])
+    finally:
+        app_.dependency_overrides.clear()
+
+
+def test_route_verifier_feeds_borne_le_lot_et_rapporte_reste(monkeypatch):
+    """Q1 : la route ne traite jamais plus de `VERIF_LIMITE_PAR_APPEL` flux
+    dans un même appel — vérifié ici avec une limite abaissée pour ne pas
+    créer 61 flux dans le test."""
+    engine = _engine()
+    app_, client, uid = _http(engine, is_admin=True)
+    try:
+        with Session(engine) as db:
+            for i in range(5):
+                _feed(db, uuid.UUID(uid), url=f"http://ex.fr/{i}", category="tech")
+        monkeypatch.setattr(service, "VERIF_LIMITE_PAR_APPEL", 3)
+        monkeypatch.setattr(httpx, "get",
+                            lambda url, **kw: _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+        monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
+        r = client.post("/watches/feeds/verifier")
+        assert r.status_code == 200, r.text
+        corps = r.json()
+        assert len(corps["resultats"]) == 3
+        assert corps["reste"] == 2
     finally:
         app_.dependency_overrides.clear()
 
@@ -329,8 +634,7 @@ def test_ajout_flux_url_libre_lit_le_titre(monkeypatch):
     engine = _engine()
     app_, client, uid = _http(engine, is_admin=False)
     try:
-        monkeypatch.setattr(httpx, "get",
-                            lambda url, **kw: _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+        _client_repondant(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
         r = client.post("/watches/feeds", json={"url": "http://ex.fr/libre", "category": "tech"})
         assert r.status_code == 200, r.text
         assert r.json()["title"] == "Flux Test"
@@ -342,17 +646,15 @@ def test_ajout_flux_url_libre_avec_titre_fourni_ne_verifie_pas(monkeypatch):
     engine = _engine()
     app_, client, uid = _http(engine, is_admin=False)
     try:
-        appele = {"n": 0}
+        monkeypatch.setattr(httpx, "Client", _ClientBoom)
 
         def _boom(url, **kw):
-            appele["n"] += 1
-            raise AssertionError("ne doit pas être appelé quand un titre est fourni")
+            raise AssertionError("httpx.get ne doit pas être appelé quand un titre est fourni")
         monkeypatch.setattr(httpx, "get", _boom)
         r = client.post("/watches/feeds",
                         json={"url": "http://ex.fr/avec-titre", "category": "tech",
                               "title": "Titre fourni"})
         assert r.status_code == 200, r.text
         assert r.json()["title"] == "Titre fourni"
-        assert appele["n"] == 0
     finally:
         app_.dependency_overrides.clear()
