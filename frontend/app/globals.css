@@ -3474,3 +3474,18 @@ html[data-theme="light"] .sidebar {
   .rep-sources { page-break-before: always; break-before: page; }
   @page { margin: 18mm 16mm; }
 }
+
+/* Bandeau de consentement de mesure d'audience (18/09) : flottant en bas,
+   au-dessus du bandeau de version s'ils coexistent. */
+.ax-bandeau-consentement {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  z-index: 1001; max-width: min(720px, calc(100% - 32px));
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 12px 16px; border-radius: 12px;
+  background: var(--surface, #fff); color: var(--fg);
+  border: 1px solid var(--border); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  font-size: 13px; line-height: 1.4;
+}
+.ax-bandeau-consentement > div:first-child { flex: 1 1 320px; }
+.ax-bandeau-consentement-details { color: var(--fg-3); font-size: 12px; margin-top: 4px; }
+.ax-bandeau-consentement-actions { display: flex; gap: 8px; }

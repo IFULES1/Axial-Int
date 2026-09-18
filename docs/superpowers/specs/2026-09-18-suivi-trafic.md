@@ -59,3 +59,20 @@ saisie (`data-clarity-mask`).
 2. Bing par import (2 minutes, quand 1 est fait).
 3. Bandeau de consentement + GA4 (une demi-journée, décisions de wording).
 4. Clarity sur la landing et l'onboarding (une heure, une fois le bandeau en place).
+
+## 6. État au 18/09 (soir)
+
+- Search Console : robots, sitemap, balise de vérification déployés ; propriété
+  connectée par Miradie.
+- Bandeau de consentement FR/EN + GA4 + Clarity : code déployé
+  (`frontend/app/_prototype/mesure.js`, tests `frontend/tests/mesure.test.mjs`).
+  Rien ne se charge tant que `NEXT_PUBLIC_GA_ID` / `NEXT_PUBLIC_CLARITY_ID` ne
+  sont pas posées dans l'environnement de build du serveur (`/opt/axial-intelligence/frontend/.env.production`
+  ou Doppler `prd` selon le mode de build) puis rebuild avec contrôle de parité.
+  Événements produit envoyés à GA4 : `page_vue` (route), `inscription`,
+  `rapport_lance` (type), `conversation_envoyee` (nouvelle ou non).
+- À faire par Miradie : créer la propriété GA4 (analytics.google.com →
+  Admin → Créer une propriété → flux Web `app.axial-ia.fr`) et le projet
+  Clarity (clarity.microsoft.com → New project) ; me transmettre les deux
+  identifiants. Bing Webmaster : bing.com/webmasters → « Import from Google
+  Search Console » avec le même compte Google.

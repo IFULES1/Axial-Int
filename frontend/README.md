@@ -17,6 +17,8 @@ que sur la machine où il avait été créé. À poser dans `frontend/.env.local
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Clé anonyme Supabase (auth). | Oui |
 | `NEXT_PUBLIC_GOOGLE_API_KEY` | Clé API pour le Google Picker (Sources v2 §6, « Importer depuis Drive » dans la surface Mémoire) — Google Cloud Console → APIs & Services → Credentials → API key, restreinte aux API Drive/Picker et au domaine `app.axial-ia.fr`. | Non — sans elle, le bouton « Importer depuis Drive » reste masqué (jamais d'erreur visible). |
 | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Même client OAuth que le `GOOGLE_CLIENT_ID` serveur (Doppler `prd`), côté navigateur — doit être un client OAuth « Web application » dont les origines JavaScript autorisées incluent cette app. | Non — même comportement que ci-dessus. |
+| `NEXT_PUBLIC_GA_ID` | Identifiant de mesure Google Analytics 4 (`G-XXXXXXXX`). Chargé uniquement après acceptation du bandeau de consentement, IP anonymisée, signaux publicitaires coupés. | Non — sans elle, ni bandeau ni script. |
+| `NEXT_PUBLIC_CLARITY_ID` | Identifiant de projet Microsoft Clarity. Chargé après consentement et **seulement** sur la landing, la connexion et l'onboarding (jamais dans l'app : conversations et rapports confidentiels). | Non — même comportement. |
 
 Le bouton « Importer depuis Drive » n'apparaît que si les DEUX variables
 `NEXT_PUBLIC_GOOGLE_*` sont posées **ET** si `GET /integrations/status`

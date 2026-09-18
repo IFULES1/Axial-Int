@@ -15,6 +15,7 @@ import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, 
 import { parserMarkdown } from "./markdown";
 import { creerVeilleVersion, lireVersionServie } from "./version";
 import { chargerGooglePicker, ouvrirPickerDrive } from "./drive";
+import { lireConsentement, enregistrerConsentement, clarityAutoriseSur, identifiants, chargerGA, chargerClarity, evenement } from "./mesure";
 
 
 /* data.js */
@@ -177,6 +178,10 @@ const STRINGS = {
     'common.continue': 'Continuer',
     'common.back': 'Retour',
     'version.nouvelle': 'Une nouvelle version d\u2019Axial est disponible.',
+    'mesure.titre': 'Axial mesure l\u2019audience de ses pages pour am\u00e9liorer le service. Acceptez-vous ?',
+    'mesure.accepter': 'Accepter',
+    'mesure.refuser': 'Refuser',
+    'mesure.details': 'Aucune donn\u00e9e publicitaire, IP anonymis\u00e9e, jamais sur vos conversations ni vos rapports.',
     'version.recharger': 'Recharger',
     'common.cancel': 'Annuler',
     'common.save': 'Enregistrer',
@@ -692,6 +697,10 @@ const STRINGS = {
     'common.continue': 'Continue',
     'common.back': 'Back',
     'version.nouvelle': 'A new version of Axial is available.',
+    'mesure.titre': 'Axial measures page audience to improve the service. Do you accept?',
+    'mesure.accepter': 'Accept',
+    'mesure.refuser': 'Decline',
+    'mesure.details': 'No advertising data, anonymised IP, never on your conversations or reports.',
     'version.recharger': 'Reload',
     'common.cancel': 'Cancel',
     'common.save': 'Save',
@@ -8748,6 +8757,18 @@ function App() {
   // bandeau propose de recharger. Jamais de rechargement automatique : une
   // réponse en cours de flux serait coupée sans prévenir.
   const [nouvelleVersion, setNouvelleVersion] = useState(false);
+  // Mesure d'audience : bandeau tant qu'aucun choix, scripts seulement après
+  // accord et si un identifiant est compilé (NEXT_PUBLIC_GA_ID / _CLARITY_ID).
+  const [consentement, setConsentement] = useState(() => lireConsentement());
+  const ids = identifiants();
+  useEffect(() => {
+    if (consentement !== 'accepte') return;
+    if (ids.ga) chargerGA(ids.ga);
+    if (ids.clarity && clarityAutoriseSur(route)) chargerClarity(ids.clarity);
+  }, [consentement, route]);
+  useEffect(() => {
+    if (consentement === 'accepte' && ids.ga) evenement('page_vue', { route });
+  }, [route, consentement]);
   useEffect(() => creerVeilleVersion({
     locale: process.env.NEXT_PUBLIC_BUILD_ID,
     lire: () => lireVersionServie(),
@@ -9093,6 +9114,7 @@ function App() {
     const controleur = new AbortController();
     controleurRapportRef.current = controleur;
     try {
+      evenement('rapport_lance', { type: analysisType });
       const r = await axLancerRapport(
         { query: prompt, analysis_type: analysisType || 'synthese_executive' },
         // Le PREMIER événement porte déjà `report_id` : le rapport est
@@ -10083,6 +10105,7 @@ function App() {
   // verrouillé pendant le flux, attendre la fin de la réponse laisserait le
   // texte déjà envoyé dans un champ grisé pendant 20-40 s.
   const handleSendInActive = (text) => {
+    evenement('conversation_envoyee', { nouvelle: false });
     if (!activeId) return false;
     if (axBal != null && axBal < CREDITS_PAR_MESSAGE) { setModaleCredits(true); return false; }
     const cid = activeId;
@@ -10110,6 +10133,7 @@ function App() {
   };
 
   const handleSendNew = async (text) => {
+    evenement('conversation_envoyee', { nouvelle: true });
     if (axBal != null && axBal < CREDITS_PAR_MESSAGE) { setModaleCredits(true); return false; }
     setErreurCreation(null);
     const title = text.length > 48 ? text.slice(0, 45) + '…' : text;
@@ -10312,7 +10336,19 @@ function App() {
       </button>
     </div>
   ) : null;
-  const avecBandeau = (ecran) => (bandeauVersion ? <>{bandeauVersion}{ecran}</> : ecran);
+  const bandeauConsentement = (consentement === null && (ids.ga || ids.clarity)) ? (
+    <div className="ax-bandeau-consentement" role="dialog" aria-live="polite">
+      <div>
+        <div>{t('mesure.titre')}</div>
+        <div className="ax-bandeau-consentement-details">{t('mesure.details')}</div>
+      </div>
+      <div className="ax-bandeau-consentement-actions">
+        <button className="btn btn-ghost btn-sm" onClick={() => { enregistrerConsentement('refuse'); setConsentement('refuse'); }}>{t('mesure.refuser')}</button>
+        <button className="btn btn-sm" onClick={() => { enregistrerConsentement('accepte'); setConsentement('accepte'); }}>{t('mesure.accepter')}</button>
+      </div>
+    </div>
+  ) : null;
+  const avecBandeau = (ecran) => ((bandeauVersion || bandeauConsentement) ? <>{bandeauVersion}{bandeauConsentement}{ecran}</> : ecran);
 
   if (route === 'landing') {
     return avecBandeau(<LandingPage
@@ -10331,7 +10367,7 @@ function App() {
       notice={authNotice}
       onBack={() => go('landing')}
       onSubmit={async ({ mode, email, pwd }) => {
-        if (mode === 'signup') { await axRegister(email, pwd); go('onb1'); }
+        if (mode === 'signup') { await axRegister(email, pwd); evenement('inscription'); go('onb1'); }
         else {
           await axLogin(email, pwd);
           // Même règle qu'au rechargement : sans abonnement actif, on passe
@@ -10432,6 +10468,7 @@ function App() {
   return (
     <>
       {bandeauVersion}
+      {bandeauConsentement}
       <AppShell
         user={axUser || { name: '', email: '', initials: '·' }}
         onLogout={deconnecter}
