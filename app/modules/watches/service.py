@@ -18,6 +18,14 @@ _CADENCE_DELTA = {
     "weekly": dt.timedelta(weeks=1),
 }
 
+# Vérification d'un flux : un GET explicite (pas `feedparser.parse(url)`, qui
+# masque le user-agent et le timeout) suivi d'un parse feedparser du contenu
+# reçu — le même parseur que `rss.py` utilise déjà pour lire les entrées.
+HTTP_TIMEOUT_VERIFICATION = 10.0
+HTTP_TIMEOUT_TITRE = 5.0
+USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
@@ -28,6 +36,127 @@ def _next_run(cadence: str, base: dt.datetime | None = None) -> dt.datetime | No
     if delta is None:  # manual → no automatic scheduling
         return None
     return (base or _now()) + delta
+
+
+# --- Vérification des flux --------------------------------------------------
+
+def verifier_flux(url: str, *, timeout: float = HTTP_TIMEOUT_VERIFICATION) -> dict:
+    """Vérifie un flux RSS/Atom en le récupérant réellement (spec §3).
+
+    `{url, ok, statut_http, entrees, dernier, erreur}` — plus `titre`, lu au
+    passage (réutilisé par l'ajout d'une URL libre pour ne pas refaire un
+    second aller-retour réseau). Ne lève jamais : un flux mort renvoie
+    `ok=False` avec `erreur` renseignée, il n'arrête pas l'appelant.
+    """
+    import httpx
+    import feedparser
+
+    resultat: dict = {"url": url, "ok": False, "statut_http": None,
+                      "entrees": 0, "dernier": None, "erreur": None, "titre": None}
+    try:
+        reponse = httpx.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout,
+                            follow_redirects=True)
+        resultat["statut_http"] = reponse.status_code
+        reponse.raise_for_status()
+        parsed = feedparser.parse(reponse.content)
+        entrees = list(getattr(parsed, "entries", []) or [])
+        # `bozo` seul est trop strict (certains flux valides déclenchent un
+        # avertissement mineur du parseur) — on ne le traite en erreur que
+        # s'il n'a en plus réussi à lire AUCUNE entrée.
+        if getattr(parsed, "bozo", False) and not entrees:
+            exc = getattr(parsed, "bozo_exception", None)
+            raise ValueError(str(exc) if exc else "flux XML invalide")
+        resultat["entrees"] = len(entrees)
+        titre_flux = (getattr(parsed, "feed", None) or {}).get("title") if hasattr(parsed, "feed") else None
+        resultat["titre"] = (titre_flux or "").strip() or None
+        from app.modules.watches.rss import _entry_dt
+
+        dates = [d for d in (_entry_dt(e) for e in entrees) if d is not None]
+        resultat["dernier"] = max(dates).isoformat() if dates else None
+        resultat["ok"] = True
+    except Exception as e:  # noqa: BLE001 — un flux mort ne doit jamais lever
+        resultat["erreur"] = str(e) or e.__class__.__name__
+    return resultat
+
+
+def lire_titre_flux(url: str) -> str | None:
+    """Best-effort, court (5 s) : utilisé à l'ajout d'une URL libre pour
+    enregistrer un titre lisible plutôt que l'URL brute."""
+    try:
+        return verifier_flux(url, timeout=HTTP_TIMEOUT_TITRE)["titre"]
+    except Exception:  # noqa: BLE001 — un titre manquant n'empêche pas l'ajout
+        return None
+
+
+def verifier_tous(db: Session) -> list[dict]:
+    """Vérifie TOUS les flux utilisateurs (met à jour `derniere_verification_at`
+    et `derniere_erreur`) puis, sans écriture, tous les flux du catalogue.
+    Utilisé par la route admin `/watches/feeds/verifier`."""
+    from app.modules.watches.catalogue import catalogue
+
+    resultats: list[dict] = []
+    for feed in db.scalars(select(RssFeed)):
+        r = verifier_flux(feed.url)
+        feed.derniere_verification_at = _now()
+        feed.derniere_erreur = None if r["ok"] else (r["erreur"] or "erreur inconnue")
+        resultats.append(r)
+    db.commit()
+
+    deja = {r["url"] for r in resultats}
+    for f in catalogue():
+        if f["url"] in deja:
+            continue
+        resultats.append(verifier_flux(f["url"]))
+    return resultats
+
+
+def _etat_flux(*, verifie_at, erreur) -> str:
+    if verifie_at is None:
+        return "inconnu"
+    return "erreur" if erreur else "ok"
+
+
+def feeds_pour_watch(db: Session, user_id: str, watch: Watch) -> list[dict]:
+    """Flux visibles sur la fiche d'un agent (spec §3) : ceux de l'utilisateur
+    dont la catégorie ∈ `skill.rss_categories`, plus le catalogue de ces
+    catégories — chaque flux catalogue reprend l'état d'un flux utilisateur
+    de même URL s'il existe, sinon `inconnu` (aucune vérification catalogue
+    propre n'est faite ici, `verifier_tous` s'en charge côté admin)."""
+    from app.modules.watches import skills
+    from app.modules.watches.catalogue import catalogue
+
+    skill = skills.get_skill(watch.skill)
+    categories = set(skill.rss_categories)
+
+    mes_flux = list(db.scalars(
+        select(RssFeed).where(RssFeed.user_id == uuid.UUID(user_id))
+        .order_by(RssFeed.created_at.desc())))
+    etat_par_url = {f.url: _etat_flux(verifie_at=f.derniere_verification_at,
+                                      erreur=f.derniere_erreur) for f in mes_flux}
+    verifie_at_par_url = {f.url: f.derniere_verification_at for f in mes_flux}
+
+    items: list[dict] = []
+    vues: set[str] = set()
+    for f in mes_flux:
+        if f.category not in categories:
+            continue
+        items.append({
+            "url": f.url, "title": f.title, "category": f.category,
+            "origine": "moi", "etat": etat_par_url[f.url],
+            "derniere_verification_at": f.derniere_verification_at,
+        })
+        vues.add(f.url)
+
+    for f in catalogue():
+        if f["category"] not in categories or f["url"] in vues:
+            continue
+        items.append({
+            "url": f["url"], "title": f["title"] or None, "category": f["category"],
+            "origine": "catalogue", "etat": etat_par_url.get(f["url"], "inconnu"),
+            "derniere_verification_at": verifie_at_par_url.get(f["url"]),
+        })
+        vues.add(f["url"])
+    return items
 
 
 # --- CRUD ------------------------------------------------------------------

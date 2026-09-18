@@ -11,7 +11,7 @@ import {
   etatDepuisRapport, etatDepuisStockage, etatSupprime, versStockage,
   libelleEtape, libelleRaison,
 } from "./rapports_etat";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axImporterDepuisDrive, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument, axKbLister, axKbAjouterFichier, axKbAjouterUrl, axKbSupprimer } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchFeeds, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axImporterDepuisDrive, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument, axKbLister, axKbAjouterFichier, axKbAjouterUrl, axKbSupprimer } from "./bridge";
 import { parserMarkdown } from "./markdown";
 import { creerVeilleVersion, lireVersionServie } from "./version";
 import { chargerGooglePicker, ouvrirPickerDrive } from "./drive";
@@ -412,6 +412,14 @@ const STRINGS = {
     'agents.session.timeline': 'Chronologie de la session',
     'agents.session.findings': 'Trouvailles',
     'agents.confidence': 'Confiance',
+    'agents.flux.count': 'Sources : {n} flux',
+    'agents.flux.gerer': 'Gérer mes flux',
+    'agents.flux.vide': 'Aucun flux pour cette veille pour le moment.',
+    'agents.flux.etat.ok': 'à jour',
+    'agents.flux.etat.erreur': 'en erreur',
+    'agents.flux.etat.inconnu': 'non vérifié',
+    'agents.flux.origine.moi': 'ajouté par vous',
+    'agents.flux.origine.catalogue': 'catalogue',
 
     // memory
     'memory.title': 'Mémoire — la clé d\'Axial',
@@ -895,6 +903,14 @@ const STRINGS = {
     'agents.session.timeline': 'Session timeline',
     'agents.session.findings': 'Findings',
     'agents.confidence': 'Confidence',
+    'agents.flux.count': 'Sources: {n} feeds',
+    'agents.flux.gerer': 'Manage my feeds',
+    'agents.flux.vide': 'No feed for this agent yet.',
+    'agents.flux.etat.ok': 'up to date',
+    'agents.flux.etat.erreur': 'error',
+    'agents.flux.etat.inconnu': 'not checked',
+    'agents.flux.origine.moi': 'added by you',
+    'agents.flux.origine.catalogue': 'catalogue',
 
     'memory.title': 'Memory — Axial\'s Key',
     'memory.subtitle': 'Here\'s what Axial knows about you. Every fact is revocable.',
@@ -6617,6 +6633,65 @@ function ActivityHistory({ onClose }) {
   );
 }
 
+// Ligne repliable « Sources : N flux » sur la carte d'un agent (spec ciblage
+// v2 §3). Chargée à l'ouverture seulement (pas au montage de la carte) : sur
+// une bibliothèque à plusieurs dizaines d'agents, précharger les flux de
+// chacun multiplierait les appels réseau pour un repli que l'utilisateur
+// n'ouvre pas forcément.
+const FLUX_ETAT_COULEUR = { ok: '#3ecf6a', erreur: '#e5484d', inconnu: 'var(--fg-3)' };
+
+function AgentFeedsLine({ agentId, onGererFlux }) {
+  const t = window.useT();
+  const lang = window.AXIAL_LANG || 'fr';
+  const [open, setOpen] = React.useState(false);
+  const [feeds, setFeeds] = React.useState(null); // null = pas encore chargé
+
+  const toggle = (e) => {
+    e.stopPropagation();
+    const prochain = !open;
+    setOpen(prochain);
+    if (prochain && feeds === null) {
+      axWatchFeeds(agentId).then(setFeeds).catch(() => setFeeds([]));
+    }
+  };
+
+  const n = feeds === null ? null : feeds.length;
+  const libelle = t('agents.flux.count').replace('{n}', n === null ? '…' : String(n));
+
+  return (
+    <div className="agent-card-flux" onClick={(e) => e.stopPropagation()}>
+      <button type="button" className="agent-card-flux-toggle" onClick={toggle}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 0, color: 'var(--fg-2)', fontSize: 12, padding: '6px 0', cursor: 'pointer', width: '100%', textAlign: 'left' }}>
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={12} />
+        {libelle}
+      </button>
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingBottom: 6 }}>
+          {feeds === null && <p style={{ color: 'var(--fg-3)', fontSize: 12 }}>…</p>}
+          {feeds !== null && feeds.length === 0 && (
+            <p style={{ color: 'var(--fg-3)', fontSize: 12 }}>{t('agents.flux.vide')}</p>
+          )}
+          {(feeds || []).map((f) => (
+            <div key={f.url} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 0' }}>
+              <span title={t('agents.flux.etat.' + f.etat)}
+                style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, background: FLUX_ETAT_COULEUR[f.etat] || FLUX_ETAT_COULEUR.inconnu }}></span>
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.url}>
+                {f.title || f.url}
+              </span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase' }}>{f.category}</span>
+              <span style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>{t('agents.flux.origine.' + f.origine)}</span>
+            </div>
+          ))}
+          <button className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-start', marginTop: 4 }}
+            onClick={(e) => { e.stopPropagation(); onGererFlux(); }}>
+            <Icon name="database" size={12} />{t('agents.flux.gerer')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AgentsLibrary({ onCreate, onOpenSession }) {
   const t = window.useT();
   const lang = window.AXIAL_LANG || 'fr';
@@ -6693,6 +6768,7 @@ function AgentsLibrary({ onCreate, onOpenSession }) {
               <span className="item"><Icon name="clock" size={11} />{a.cadence}</span>
               <span className="item"><Icon name="check" size={11} />{lang === 'fr' ? 'Dernier' : 'Last'}: {fmtWhen(a.last_run_at, lang)}</span>
             </div>
+            <AgentFeedsLine agentId={a.id} onGererFlux={() => setShowFeeds(true)} />
           </div>
           );
         })}

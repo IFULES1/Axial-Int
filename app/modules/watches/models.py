@@ -84,3 +84,8 @@ class RssFeed(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_fetched_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # Dernière vérification (script `tester_flux_rss.py` ou route admin
+    # `/watches/feeds/verifier`) : un flux jamais vérifié a les deux à NULL,
+    # ce que la carte d'agent affiche comme état « inconnu ».
+    derniere_verification_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    derniere_erreur: Mapped[str | None] = mapped_column(Text)

@@ -507,6 +507,9 @@ export async function axWatchSkills() { return axFetch("/watches/skills", { auth
 export async function axListWatches() { return axFetch("/watches"); }
 export async function axCreateWatch(body) { return axFetch("/watches", { method: "POST", body }); }
 export async function axWatchRuns(id) { return axFetch(`/watches/${id}/runs`); }
+/** Sources de l'agent (spec ciblage v2 §3) : flux utilisateur + catalogue
+ * filtrés par les catégories du skill, chacun avec son état de vérification. */
+export async function axWatchFeeds(id) { return axFetch(`/watches/${id}/feeds`); }
 export async function axWatchActivity() { return axFetch("/watches/activity"); }
 export async function axRunWatch(id) { return axFetch(`/watches/${id}/run`, { method: "POST", body: {} }); }
 export async function axPauseWatch(id) { return axFetch(`/watches/${id}/pause`, { method: "POST", body: {} }); }

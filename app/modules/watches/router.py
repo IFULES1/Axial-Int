@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.modules.auth.schemas import AuthUser
-from app.modules.auth.security import get_current_user
+from app.modules.auth.security import get_current_admin, get_current_user
 from app.modules.watches import service, skills
 from app.modules.watches.models import RssFeed
 
@@ -85,6 +85,24 @@ class FeedOut(BaseModel):
     active: bool
 
 
+class FeedVerifOut(BaseModel):
+    url: str
+    ok: bool
+    statut_http: int | None
+    entrees: int
+    dernier: str | None
+    erreur: str | None
+
+
+class WatchFeedOut(BaseModel):
+    url: str
+    title: str | None
+    category: str
+    origine: str    # "moi" | "catalogue"
+    etat: str        # "ok" | "erreur" | "inconnu"
+    derniere_verification_at: dt.datetime | None
+
+
 def _out(w) -> WatchOut:
     return WatchOut(id=str(w.id), name=w.name, query=w.query, skill=w.skill,
                     analysis_type=w.analysis_type, cadence=w.cadence, status=w.status,
@@ -121,8 +139,16 @@ def add_feed(payload: FeedIn, user: AuthUser = Depends(get_current_user),
     if existant is not None:
         return FeedOut(id=str(existant.id), url=existant.url, title=existant.title,
                        category=existant.category, active=existant.active)
+    titre = payload.title
+    if not titre:
+        # URL libre sans titre fourni : on lit le <title> du flux, sans
+        # bloquer l'ajout si le réseau traîne ou que le flux est mort.
+        try:
+            titre = service.lire_titre_flux(payload.url)
+        except Exception:  # noqa: BLE001
+            titre = None
     feed = RssFeed(id=uuid.uuid4(), user_id=uuid.UUID(user.id), url=payload.url,
-                   title=payload.title, category=payload.category)
+                   title=titre, category=payload.category)
     db.add(feed)
     db.commit()
     db.refresh(feed)
@@ -163,6 +189,16 @@ def delete_feed(feed_id: str, user: AuthUser = Depends(get_current_user),
     return Response(status_code=204)
 
 
+@router.post("/feeds/verifier", response_model=list[FeedVerifOut])
+def verifier_feeds(user: AuthUser = Depends(get_current_admin),
+                   db: Session = Depends(get_db)) -> list[FeedVerifOut]:
+    """Vérifie tous les flux (utilisateurs + catalogue) — admin uniquement
+    (spec §3), même vérification que `scripts/tester_flux_rss.py`."""
+    return [FeedVerifOut(url=r["url"], ok=r["ok"], statut_http=r["statut_http"],
+                         entrees=r["entrees"], dernier=r["dernier"], erreur=r["erreur"])
+            for r in service.verifier_tous(db)]
+
+
 # --- Watches (agents) ------------------------------------------------------
 
 @router.post("", response_model=WatchOut)
@@ -197,6 +233,15 @@ def runs(watch_id: str, user: AuthUser = Depends(get_current_user),
                     delta_content=r.delta_content, full_content=r.full_content, sources=r.sources)
         for r in service.list_runs(db, user.id, watch_id)
     ]
+
+
+@router.get("/{watch_id}/feeds", response_model=list[WatchFeedOut])
+def watch_feeds(watch_id: str, user: AuthUser = Depends(get_current_user),
+                db: Session = Depends(get_db)) -> list[WatchFeedOut]:
+    """Sources visibles sur la fiche de l'agent (spec §3) : flux utilisateur
+    + catalogue, filtrés par les catégories du skill de l'agent."""
+    watch = service._own_watch(db, user.id, watch_id)
+    return [WatchFeedOut(**item) for item in service.feeds_pour_watch(db, user.id, watch)]
 
 
 @router.post("/{watch_id}/pause", response_model=WatchOut)
