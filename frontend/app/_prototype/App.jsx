@@ -300,6 +300,9 @@ const STRINGS = {
 
     // Bandeau d'un rapport dégradé (spec §3)
     'reports.degrade.titre': 'Rapport incomplet',
+    'reports.levee.retenu': 'Montant retenu :',
+    'reports.levee.demande': '{n} investisseurs sur {d} demandés',
+    'reports.levee.ambigu': 'Montant écrit « {texte} », lecture à vérifier.',
     'reports.degrade.titre_partiel': 'Couverture partielle',
     'reports.degrade.defaut': 'Ce rapport n\'a pas été produit dans des conditions normales. Lisez-le avec prudence.',
     'reports.degrade.truncated_generation': 'La rédaction a atteint la limite de sortie du modèle avant sa conclusion : le rapport s\'arrête en cours de route. Aucun crédit n\'a été débité — relancez la génération.',
@@ -805,6 +808,9 @@ const STRINGS = {
     'reports.sources_insuf.forcer_aide': 'The report will be produced and charged, flagged “partial coverage”.',
 
     'reports.degrade.titre': 'Incomplete report',
+    'reports.levee.retenu': 'Amount considered:',
+    'reports.levee.demande': '{n} investors out of {d} requested',
+    'reports.levee.ambigu': 'Amount written “{texte}”, reading to be checked.',
     'reports.degrade.titre_partiel': 'Partial coverage',
     'reports.degrade.defaut': 'This report was not produced under normal conditions. Read it with care.',
     'reports.degrade.truncated_generation': 'Writing hit the model output limit before its conclusion: the report stops mid-way. No credits were charged — run it again.',
@@ -5615,6 +5621,27 @@ function ReportsSourcesInsuffisantes({ etat, onReformuler, onElargir, onForcer,
 /* `statut = degrade` et `detail.raison` étaient renvoyés par le backend et lus
    par personne : un rapport tronqué s'affichait exactement comme un rapport
    complet. La raison est désormais en clair, en tête du document. */
+/* Paramètres de la levée lus dans la question (ciblage investisseurs v2) :
+   le fondateur voit ce que le rapport a retenu — le 16/09, « 300 000k€ »
+   avait été lu 3 M€ sans que personne ne le voie. */
+function BandeauLevee({ detail }) {
+  const t = window.useT();
+  const levee = detail && detail.levee;
+  const stade = detail && detail.stade_retenu;
+  if (!levee || typeof levee.montant_eur !== 'number') return null;
+  const montant = new Intl.NumberFormat('fr-FR').format(levee.montant_eur) + ' €';
+  const libelleStade = stade ? ` · ${stade}` : '';
+  const n = detail.demande && detail.demande.n;
+  const dispo = detail.demande && detail.demande.disponibles;
+  const compte = (n && dispo != null) ? ` · ${t('reports.levee.demande').replace('{n}', String(Math.min(n, dispo))).replace('{d}', String(n))}` : '';
+  return (
+    <div className="ax-bandeau-profil" role="status" style={{ maxWidth: 820 }}>
+      <span>{t('reports.levee.retenu')} {montant}{libelleStade}{compte}</span>
+      {levee.ambigu && <span style={{ color: 'var(--v-bright)' }}>{t('reports.levee.ambigu').replace('{texte}', levee.texte || '')}</span>}
+    </div>
+  );
+}
+
 function BandeauDegrade({ etat }) {
   const t = window.useT();
   const texte = libelleRaison(etat, t);
@@ -6307,6 +6334,7 @@ function ReportsEditor({ data, onBack, estAdmin, onModifierRelancer, onRegenerer
       )}
 
       <BandeauDegrade etat={etatDepuisRapport(data)} />
+      <BandeauLevee detail={data && data.detail} />
 
       <div className="rep-doc" style={{ fontSize: 14, maxWidth: 820 }}>
         {content
@@ -6649,7 +6677,9 @@ function AgentFeedsLine({ agentId, onGererFlux }) {
     e.stopPropagation();
     const prochain = !open;
     setOpen(prochain);
-    if (prochain && feeds === null) {
+    // Rechargé à CHAQUE ouverture : la vérification en arrière-plan déclenchée
+    // par la première lecture met les états à jour une seconde plus tard.
+    if (prochain) {
       axWatchFeeds(agentId).then(setFeeds).catch(() => setFeeds([]));
     }
   };

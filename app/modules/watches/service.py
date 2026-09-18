@@ -321,10 +321,14 @@ def feeds_pour_watch(db: Session, user_id: str, watch: Watch) -> list[dict]:
 
     items: list[dict] = []
     vues: set[str] = set()
+    # Les flux du catalogue sont attachés au compte à la création de l'agent :
+    # ils restent « catalogue » à l'écran, « ajouté par vous » ne vaut que pour
+    # une URL libre.
+    urls_catalogue = {c["url"] for c in catalogue()}
     for f in mes_flux:
         items.append({
             "url": f.url, "title": f.title, "category": f.category,
-            "origine": "moi", "etat": etat_par_url[f.url],
+            "origine": "catalogue" if f.url in urls_catalogue else "moi", "etat": etat_par_url[f.url],
             "derniere_verification_at": f.derniere_verification_at,
         })
         vues.add(f.url)

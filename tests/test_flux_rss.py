@@ -408,7 +408,9 @@ def test_feeds_pour_watch_etat_catalogue_reprend_celui_du_flux_utilisateur(monke
         # un seul item pour cette URL, celui de l'utilisateur (origine "moi")
         assert len([i for i in items if i["url"] == "http://cat.fr/tech"]) == 1
         item = items[0]
-        assert item["origine"] == "moi"
+        # URL présente dans le catalogue → étiquette « catalogue » même si la
+        # ligne appartient à l'utilisateur (attachée à la création de l'agent).
+        assert item["origine"] == "catalogue"
         assert item["etat"] == "erreur"
 
 

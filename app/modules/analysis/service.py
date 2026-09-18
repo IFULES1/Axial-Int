@@ -893,6 +893,7 @@ def run_analysis(*, query: str, analysis_type: str, user_id: str,
             "raison": raison_couverture,
             "levee": (mapping or {}).get("levee"),
             "demande": (mapping or {}).get("demande"),
+            "stade_retenu": (mapping or {}).get("stade_retenu"),
             "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         },
     )
