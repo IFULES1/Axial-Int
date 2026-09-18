@@ -1,9 +1,11 @@
 """Task 2 — flux RSS visibles et testés (spec ciblage-investisseurs-v2 §3).
 
 Couvre : vérification d'un flux (bouchonnée : ok / 404 / XML invalide /
-timeout), transmission du timeout/User-Agent aux faux `httpx.get`/`httpx.
-Client`, parallélisme + borne de `verifier_tous` (revue tour 1, Q1), la route
-admin `/watches/feeds/verifier` (403 pour un non-admin, `reste`),
+timeout), transmission du timeout/User-Agent/max_redirects au faux
+`httpx.Client` (tout le trafic de `_get_flux` passe par lui — revue tour 2),
+parallélisme + borne de `verifier_tous` ET son rendu-la-main réel même si un
+flux reste bloqué (revue tour 1 Q1, tour 2), la route admin
+`/watches/feeds/verifier` (403 pour un non-admin, `reste`),
 `GET /watches/{id}/feeds` (filtre par catégories + actif, fusion du
 catalogue, déclenchement best-effort de la vérification d'arrière-plan —
 Q3/Q6), et le titre lu à l'ajout d'une URL libre.
@@ -90,39 +92,45 @@ class _FauxReponse:
             raise self._raise_status
 
 
-class _FauxClient:
-    """Bouchon de `httpx.Client(...)` utilisé par `lire_titre_flux` (Q2,
-    `max_redirects`) — capture les kwargs du constructeur ET de `.get()`
-    dans les dictionnaires passés au constructeur de la classe (via
-    `fabrique_client`) pour que les tests puissent les inspecter."""
+def _patch_client(monkeypatch, responder):
+    """Bouchonne `httpx.Client(...)` — le SEUL transport que `_get_flux`
+    utilise (revue tour 2 : `httpx.get` n'est plus appelé nulle part dans
+    `service.py`, `_get_flux` route systématiquement par un `Client` pour
+    pouvoir borner `max_redirects`). `responder(url, **kw)` doit renvoyer
+    une réponse ou lever. Renvoie un dict `{"client": kw, "get": kw}` rempli
+    par le dernier appel — suffisant, aucun test n'a besoin d'en inspecter
+    plusieurs."""
+    captures = {"client": None, "get": None}
 
-    kwargs_constructeur: dict = {}
-    kwargs_get: dict = {}
-    reponse = None
+    class _Client:
+        def __init__(self, **kw):
+            captures["client"] = kw
 
-    def __init__(self, **kw):
-        type(self).kwargs_constructeur = kw
+        def __enter__(self):
+            return self
 
-    def __enter__(self):
-        return self
+        def __exit__(self, *a):
+            return False
 
-    def __exit__(self, *a):
-        return False
+        def get(self, url, **kw):
+            captures["get"] = kw
+            return responder(url, **kw)
 
-    def get(self, url, **kw):
-        type(self).kwargs_get = kw
-        return type(self).reponse
-
-
-def _client_repondant(monkeypatch, reponse):
-    _FauxClient.kwargs_constructeur = {}
-    _FauxClient.kwargs_get = {}
-    _FauxClient.reponse = reponse
-    monkeypatch.setattr(httpx, "Client", _FauxClient)
-    return _FauxClient
+    monkeypatch.setattr(httpx, "Client", _Client)
+    return captures
 
 
-class _ClientBoom:
+def _patch_client_reponse(monkeypatch, reponse):
+    return _patch_client(monkeypatch, lambda url, **kw: reponse)
+
+
+def _patch_client_boom(monkeypatch, exc):
+    def _lever(url, **kw):
+        raise exc
+    return _patch_client(monkeypatch, _lever)
+
+
+class _ClientBoomConstruction:
     def __init__(self, **kw):
         raise AssertionError("httpx.Client ne doit pas être construit ici")
 
@@ -130,8 +138,7 @@ class _ClientBoom:
 # --- verifier_flux : bouchonnée ok / 404 / XML invalide / timeout -----------
 
 def test_verifier_flux_ok(monkeypatch):
-    monkeypatch.setattr(httpx, "get",
-                        lambda url, **kw: _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+    _patch_client_reponse(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
     r = service.verifier_flux("http://ex.fr/feed")
     assert r["ok"] is True
     assert r["statut_http"] == 200
@@ -143,10 +150,9 @@ def test_verifier_flux_ok(monkeypatch):
 
 def test_verifier_flux_404(monkeypatch):
     def _get(url, **kw):
-        resp = _FauxReponse(404, b"", raise_status=httpx.HTTPStatusError(
+        return _FauxReponse(404, b"", raise_status=httpx.HTTPStatusError(
             "404", request=httpx.Request("GET", url), response=httpx.Response(404)))
-        return resp
-    monkeypatch.setattr(httpx, "get", _get)
+    _patch_client(monkeypatch, _get)
     r = service.verifier_flux("http://ex.fr/mort")
     assert r["ok"] is False
     assert r["statut_http"] == 404
@@ -154,8 +160,7 @@ def test_verifier_flux_404(monkeypatch):
 
 
 def test_verifier_flux_xml_invalide(monkeypatch):
-    monkeypatch.setattr(httpx, "get",
-                        lambda url, **kw: _FauxReponse(200, b"<not><valid"))
+    _patch_client_reponse(monkeypatch, _FauxReponse(200, b"<not><valid"))
     r = service.verifier_flux("http://ex.fr/invalide")
     assert r["ok"] is False
     assert r["entrees"] == 0
@@ -163,27 +168,21 @@ def test_verifier_flux_xml_invalide(monkeypatch):
 
 
 def test_verifier_flux_timeout(monkeypatch):
-    def _boom(url, **kw):
-        raise httpx.TimeoutException("timeout")
-    monkeypatch.setattr(httpx, "get", _boom)
+    _patch_client_boom(monkeypatch, httpx.TimeoutException("timeout"))
     r = service.verifier_flux("http://ex.fr/lent")
     assert r["ok"] is False
     assert "timeout" in r["erreur"].lower()
 
 
-# --- Q2 : timeout et User-Agent réellement transmis --------------------------
+# --- Q2 : timeout, User-Agent et max_redirects réellement transmis ----------
 
-def test_verifier_flux_transmet_timeout_et_user_agent(monkeypatch):
-    capture = {}
-
-    def _get(url, **kw):
-        capture.update(kw)
-        return _FauxReponse(200, _FLUX_VALIDE.encode("utf-8"))
-    monkeypatch.setattr(httpx, "get", _get)
+def test_verifier_flux_transmet_timeout_user_agent_et_max_redirects(monkeypatch):
+    captures = _patch_client_reponse(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
     service.verifier_flux("http://ex.fr/feed")
-    assert capture["timeout"] == service.HTTP_TIMEOUT_VERIFICATION
-    assert capture["headers"]["User-Agent"] == service.USER_AGENT
-    assert capture["follow_redirects"] is True
+    assert captures["client"]["timeout"] == service.HTTP_TIMEOUT_VERIFICATION
+    assert captures["client"]["max_redirects"] == service.MAX_REDIRECTS_VERIFICATION
+    assert captures["client"]["follow_redirects"] is True
+    assert captures["get"]["headers"]["User-Agent"] == service.USER_AGENT
 
 
 def test_http_timeout_titre_borne_la_connexion_a_2s():
@@ -195,23 +194,27 @@ def test_http_timeout_titre_borne_la_connexion_a_2s():
     assert service.MAX_REDIRECTS_TITRE == 3
 
 
+def test_max_redirects_verification_est_borne_a_5():
+    # Tour 2 : le chemin de vérification standard (pas seulement la lecture
+    # de titre) borne aussi ses redirections — un flux qui boucle ne tourne
+    # plus indéfiniment (limite par défaut d'httpx : 20).
+    assert service.MAX_REDIRECTS_VERIFICATION == 5
+
+
 def test_lire_titre_flux_transmet_timeout_borne_redirections_et_user_agent(monkeypatch):
-    client_cls = _client_repondant(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+    captures = _patch_client_reponse(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
     assert service.lire_titre_flux("http://ex.fr/feed") == "Flux Test"
-    assert client_cls.kwargs_constructeur["timeout"] == service.HTTP_TIMEOUT_TITRE
-    assert client_cls.kwargs_constructeur["max_redirects"] == service.MAX_REDIRECTS_TITRE
-    assert client_cls.kwargs_constructeur["follow_redirects"] is True
-    assert client_cls.kwargs_get["headers"]["User-Agent"] == service.USER_AGENT
+    assert captures["client"]["timeout"] == service.HTTP_TIMEOUT_TITRE
+    assert captures["client"]["max_redirects"] == service.MAX_REDIRECTS_TITRE
+    assert captures["client"]["follow_redirects"] is True
+    assert captures["get"]["headers"]["User-Agent"] == service.USER_AGENT
 
 
 def test_lire_titre_flux_best_effort(monkeypatch):
-    _client_repondant(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+    _patch_client_reponse(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
     assert service.lire_titre_flux("http://ex.fr/feed") == "Flux Test"
 
-    class _ClientBoomReseau:
-        def __init__(self, **kw):
-            raise RuntimeError("réseau down")
-    monkeypatch.setattr(httpx, "Client", _ClientBoomReseau)
+    _patch_client_boom(monkeypatch, RuntimeError("réseau down"))
     assert service.lire_titre_flux("http://ex.fr/feed") is None
 
 
@@ -228,7 +231,7 @@ def test_verifier_tous_met_a_jour_les_flux_utilisateurs(monkeypatch):
             if url == "http://ex.fr/ok":
                 return _FauxReponse(200, _FLUX_VALIDE.encode("utf-8"))
             raise httpx.TimeoutException("timeout")
-        monkeypatch.setattr(httpx, "get", _get)
+        _patch_client(monkeypatch, _get)
         monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
 
         sortie = service.verifier_tous(db)
@@ -247,8 +250,7 @@ def test_verifier_tous_met_a_jour_les_flux_utilisateurs(monkeypatch):
 def test_verifier_tous_inclut_le_catalogue_sans_ecrire(monkeypatch):
     engine = _engine()
     with Session(engine) as db:
-        monkeypatch.setattr(httpx, "get",
-                            lambda url, **kw: _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+        _patch_client_reponse(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
         monkeypatch.setattr("app.modules.watches.catalogue.catalogue",
                             lambda: [{"url": "http://cat.fr/feed", "category": "tech",
                                      "title": "Cat", "category_label": "Technologie"}])
@@ -272,7 +274,7 @@ def test_verifier_tous_est_parallele_et_reste_rapide(monkeypatch):
         def _get(url, **kw):
             time.sleep(0.3)
             return _FauxReponse(200, _FLUX_VALIDE.encode("utf-8"))
-        monkeypatch.setattr(httpx, "get", _get)
+        _patch_client(monkeypatch, _get)
         monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
 
         debut = time.monotonic()
@@ -289,8 +291,7 @@ def test_verifier_tous_respecte_limit_et_rapporte_reste(monkeypatch):
     with Session(engine) as db:
         for i in range(5):
             _feed(db, uid, url=f"http://ex.fr/{i}", category="tech")
-        monkeypatch.setattr(httpx, "get",
-                            lambda url, **kw: _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+        _patch_client_reponse(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
         monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
 
         sortie = service.verifier_tous(db, limit=3)
@@ -300,6 +301,56 @@ def test_verifier_tous_respecte_limit_et_rapporte_reste(monkeypatch):
         traites = {f.url for f in db.scalars(select(RssFeed))
                   if f.derniere_verification_at is not None}
         assert len(traites) == 3
+
+
+# --- Tour 2 : rendre la main sans attendre un flux bloqué -------------------
+
+def test_verifier_tous_rend_la_main_sans_attendre_un_flux_bloque(monkeypatch):
+    """Avant correction, `with ThreadPoolExecutor(...)` attendait la fin de
+    TOUS les threads à la sortie du bloc (`shutdown(wait=True)` implicite),
+    annulant le bornage de `future.result(timeout=...)` : un flux qui ne
+    répond jamais bloquait quand même la fonction ~3 s. Avec
+    `executor.shutdown(wait=False)`, `verifier_tous` rend la main dès que le
+    `.result(timeout=0.2)` a tranché, sans attendre le thread abandonné."""
+    engine = _engine()
+    uid = uuid.uuid4()
+    with Session(engine) as db:
+        _feed(db, uid, url="http://ex.fr/bloque", category="tech")
+
+        def _get(url, **kw):
+            time.sleep(3)
+            return _FauxReponse(200, _FLUX_VALIDE.encode("utf-8"))
+        _patch_client(monkeypatch, _get)
+        monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
+
+        debut = time.monotonic()
+        sortie = service.verifier_tous(db, timeout_future=0.2)
+        duree = time.monotonic() - debut
+
+        assert duree < 1.0, f"verifier_tous a mis {duree:.2f}s à rendre la main (attendu < 1 s)"
+        assert sortie["resultats"][0]["ok"] is False
+        assert "délai" in sortie["resultats"][0]["erreur"].lower()
+
+
+def test_verifier_tous_pour_rend_aussi_la_main_sans_attendre(monkeypatch):
+    """Même correction sur `verifier_tous_pour` (Q6, utilisée par la
+    vérification d'arrière-plan) — même bouchon, même borne basse."""
+    engine = _engine()
+    uid = uuid.uuid4()
+    with Session(engine) as db:
+        flux = _feed(db, uid, url="http://ex.fr/bloque", category="tech")
+
+        def _get(url, **kw):
+            time.sleep(3)
+            return _FauxReponse(200, _FLUX_VALIDE.encode("utf-8"))
+        _patch_client(monkeypatch, _get)
+
+        debut = time.monotonic()
+        resultats = service.verifier_tous_pour(db, [flux], timeout_future=0.2)
+        duree = time.monotonic() - debut
+
+        assert duree < 1.0, f"verifier_tous_pour a mis {duree:.2f}s à rendre la main (attendu < 1 s)"
+        assert resultats[0]["ok"] is False
 
 
 # --- feeds_pour_watch : filtre par catégories, actif, fusion catalogue ------
@@ -485,8 +536,7 @@ def test_verification_arriere_plan_ecrit_bien_l_etat_du_flux(monkeypatch):
         _feed(db, uid, url="http://moi.fr/jamais-verifie", category="tech")
         monkeypatch.setattr(service, "_lancer_fil_verification", _fil_synchrone)
         monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
-        monkeypatch.setattr(httpx, "get",
-                            lambda url, **kw: _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+        _patch_client_reponse(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
         fausse_session_locale = sessionmaker(bind=engine, autoflush=False, autocommit=False,
                                              future=True)
         monkeypatch.setattr("app.db.SessionLocal", fausse_session_locale)
@@ -545,8 +595,7 @@ def test_route_verifier_feeds_admin_ok(monkeypatch):
     try:
         with Session(engine) as db:
             _feed(db, uuid.UUID(uid), url="http://ex.fr/a", category="tech")
-        monkeypatch.setattr(httpx, "get",
-                            lambda url, **kw: _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+        _patch_client_reponse(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
         monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
         r = client.post("/watches/feeds/verifier")
         assert r.status_code == 200, r.text
@@ -568,8 +617,7 @@ def test_route_verifier_feeds_borne_le_lot_et_rapporte_reste(monkeypatch):
             for i in range(5):
                 _feed(db, uuid.UUID(uid), url=f"http://ex.fr/{i}", category="tech")
         monkeypatch.setattr(service, "VERIF_LIMITE_PAR_APPEL", 3)
-        monkeypatch.setattr(httpx, "get",
-                            lambda url, **kw: _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+        _patch_client_reponse(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
         monkeypatch.setattr("app.modules.watches.catalogue.catalogue", lambda: [])
         r = client.post("/watches/feeds/verifier")
         assert r.status_code == 200, r.text
@@ -634,7 +682,7 @@ def test_ajout_flux_url_libre_lit_le_titre(monkeypatch):
     engine = _engine()
     app_, client, uid = _http(engine, is_admin=False)
     try:
-        _client_repondant(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
+        _patch_client_reponse(monkeypatch, _FauxReponse(200, _FLUX_VALIDE.encode("utf-8")))
         r = client.post("/watches/feeds", json={"url": "http://ex.fr/libre", "category": "tech"})
         assert r.status_code == 200, r.text
         assert r.json()["title"] == "Flux Test"
@@ -646,11 +694,7 @@ def test_ajout_flux_url_libre_avec_titre_fourni_ne_verifie_pas(monkeypatch):
     engine = _engine()
     app_, client, uid = _http(engine, is_admin=False)
     try:
-        monkeypatch.setattr(httpx, "Client", _ClientBoom)
-
-        def _boom(url, **kw):
-            raise AssertionError("httpx.get ne doit pas être appelé quand un titre est fourni")
-        monkeypatch.setattr(httpx, "get", _boom)
+        monkeypatch.setattr(httpx, "Client", _ClientBoomConstruction)
         r = client.post("/watches/feeds",
                         json={"url": "http://ex.fr/avec-titre", "category": "tech",
                               "title": "Titre fourni"})

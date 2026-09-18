@@ -32,6 +32,12 @@ HTTP_TIMEOUT_VERIFICATION = 10.0
 # connexion à 2 s ; `max_redirects=3` borne le nombre de sauts suivis.
 HTTP_TIMEOUT_TITRE = httpx.Timeout(5.0, connect=2.0)
 MAX_REDIRECTS_TITRE = 3
+# Revue tour 2 : `httpx.get(..., follow_redirects=True)` (fonction de module)
+# ne sait pas borner le nombre de sauts suivis — un flux pathologique qui
+# redirige en boucle tournait jusqu'à la limite interne d'httpx (20). Borné
+# à 5 sur le chemin de vérification standard aussi (`_get_flux` passe
+# systématiquement par un `httpx.Client`, qui le permet).
+MAX_REDIRECTS_VERIFICATION = 5
 USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
              "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
 
@@ -64,25 +70,21 @@ def _next_run(cadence: str, base: dt.datetime | None = None) -> dt.datetime | No
 
 # --- Vérification des flux --------------------------------------------------
 
-def _get_flux(url: str, *, timeout, max_redirects: int | None = None) -> httpx.Response:
+def _get_flux(url: str, *, timeout, max_redirects: int) -> httpx.Response:
     """Le GET qu'utilisent `verifier_flux` et `lire_titre_flux`.
 
-    `httpx.get(...)` (fonction de module, celle que les tests bouchonnent) ne
-    sait pas borner le nombre de redirections suivies. Quand `max_redirects`
-    est demandé (lecture de titre à l'ajout, Q2), on ouvre un `httpx.Client`
-    de courte durée qui le peut ; sinon on reste sur `httpx.get` — chemin le
-    plus emprunté (vérification, `verifier_tous`), inchangé.
+    Toujours via un `httpx.Client` de courte durée : `httpx.get(...)`
+    (fonction de module) ne sait pas borner le nombre de redirections
+    suivies, et un flux pathologique qui redirige en boucle tournerait
+    jusqu'à la limite par défaut d'httpx (20) plutôt que celle demandée ici.
     """
-    if max_redirects is None:
-        return httpx.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout,
-                         follow_redirects=True)
     with httpx.Client(timeout=timeout, follow_redirects=True,
                       max_redirects=max_redirects) as client:
         return client.get(url, headers={"User-Agent": USER_AGENT})
 
 
 def verifier_flux(url: str, *, timeout=HTTP_TIMEOUT_VERIFICATION,
-                  max_redirects: int | None = None) -> dict:
+                  max_redirects: int = MAX_REDIRECTS_VERIFICATION) -> dict:
     """Vérifie un flux RSS/Atom en le récupérant réellement (spec §3).
 
     `{url, ok, statut_http, entrees, dernier, erreur}` — plus `titre`, lu au
@@ -164,7 +166,16 @@ def verifier_tous(db: Session, *, limit: int | None = None,
     reste = max(0, total - len(lot))
 
     resultats: list[dict] = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    # Revue tour 2 : `with ThreadPoolExecutor(...)` attend TOUS les threads à
+    # la sortie du bloc (`shutdown(wait=True)` implicite), ce qui annule le
+    # bornage de `future.result(timeout=...)` — un flux qui ne répond jamais
+    # bloquait quand même la fonction jusqu'à ce qu'il abandonne de
+    # lui-même. Executor créé sans `with` ; `shutdown(wait=False)` dans le
+    # `finally` rend la main dès que le dernier `.result(timeout=...)` a
+    # tranché, sans attendre les threads encore en vol (abandonnés à
+    # l'interpréteur, comme n'importe quelle requête réseau qui traîne).
+    executor = ThreadPoolExecutor(max_workers=max_workers)
+    try:
         soumis = [(url, feed, executor.submit(verifier_flux, url)) for url, feed in lot]
         for url, feed, future in soumis:
             try:
@@ -180,6 +191,8 @@ def verifier_tous(db: Session, *, limit: int | None = None,
                 feed.derniere_verification_at = _now()
                 feed.derniere_erreur = None if r["ok"] else (r["erreur"] or "erreur inconnue")
                 db.commit()  # par flux (Q1), pas un seul commit final
+    finally:
+        executor.shutdown(wait=False)
 
     return {"resultats": resultats, "reste": reste}
 
@@ -253,7 +266,11 @@ def verifier_tous_pour(db: Session, flux: list[RssFeed], *,
     d'UN utilisateur) et `verifier_tous` (TOUS les flux) partagent le même
     code d'exécution."""
     resultats: list[dict] = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    # Revue tour 2 : même correction que `verifier_tous` — pas de `with`
+    # (qui attendrait tous les threads à la sortie), `shutdown(wait=False)`
+    # en sortie pour rendre la main dès le dernier `.result(timeout=...)`.
+    executor = ThreadPoolExecutor(max_workers=max_workers)
+    try:
         soumis = [(f, executor.submit(verifier_flux, f.url)) for f in flux]
         for feed, future in soumis:
             try:
@@ -266,6 +283,8 @@ def verifier_tous_pour(db: Session, flux: list[RssFeed], *,
             feed.derniere_erreur = None if r.get("ok") else (r.get("erreur") or "erreur inconnue")
             db.commit()
             resultats.append(r)
+    finally:
+        executor.shutdown(wait=False)
     return resultats
 
 
