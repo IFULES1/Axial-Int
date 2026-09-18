@@ -1,7 +1,7 @@
 """Envoi de l'email de migration aux utilisateurs de l'ancienne plateforme.
 
 Sécurité par construction :
-  * mode simulation par DÉFAUT — il faut `--envoyer` pour qu'un message parte ;
+  * mode simulation par DÉFAUT, il faut `--envoyer` pour qu'un message parte ;
   * envoi par lots avec pause, pour repérer un problème avant d'avoir tout expédié ;
   * journal des envois sur disque : relancer le script ne renvoie jamais deux fois
     au même destinataire.
@@ -27,7 +27,7 @@ from app.db import SessionLocal
 from app.modules.reports.legacy import LegacyReport
 
 EXPEDITEUR = '"Miradie @Axial" <miradie.buranturu@axial-ia.fr>'
-OBJET = "Axial fait peau neuve — tes rapports t'attendent"
+OBJET = "Axial fait peau neuve : tes rapports t'attendent"
 JOURNAL = pathlib.Path("/opt/axial-intelligence/var/emails_migration_envoyes.json")
 
 CORPS = """Salut {prenom},
@@ -36,29 +36,29 @@ CORPS = """Salut {prenom},
 
 {bloc_rapports}
 
-Et 50 crédits te sont offerts pour reprendre en main — de quoi produire un ou deux rapports complets, ou tenir une vingtaine d'échanges avec les agents.
+Et 50 crédits te sont offerts pour reprendre en main, de quoi produire un ou deux rapports complets, ou tenir une vingtaine d'échanges avec les agents.
 
 CE QUI A CHANGÉ
 
-Axial se souvient de toi. Tu renseignes ton entreprise une fois — activité, positionnement, stade, marché — et chaque analyse part de ce contexte. Fini le fait de réexpliquer qui tu es à chaque question.
+Axial se souvient de toi. Tu renseignes ton entreprise une fois, activité, positionnement, stade, marché, et chaque analyse part de ce contexte. Fini le fait de réexpliquer qui tu es à chaque question.
 
 Les réponses s'écrivent sous tes yeux. Plus d'attente devant un écran figé : le texte apparaît au fil de sa rédaction, et les sources s'affichent avant même la première phrase.
 
 Chaque affirmation est traçable. Les citations dans le texte sont cliquables : un clic ouvre la source, son extrait et son lien d'origine. Tu peux vérifier, pas seulement lire.
 
-Les rapports sont nettement plus profonds. Une synthèse exécutive mobilise désormais jusqu'à 40 sources, avec une structure de vrai rapport d'analyse — et un export PDF propre.
+Les rapports sont nettement plus profonds. Une synthèse exécutive mobilise désormais jusqu'à 40 sources, avec une structure de vrai rapport d'analyse, et un export PDF propre.
 
 Tes documents nourrissent les réponses. Glisse un pitch deck, une étude ou un business plan dans la conversation : il alimente directement la réponse qui suit, et reste disponible pour les analyses suivantes.
 
-Des agents travaillent en continu. Configure une veille — concurrents, réglementation, technologies — choisis sa fréquence, et reçois les trouvailles par email sans y penser.
+Des agents travaillent en continu. Configure une veille, concurrents, réglementation, technologies, choisis sa fréquence, et reçois les trouvailles par email sans y penser.
 
-Nouveau : la cartographie des investisseurs. À partir de ton secteur et de ton stade, Axial identifie les fonds et réseaux de business angels réellement pertinents, à partir d'une base propriétaire de plus de 1 600 investisseurs français — puis construit ton ordre d'approche, l'angle de discours par interlocuteur et les objections à préparer. C'est le genre d'analyse qu'aucun outil généraliste ne peut produire.
+Nouveau : la cartographie des investisseurs. À partir de ton secteur et de ton stade, Axial identifie les fonds et réseaux de business angels réellement pertinents, à partir d'une base propriétaire de plus de 1 600 investisseurs français, puis construit ton ordre d'approche, l'angle de discours par interlocuteur et les objections à préparer. C'est le genre d'analyse qu'aucun outil généraliste ne peut produire.
 
 POUR REPRENDRE
 
-app.axial-ia.fr — crée ton compte avec cette adresse email, tes rapports et tes crédits t'y attendent.
+app.axial-ia.fr, crée ton compte avec cette adresse email, tes rapports et tes crédits t'y attendent.
 
-L'inscription prend deux minutes : tu décris ton entreprise, puis tu actives ton essai avec ta carte — 0 € débité aujourd'hui, 14 jours d'essai. Ensuite l'abonnement Pro est à 50 €/mois (120 crédits mensuels), et tu peux l'arrêter en un clic depuis ton espace avant la fin de l'essai.
+L'inscription prend deux minutes : tu décris ton entreprise, puis tu actives ton essai avec ta carte, 0 € débité aujourd'hui, 14 jours d'essai. Ensuite l'abonnement Pro est à 50 €/mois (120 crédits mensuels), et tu peux l'arrêter en un clic depuis ton espace avant la fin de l'essai.
 
 Si quelque chose coince ou ne te convient pas, réponds simplement à cet email : je lis tout.
 
@@ -158,7 +158,7 @@ def jeton_pour(email: str) -> str:
 def en_html(texte: str, jeton: str = "") -> str:
     """Version HTML volontairement dépouillée : mêmes mots, mêmes paragraphes.
 
-    Un pixel de suivi ne peut vivre que dans une partie HTML — mais une mise en
+    Un pixel de suivi ne peut vivre que dans une partie HTML, mais une mise en
     page riche (images, boutons, colonnes) ferait basculer le message en onglet
     « Promotions ». On reste donc sur du texte enrichi.
     """

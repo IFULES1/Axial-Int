@@ -6,7 +6,7 @@
 
 Même mécanique que la relance d'août : journal `email_sends`, liste de
 suppression, désinscription en un clic, pixel d'ouverture. Ce qui change :
-la campagne, le message, et une liste d'exclusions nominatives — les contacts
+la campagne, le message, et une liste d'exclusions nominatives, les contacts
 avec qui Miradie échange déjà directement ne reçoivent pas un message
 automatique par-dessus la conversation.
 """
@@ -44,7 +44,7 @@ Depuis mon dernier message, Axial a pas mal bougé, et une chose en particulier 
 
 Concrètement, à l'inscription :
 
-40 crédits offerts, et une étude de marché ou une cartographie concurrentielle complète offerte en plus — jusqu'à 40 sources citées, 8 000 à 10 000 mots, exportable en PDF.
+40 crédits offerts, et une étude de marché ou une cartographie concurrentielle complète offerte en plus, jusqu'à 40 sources citées, 8 000 à 10 000 mots, exportable en PDF.
 
 Aucune carte demandée pendant l'essai. Tu testes sur ton vrai sujet, tu décides ensuite.
 

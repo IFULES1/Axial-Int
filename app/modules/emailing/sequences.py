@@ -9,7 +9,7 @@ Deux garde-fous structurent tout le fichier :
 * **Fenêtres bornées des DEUX côtés.** Une séquence « J+2 » ne dit pas « compte
   de plus de 2 jours » mais « compte créé il y a entre 2 et 3 jours ». Une
   fenêtre ouverte aurait, au premier déploiement, arrosé d'un coup tous les
-  comptes existants — y compris ceux que Miradie relance à la main.
+  comptes existants, y compris ceux que Miradie relance à la main.
 * **Idempotence par (email, campagne).** Le journal `email_sends` fait foi :
   une personne ne reçoit jamais deux fois la même étape, quel que soit le
   nombre de passages du worker.
@@ -59,7 +59,7 @@ def _prenom(ctx: dict) -> str:
 
 def _jour(d: dt.datetime | None, langue: str) -> str:
     if not d:
-        return "—"
+        return ""
     mois_fr = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet",
                "août", "septembre", "octobre", "novembre", "décembre"]
     if _fr(langue):
@@ -86,7 +86,7 @@ def _prix(plan_key: str | None) -> str:
     for p in PLANS:
         if p["key"] == plan_key and p.get("price_eur") is not None:
             return f"{p['price_eur']} €"
-    return "—"
+    return ""
 
 
 def sujet_essai(langue, ctx):
@@ -102,7 +102,7 @@ def corps_essai(langue, ctx):
             "Hello,\n\n"
             "Petit point avant que ton essai Axial ne se termine : le premier "
             f"prélèvement de {prix} est prévu le {jour}.\n\n"
-            "Si Axial t'est utile, tu n'as rien à faire — ton accès et tes "
+            "Si Axial t'est utile, tu n'as rien à faire, ton accès et tes "
             "crédits mensuels continuent.\n\n"
             "Si tu préfères t'arrêter, c'est en deux clics dans Paramètres → "
             f"Facturation → Gérer, sur {APP}. Aucun prélèvement ne partira.\n\n"
@@ -115,7 +115,7 @@ def corps_essai(langue, ctx):
         "Hello,\n\n"
         "A quick note before your Axial trial ends: the first charge of "
         f"{prix} is scheduled for {jour}.\n\n"
-        "If Axial is useful to you, there is nothing to do — your access and "
+        "If Axial is useful to you, there is nothing to do, your access and "
         "monthly credits simply continue.\n\n"
         f"If you would rather stop, it takes two clicks on {APP}, under "
         "Settings → Billing → Manage. Nothing will be charged.\n\n"
@@ -137,8 +137,8 @@ WHERE u.created_at > now() - interval '2 hours'
 
 
 def sujet_bienvenue(langue, ctx):
-    return ("Bienvenue sur Axial — par où commencer" if _fr(langue)
-            else "Welcome to Axial — where to start")
+    return ("Bienvenue sur Axial : par où commencer" if _fr(langue)
+            else "Welcome to Axial: where to start")
 
 
 def corps_bienvenue(langue, ctx):
@@ -147,7 +147,7 @@ def corps_bienvenue(langue, ctx):
             "Hello,\n\n"
             "Ton compte Axial est ouvert. Deux minutes pour que la première "
             "réponse vaille quelque chose :\n\n"
-            "Renseigne ta mémoire d'entreprise (onglet Mémoire) — secteur, "
+            "Renseigne ta mémoire d'entreprise (onglet Mémoire), secteur, "
             "stade, concurrents connus, défi principal. Axial injecte ce "
             "contexte dans chaque analyse : sans lui, tu obtiens une réponse "
             "générique ; avec lui, une réponse sur TON marché.\n\n"
@@ -155,7 +155,7 @@ def corps_bienvenue(langue, ctx):
             "semaines. Pas « c'est quoi le marché du SaaS RH », mais « mes 5 "
             "concurrents directs en France et leur positionnement respectif ».\n\n"
             f"C'est ici : {APP}\n\n"
-            "Si quelque chose coince, réponds à ce message — il arrive "
+            "Si quelque chose coince, réponds à ce message, il arrive "
             "directement chez moi.\n\n"
             "Miradie"
         )
@@ -163,7 +163,7 @@ def corps_bienvenue(langue, ctx):
         "Hello,\n\n"
         "Your Axial account is open. Two minutes to make the first answer "
         "worth something:\n\n"
-        "Fill in your company memory (Memory tab) — sector, stage, known "
+        "Fill in your company memory (Memory tab), sector, stage, known "
         "competitors, main challenge. Axial injects that context into every "
         "analysis: without it you get a generic answer; with it, an answer "
         "about YOUR market.\n\n"
@@ -171,7 +171,7 @@ def corps_bienvenue(langue, ctx):
         "Not \"what is the HR SaaS market\", but \"my 5 direct competitors in "
         "France and their respective positioning\".\n\n"
         f"It starts here: {APP}\n\n"
-        "If anything gets in the way, just reply to this message — it comes "
+        "If anything gets in the way, just reply to this message, it comes "
         "straight to me.\n\n"
         "Miradie"
     )
@@ -198,14 +198,14 @@ def corps_profil(langue, ctx):
         return (
             "Hello,\n\n"
             "Tu as créé ton compte Axial il y a deux jours mais la mémoire "
-            "d'entreprise est restée vide — et c'est précisément elle qui fait "
+            "d'entreprise est restée vide, et c'est précisément elle qui fait "
             "la différence entre une réponse d'IA générique et une analyse sur "
             "ton marché.\n\n"
             "Quatre champs suffisent pour commencer : secteur, stade, "
             "concurrents connus, défi principal. Deux minutes, une seule fois.\n\n"
             f"C'est dans l'onglet Mémoire : {APP}\n\n"
-            "Si tu as ouvert l'app et que quelque chose t'a arrêté — un écran "
-            "confus, une question sans réponse — dis-le-moi franchement en "
+            "Si tu as ouvert l'app et que quelque chose t'a arrêté, un écran "
+            "confus, une question sans réponse, dis-le-moi franchement en "
             "répondant à ce message. C'est exactement ce que j'ai besoin de "
             "savoir en ce moment.\n\n"
             "Miradie"
@@ -213,13 +213,13 @@ def corps_profil(langue, ctx):
     return (
         "Hello,\n\n"
         "You created your Axial account two days ago, but the company memory "
-        "is still empty — and that is exactly what separates a generic AI "
+        "is still empty, and that is exactly what separates a generic AI "
         "answer from an analysis about your market.\n\n"
         "Four fields are enough to start: sector, stage, known competitors, "
         "main challenge. Two minutes, once.\n\n"
         f"It is in the Memory tab: {APP}\n\n"
-        "And if you opened the app and something stopped you — a confusing "
-        "screen, a question left unanswered — tell me plainly by replying to "
+        "And if you opened the app and something stopped you, a confusing "
+        "screen, a question left unanswered, tell me plainly by replying to "
         "this message. That is exactly what I need to know right now.\n\n"
         "Miradie"
     )
@@ -252,7 +252,7 @@ def corps_question(langue, ctx):
     if _fr(langue):
         return (
             "Hello,\n\n"
-            "Tu as tout configuré sur Axial — profil, contexte — mais tu n'as "
+            "Tu as tout configuré sur Axial, profil, contexte, mais tu n'as "
             "encore posé aucune question. C'est souvent l'étape la plus dure : "
             "savoir par quoi commencer.\n\n"
             "Trois questions qui donnent un résultat exploitable dès le "
@@ -264,13 +264,13 @@ def corps_question(langue, ctx):
             "Quels risques réglementaires vont me tomber dessus dans les 18 "
             "mois ?\n\n"
             f"Copie-colle celle qui te parle : {APP}\n\n"
-            "Et si aucune ne correspond, réponds-moi avec ta vraie question — "
+            "Et si aucune ne correspond, réponds-moi avec ta vraie question, "
             "je te dis honnêtement si Axial est le bon outil pour elle.\n\n"
             "Miradie"
         )
     return (
         "Hello,\n\n"
-        "You set everything up on Axial — profile, context — but you have not "
+        "You set everything up on Axial, profile, context, but you have not "
         "asked a question yet. That is often the hardest step: knowing where "
         "to start.\n\n"
         "Three questions that give you something usable on the first try:\n\n"
@@ -280,7 +280,7 @@ def corps_question(langue, ctx):
         "and why those?\n\n"
         "Which regulatory changes will hit me in the next 18 months?\n\n"
         f"Copy whichever speaks to you: {APP}\n\n"
-        "And if none of them fits, reply with your real question — I will tell "
+        "And if none of them fits, reply with your real question, I will tell "
         "you honestly whether Axial is the right tool for it.\n\n"
         "Miradie"
     )
@@ -309,7 +309,7 @@ def corps_credits(langue, ctx):
     if _fr(langue):
         return (
             "Hello,\n\n"
-            f"Il te reste {solde} crédits sur Axial — de quoi tenir une "
+            f"Il te reste {solde} crédits sur Axial, de quoi tenir une "
             "conversation, pas un rapport complet (un rapport en consomme 40).\n\n"
             "Deux options, sans urgence : une recharge ponctuelle à partir de "
             "20 €, ou un abonnement mensuel qui recrédite automatiquement.\n\n"
@@ -320,7 +320,7 @@ def corps_credits(langue, ctx):
         )
     return (
         "Hello,\n\n"
-        f"You have {solde} credits left on Axial — enough for a conversation, "
+        f"You have {solde} credits left on Axial, enough for a conversation, "
         "not a full report (a report costs 40).\n\n"
         "Two options, no rush: a one-off top-up from €20, or a monthly plan "
         "that re-credits automatically.\n\n"
@@ -345,8 +345,8 @@ WHERE EXISTS (SELECT 1 FROM reports r WHERE r.user_id = u.id)
 
 
 def sujet_reactivation(langue, ctx):
-    return ("Deux semaines sans Axial — tout va bien ?" if _fr(langue)
-            else "Two weeks without Axial — everything all right?")
+    return ("Deux semaines sans Axial : tout va bien ?" if _fr(langue)
+            else "Two weeks without Axial: everything all right?")
 
 
 def corps_reactivation(langue, ctx):
@@ -358,7 +358,7 @@ def corps_reactivation(langue, ctx):
             "savoir pourquoi.\n\n"
             "Une réponse qui t'a déçu ? Un besoin qui n'était pas là ? Trop de "
             "temps pour obtenir le rapport ? Un mot en réponse à ce message "
-            "m'aide plus que tu ne l'imagines — Axial est jeune, et c'est "
+            "m'aide plus que tu ne l'imagines, Axial est jeune, et c'est "
             "exactement là-dessus que je le corrige.\n\n"
             "Et si c'est juste que la semaine a été chargée, tes crédits "
             f"t'attendent : {APP}\n\n"
@@ -367,10 +367,10 @@ def corps_reactivation(langue, ctx):
     return (
         "Hello,\n\n"
         "It has been two weeks since you last used Axial. I am not writing to "
-        "nudge you mechanically — mostly I would like to know why.\n\n"
+        "nudge you mechanically, mostly I would like to know why.\n\n"
         "An answer that disappointed you? A need that was not really there? "
         "Reports taking too long? One line in reply helps me more than you "
-        "would think — Axial is young, and this is exactly what I fix it on.\n\n"
+        "would think, Axial is young, and this is exactly what I fix it on.\n\n"
         f"And if the week was simply busy, your credits are waiting: {APP}\n\n"
         "Miradie"
     )

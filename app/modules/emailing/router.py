@@ -65,7 +65,7 @@ def desinscription(t: str, db: Session = Depends(get_db)) -> Response:
         message = "Une erreur est survenue. Répondez à l'email et nous vous retirerons à la main."
     return Response(
         content=("<!doctype html><meta charset=utf-8>"
-                 "<title>Désinscription — Axial</title>"
+                 "<title>Désinscription : Axial</title>"
                  "<div style=\"font-family:-apple-system,Segoe UI,Roboto,sans-serif;"
                  "max-width:520px;margin:80px auto;color:#1b1d1e;line-height:1.6\">"
                  f"<p>{message}</p></div>"),

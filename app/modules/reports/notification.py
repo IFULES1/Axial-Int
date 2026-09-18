@@ -1,7 +1,7 @@
 """Prévenir l'utilisateur quand son rapport est prêt.
 
 Une étude de fond demande plusieurs minutes. Sans notification, l'utilisateur
-soit attend devant un écran de progression, soit part — et ne revient pas.
+soit attend devant un écran de progression, soit part, et ne revient pas.
 C'est la principale raison pour laquelle un rapport terminé peut n'être jamais
 lu.
 
@@ -28,7 +28,7 @@ Ton rapport « {titre} » est terminé.
 
 Tu le retrouves dans l'onglet Rapports : app.axial-ia.fr
 
-Si quelque chose cloche — un chiffre qui te paraît faux, une source qui manque — dis-le-moi en répondant à ce message. C'est comme ça que l'app s'améliore.
+Si quelque chose cloche, un chiffre qui te paraît faux, une source qui manque, dis-le-moi en répondant à ce message. C'est comme ça que l'app s'améliore.
 
 Miradie""",
     "en": """Hello,
@@ -39,7 +39,7 @@ Your report "{titre}" is ready.
 
 You will find it in the Reports tab: app.axial-ia.fr
 
-If something looks off — a figure that seems wrong, a missing source — tell me by replying to this message. That is how the app gets better.
+If something looks off, a figure that seems wrong, a missing source, tell me by replying to this message. That is how the app gets better.
 
 Miradie""",
 }

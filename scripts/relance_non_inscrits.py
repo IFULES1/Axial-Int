@@ -29,7 +29,7 @@ INTERNES = {"miradieburanturu@gmail.com"}
 
 CORPS = """Hello {prenom},
 
-Je t'avais écrit il y a quelques jours pour la nouvelle version d'Axial. Tu ne l'as pas encore ouverte — pas de souci, je reviens vers toi une seule fois.
+Je t'avais écrit il y a quelques jours pour la nouvelle version d'Axial. Tu ne l'as pas encore ouverte, pas de souci, je reviens vers toi une seule fois.
 
 Ce qui a changé depuis :
 
@@ -45,7 +45,7 @@ Tes 50 crédits t'attendent, de quoi reprendre en main l'application.
 
 C'est ici : app.axial-ia.fr
 
-Si Axial ne correspond pas à ton besoin, dis-le-moi en une ligne — c'est utile aussi, et je ne te relancerai plus.
+Si Axial ne correspond pas à ton besoin, dis-le-moi en une ligne, c'est utile aussi, et je ne te relancerai plus.
 
 Miradie"""
 
