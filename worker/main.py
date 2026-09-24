@@ -15,6 +15,14 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from app.config import get_settings
 from app.db import SessionLocal
 from app.modules.watches.service import run_due_watches
+# Le worker ne charge pas les routeurs de l'API : les modèles ORM ne sont
+# donc importés qu'au gré des services qu'il appelle. `Report.project_id`
+# référence la table `projects` (module intelligence) : sans cet import, le
+# premier accès à `Report` dans ce processus échoue au moment de configurer
+# les mappers (« could not find table 'projects' »), et le rapport offert
+# n'est jamais généré alors que son marqueur a déjà été posé (21/09/2026).
+import app.modules.intelligence.models  # noqa: F401
+import app.modules.reports.models  # noqa: F401
 
 logging.basicConfig(level=get_settings().log_level)
 logger = logging.getLogger("axial.worker")
