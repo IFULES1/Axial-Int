@@ -16,6 +16,7 @@ import { parserMarkdown } from "./markdown";
 import { creerVeilleVersion, lireVersionServie } from "./version";
 import { chargerGooglePicker, ouvrirPickerDrive } from "./drive";
 import { lireConsentement, enregistrerConsentement, clarityAutoriseSur, identifiants, chargerGA, chargerClarity, evenement } from "./mesure";
+import { validerIdentifiants, emailNormalise } from "./auth_validation";
 
 
 /* data.js */
@@ -1790,7 +1791,7 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack, notice }) {
     setAuthErr(null);
     setBusy(kind);
     try {
-      await (onSubmit && onSubmit({ mode, email, pwd }));
+      await (onSubmit && onSubmit({ mode, email: emailNormalise(email), pwd }));
     } catch (err) {
       setBusy(null);
       setAuthErr((err && err.message) ? err.message : "Une erreur est survenue.");
@@ -1816,6 +1817,10 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack, notice }) {
   const submit = (e) => {
     e.preventDefault();
     if (busy) return;
+    // Validation affichée par l'écran, pas par le navigateur : la bulle native
+    // est invisible sur téléphone et laissait croire que le bouton était mort.
+    const message = validerIdentifiants({ mode, email, pwd });
+    if (message) { setAuthErr(libelle(message)); return; }
     finish('email');
   };
 
@@ -1857,18 +1862,18 @@ function AuthPage({ initialMode = 'signup', onSubmit, onBack, notice }) {
             onClick={() => setMode('login')}>{libelle('Se connecter')}</button>
         </div>
 
-        <form onSubmit={submit} className="auth-fields">
+        <form onSubmit={submit} className="auth-fields" noValidate>
           <div>
             <label className="label">{libelle("EMAIL")}</label>
-            <input className="input" type="email" required
+            <input className="input" type="email" autoComplete="email" inputMode="email"
               placeholder={libelle("vous@entreprise.com")}
-              value={email} onChange={(e) => setEmail(e.target.value)} />
+              value={email} onChange={(e) => { setEmail(e.target.value); if (authErr) setAuthErr(null); }} />
           </div>
           <div>
             <label className="label">{libelle("MOT DE PASSE")}</label>
-            <input className="input" type="password" required minLength={8}
+            <input className="input" type="password" autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
               placeholder={mode === 'signup' ? libelle("8 caractères minimum") : libelle("Votre mot de passe")}
-              value={pwd} onChange={(e) => setPwd(e.target.value)} />
+              value={pwd} onChange={(e) => { setPwd(e.target.value); if (authErr) setAuthErr(null); }} />
           </div>
           {mode === 'login' && (
             <button type="button" onClick={askReset} disabled={resetBusy}
@@ -2150,6 +2155,10 @@ const LABELS_EN = {
   "Starter — 50 crédits": "Starter — 50 credits",
   "Boost — 100 crédits": "Boost — 100 credits",
   "Scale — 200 crédits": "Scale — 200 credits",
+  "Renseignez votre adresse email.": "Enter your email address.",
+  "Cette adresse email semble incomplète (ex. vous@entreprise.com).": "This email address looks incomplete (e.g. you@company.com).",
+  "Renseignez votre mot de passe.": "Enter your password.",
+  "Le mot de passe doit faire au moins 8 caractères.": "The password must be at least 8 characters long.",
 };
 
 // Traduit un libellé d'affichage sans jamais toucher à la valeur sous-jacente.
