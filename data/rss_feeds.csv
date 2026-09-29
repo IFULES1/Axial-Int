@@ -1,0 +1,19 @@
+url,category,title
+https://techcrunch.com/feed/,startup,TechCrunch
+https://www.frenchweb.fr/rss,startup,FrenchWeb
+https://www.maddyness.com/feed/,startup,Maddyness
+https://www.eu-startups.com/feed/,startup,EU-Startups
+https://techcrunch.com/category/venture/feed/,vc,TechCrunch Venture
+https://sifted.eu/feed,vc,Sifted
+https://news.crunchbase.com/feed/,financement,Crunchbase News
+https://www.cnil.fr/fr/rss.xml,reglementaire,CNIL
+https://www.village-justice.com/articles/spip.php?page=backend,juridique,Village de la Justice
+https://www.usine-digitale.fr/rss,tech,Usine Digitale
+https://www.silicon.fr/feed,tech,Silicon
+https://www.zdnet.fr/feeds/rss/actualites/,tech,ZDNet France
+https://www.lemondeinformatique.fr/flux-rss/thematique/toutes-les-actualites/rss.xml,tech,Le Monde Informatique
+https://arstechnica.com/feed/,tech,Ars Technica
+https://www.theverge.com/rss/index.xml,produit,The Verge
+https://feeds.feedburner.com/venturebeat/SZYF,produit,VentureBeat
+https://www.journaldunet.com/rss/,marche,Journal du Net
+https://www.usine-nouvelle.com/rss,marche,Usine Nouvelle

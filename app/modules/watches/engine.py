@@ -16,6 +16,12 @@ logger = logging.getLogger("axial.watches.engine")
 
 MAX_SOURCES = 12
 
+# Bilan du 29/09 (#15) : la consigne demande « ~400 mots max » mais rien ne
+# l'imposait — la mémoire roulante atteignait 4 207 caractères en production,
+# et comme elle repart dans le prompt du run suivant, le coût d'entrée a grimpé
+# de 30 % en un mois. On coupe sur un séparateur de phrase quand c'est possible.
+MAX_ROLLING_STATE = 3000
+
 
 def _format_sources(query: str, articles: list[dict], web_results: list) -> tuple[str, list[dict]]:
     """Merge RSS articles + web results into one block ranked by relevance to the
@@ -94,6 +100,16 @@ def _parse(text: str) -> dict:
     }
 
 
+def _borner_memoire(etat: str | None) -> str | None:
+    """Coupe la mémoire roulante à `MAX_ROLLING_STATE`, de préférence à la fin
+    d'une phrase pour ne pas rendre au run suivant un fragment tronqué."""
+    if not etat or len(etat) <= MAX_ROLLING_STATE:
+        return etat
+    coupe = etat[:MAX_ROLLING_STATE]
+    fin = max(coupe.rfind(". "), coupe.rfind("\n"))
+    return (coupe[:fin + 1] if fin > MAX_ROLLING_STATE // 2 else coupe).strip()
+
+
 def generate_veille(*, skill: VeilleSkill, subject: str, rolling_state: str | None,
                     rss_articles: list[dict], web_results: list,
                     company_context: str) -> dict:
@@ -128,6 +144,7 @@ def generate_veille(*, skill: VeilleSkill, subject: str, rolling_state: str | No
     full = (parsed.get("full_report") or "").strip()
     parsed["full_report"] = full or delta
     parsed["delta"] = delta or full
+    parsed["rolling_state"] = _borner_memoire(parsed.get("rolling_state"))
     parsed["sources"] = citations
     # Le LLMResult remonte avec le contenu : sans lui, le coût d'une exécution
     # de veille reste invisible côté service.

@@ -53,6 +53,16 @@ VERIF_LIMITE_PAR_APPEL = 60  # borne haute pour que la route admin reste sous ~6
 # chargement de sa fiche agent — sans quoi rien (hors script/route admin)
 # n'alimente jamais l'état affiché et tous les points restent gris.
 SEUIL_REVERIFICATION = dt.timedelta(days=7)
+
+# Bilan du 29/09 (#16) : `_prior_seen_urls` relisait les URLs de TOUS les runs
+# passés à chaque exécution — 104 runs × jusqu'à 60 URLs, sans borne ni purge.
+# Une fenêtre de 30 runs couvre un mois de veille quotidienne, largement au-delà
+# de la fenêtre de fraîcheur d'un flux RSS.
+FENETRE_RUNS_URLS_VUES = 30
+
+# Statut d'un agent qui ne peut plus tourner faute de crédits : distinct de
+# `active` (la carte mentait) et de `paused` (que l'utilisateur seul décide).
+STATUT_SANS_CREDITS = "sans_credits"
 _verification_en_cours: set[str] = set()
 _verification_lock = threading.Lock()
 
@@ -360,9 +370,12 @@ def amorcer_flux(db: Session, user_id: str, skill_key: str) -> int:
     web. L'utilisateur ne peut pas deviner qu'il devait d'abord ajouter des
     sources — on les lui pose.
 
-    On n'ajoute que ce qui manque : un flux déjà suivi n'est pas dupliqué, et
-    un utilisateur qui a délibérément retiré une source ne la voit pas revenir
-    dans une catégorie qu'il alimente déjà autrement.
+    On n'ajoute que ce qui manque : un flux déjà suivi n'est pas dupliqué.
+
+    Bilan du 29/09 (#19) : la condition portait aussi sur la CATÉGORIE, pas
+    seulement sur l'URL — un seul flux « tech » suffisait à priver
+    l'utilisateur de tous les autres flux tech du catalogue. D'où une
+    couverture allant de 5 à 12 flux selon le compte, sans raison.
     """
     from app.modules.watches import skills
     from app.modules.watches.catalogue import catalogue
@@ -373,11 +386,9 @@ def amorcer_flux(db: Session, user_id: str, skill_key: str) -> int:
     categories = [c for c in skill.rss_categories if c != "general"]
     deja = {f.url for f in db.scalars(
         select(RssFeed).where(RssFeed.user_id == uuid.UUID(user_id)))}
-    couvertes = {f.category for f in db.scalars(
-        select(RssFeed).where(RssFeed.user_id == uuid.UUID(user_id)))}
     ajoutes = 0
     for f in catalogue():
-        if f["category"] not in categories or f["category"] in couvertes:
+        if f["category"] not in categories:
             continue
         if f["url"] in deja:
             continue
@@ -437,9 +448,14 @@ def _feeds_for(db: Session, user_id: str, categories: list[str]) -> list[RssFeed
 
 
 def _prior_seen_urls(db: Session, watch_id) -> set[str]:
-    """Every RSS url this watch already consumed — so we never re-report an article."""
+    """URLs RSS déjà consommées par cette veille — pour ne jamais re-remonter
+    un article. Bornée aux `FENETRE_RUNS_URLS_VUES` runs les plus récents."""
+    stmt = (select(WatchRun.new_article_urls)
+            .where(WatchRun.watch_id == watch_id)
+            .order_by(WatchRun.created_at.desc())
+            .limit(FENETRE_RUNS_URLS_VUES))
     seen: set[str] = set()
-    for urls in db.scalars(select(WatchRun.new_article_urls).where(WatchRun.watch_id == watch_id)):
+    for urls in db.scalars(stmt):
         if urls:
             seen.update(urls)
     return seen
@@ -449,6 +465,26 @@ def _own_watch(db: Session, user_id: str, watch_id: str) -> Watch:
     watch = db.get(Watch, uuid.UUID(watch_id))
     if not watch or str(watch.user_id) != user_id:
         raise AppError("Veille introuvable.", 404, code="not_found")
+    return watch
+
+
+def modifier_watch(db: Session, user_id: str, watch_id: str, champs: dict) -> Watch:
+    """Modifie un agent existant (bilan #4).
+
+    Trois agents sur cinq portaient en production un nom qui ne correspondait
+    pas à leur skill, sans aucun moyen de les renommer. Seuls les champs
+    fournis sont écrits ; changer la cadence reprogramme le prochain passage.
+    """
+    watch = _own_watch(db, user_id, watch_id)
+    for champ in ("name", "query", "skill", "email_recipients"):
+        if champ in champs and champs[champ] is not None:
+            setattr(watch, champ, champs[champ])
+    if champs.get("cadence"):
+        watch.cadence = champs["cadence"]
+        programme = watch.status in ("active", STATUT_SANS_CREDITS)
+        watch.next_run_at = _next_run(watch.cadence) if programme else None
+    db.commit()
+    db.refresh(watch)
     return watch
 
 
@@ -490,6 +526,7 @@ def run_watch(db: Session, watch: Watch) -> bool:
 
         if not billing.check_credits(db, uid, "run_agent_veille")["affordable"]:
             logger.info("Watch %s skipped: insufficient credits", watch.id)
+            _signaler_panne_de_credits(db, watch)
             _reschedule(db, watch, produced=False)
             return False
 
@@ -562,6 +599,8 @@ def run_watch(db: Session, watch: Watch) -> bool:
             db.commit()
             send_email(watch.email_recipients, f"[Axial · Veille] {watch.name}", corps, vizs)
 
+        if watch.status == STATUT_SANS_CREDITS:
+            watch.status = "active"
         _reschedule(db, watch, produced=True)
         return True
     except Exception:
@@ -570,11 +609,49 @@ def run_watch(db: Session, watch: Watch) -> bool:
         return False
 
 
+def _signaler_panne_de_credits(db: Session, watch: Watch) -> None:
+    """Prévient une seule fois qu'un agent s'arrête faute de crédits.
+
+    Bilan du 29/09 (#1) : deux agents sur cinq s'étaient éteints en silence,
+    dont le seul client externe — solde à zéro, plus aucun run depuis trois
+    semaines, et une carte qui affichait toujours « actif ». L'alerte part une
+    fois, à la bascule, pas à chaque passage du worker.
+    """
+    if watch.status == STATUT_SANS_CREDITS:
+        return
+    watch.status = STATUT_SANS_CREDITS
+    db.commit()
+    if not watch.email_recipients:
+        return
+    from app.modules.watches.email import send_email
+
+    corps = (
+        f"# Votre veille « {watch.name} » est en pause\n\n"
+        "Votre solde de crédits ne permet plus de lancer cette veille. "
+        "Elle reprendra d'elle-même dès que votre solde sera à nouveau "
+        "suffisant — rien à refaire de votre côté.\n\n"
+        "Pour la relancer tout de suite : Crédits, puis rechargez votre "
+        "compte ou activez un abonnement.\n\n"
+        "---\n*Vous ne recevrez pas ce message une seconde fois pour cette "
+        "veille.*"
+    )
+    try:
+        send_email(watch.email_recipients,
+                   f"[Axial · Veille] {watch.name} — en pause, crédits épuisés", corps)
+    except Exception:  # noqa: BLE001 — une alerte perdue ne doit pas casser le tick
+        logger.warning("Alerte de panne de crédits non envoyée pour %s", watch.id,
+                       exc_info=True)
+
+
 def _reschedule(db: Session, watch: Watch, *, produced: bool) -> None:
     now = _now()
     if produced:
         watch.last_run_at = now
-    watch.next_run_at = _next_run(watch.cadence, base=now) if watch.status == "active" else None
+    # `sans_credits` reste programmé : c'est ce qui permet à l'agent de
+    # repartir de lui-même dès que le solde revient. Seule une pause explicite
+    # le sort de la requête du worker.
+    programme = watch.status in ("active", STATUT_SANS_CREDITS)
+    watch.next_run_at = _next_run(watch.cadence, base=now) if programme else None
     db.commit()
 
 

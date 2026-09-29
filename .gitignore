@@ -28,6 +28,10 @@ venv/
 # Data / artifacts
 *.log
 /data/
+# Exception : le catalogue de flux RSS est une donnée éditoriale, pas une
+# donnée de travail. Non versionné, il n'était relu dans aucune revue et
+# n'existait que sur le serveur (bilan veille du 29/09, #20).
+!/data/rss_feeds.csv
 *.bundle
 *.bak
 *.bak.*

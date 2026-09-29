@@ -35,7 +35,7 @@ sur 60 jours.
 | Sources RSS | flux actifs des catégories du skill, entrées **plus récentes que le dernier run** et jamais vues (`_prior_seen_urls` sur tout l'historique) |
 | Sources web | 4 requêtes : le gabarit du skill + 3 angles (`search_multi`), 12 résultats, rerank Cohere sur le sujet |
 | Mémoire | `rolling_state` du run précédent injecté dans le prompt — c'est ce qui rend la veille cumulative au lieu d'amnésique |
-| Modèle | tier `report` (Claude Sonnet), `max_tokens=6000`, **une seule passe, aucune reprise sur troncature** |
+| Modèle | tier `report` (Claude Sonnet), `max_tokens=6000` ; reprise automatique sur troncature héritée de `claude.generate` (jusqu'à 3 relances) |
 | Sortie | un seul appel produit 4 sections délimitées : `HAD_CHANGES`, `DELTA`, `FULL_REPORT`, `ROLLING_STATE` |
 | Archivage | `watch_runs` : delta, rapport complet, mémoire, sources, URLs RSS consommées, tokens, coût modèle, coût recherche |
 | Facturation | `consume_credits` **après** l'archivage : 5 crédits, quel que soit le résultat |
@@ -60,7 +60,7 @@ sur 60 jours.
 | Flux RSS | 33 flux, **tous vérifiés OK, aucun en erreur** ; 14 articles neufs par run en moyenne |
 | Mais | **39 runs sur 104 (37 %) n'ont consommé aucun article RSS** — la veille reposait alors sur la seule recherche web |
 | Mémoire roulante | 2 792 caractères en moyenne, jusqu'à **4 207** — la consigne demande « ~400 mots max » (≈ 2 800) |
-| Troncature probable | 8 runs à ≥ 5 800 tokens de sortie (plafond demandé 6 000, max observé 7 513) ; 5 rapports se terminent sans ponctuation finale |
+| Sorties au-delà du plafond | 8 runs à ≥ 5 800 tokens (plafond demandé 6 000, max observé 7 513) — c'est la **reprise automatique sur troncature** du client Claude qui a fonctionné, pas un bug |
 
 ### Incidents réels trouvés en production
 - **Un agent est mort en silence il y a trois semaines.** `a3f0d323`
@@ -167,9 +167,14 @@ un utilisateur qui paie.
     `consume_credits`, et le chemin d'échec ne fait aucun rollback explicite
     avant le commit de reprogrammation. Même faiblesse que celle corrigée pour
     les rapports et les conversations — non vérifiée ici faute de test.
-14. **Aucune reprise sur troncature** (les rapports réessaient 3 fois) :
-    8 runs frôlent ou dépassent le plafond, 5 rapports finissent au milieu
-    d'une phrase.
+14. ~~Aucune reprise sur troncature.~~ **Retiré le 29/09 après vérification :
+    faux.** La veille appelle `llm_client.generate(tier="report")`, qui route
+    vers `claude.generate`, lequel relance jusqu'à 3 fois sur
+    `stop_reason == "max_tokens"` — exactement comme les rapports. Les 7 513
+    tokens de sortie observés au-delà du plafond de 6 000 sont la **preuve**
+    que la reprise tourne. Le « 5 rapports finissent sans ponctuation » venait
+    d'une heuristique trop grossière : un rapport qui se termine par une puce
+    finit sur une lettre.
 15. **La mémoire roulante n'est pas bornée** : jusqu'à 4 207 caractères pour
     une consigne de ~2 800, et le coût d'entrée a grimpé de 30 % en un mois.
 16. **`_prior_seen_urls` relit toutes les URLs de tous les runs passés** à
@@ -209,7 +214,7 @@ un utilisateur qui paie.
 | 7 | **Exporter une veille** en PDF (moteur des rapports) et vers Notion (connecteur existant). | la veille sort de l'email | moyen |
 | 8 | **Lancement asynchrone avec état**, comme les rapports v2 : ligne créée à l'envoi, progression, erreur crédits affichée. | plus de bouton qui ment | moyen |
 | 9 | **Signaler un run sans RSS** (« aucune source RSS neuve, veille basée sur le web »). | l'utilisateur sait ce qu'il lit | très faible |
-| 10 | **Borner la mémoire roulante** (troncature dure + consigne renforcée) et **reprendre sur troncature** comme les rapports. | coût maîtrisé, rapports entiers | faible |
+| 10 | **Borner la mémoire roulante** (coupe dure à 3 000 caractères, sur une fin de phrase). La reprise sur troncature, elle, existe déjà. | coût d'entrée maîtrisé | faible |
 
 ### Simplifier
 | # | Piste |
@@ -242,6 +247,6 @@ un utilisateur qui paie.
 4. **Décision produit** : facturation du « rien de neuf » (#2) et cadence par
    défaut vs dotation du plan (#18, #19).
 5. **Lisibilité** : sources et coût d'un run, export (#6, #7).
-6. **Robustesse** : lancement asynchrone, troncature, mémoire bornée (#8, #10),
-   puis tests de `run_watch` (#17).
+6. **Robustesse** : lancement asynchrone et mémoire bornée (#8, #10), puis
+   tests de `run_watch` (#17).
 7. **Nettoyage** : #11 à #16.

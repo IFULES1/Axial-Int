@@ -514,6 +514,7 @@ export async function axWatchActivity() { return axFetch("/watches/activity"); }
 export async function axRunWatch(id) { return axFetch(`/watches/${id}/run`, { method: "POST", body: {} }); }
 export async function axPauseWatch(id) { return axFetch(`/watches/${id}/pause`, { method: "POST", body: {} }); }
 export async function axResumeWatch(id) { return axFetch(`/watches/${id}/resume`, { method: "POST", body: {} }); }
+export async function axUpdateWatch(id, body) { return axFetch(`/watches/${id}`, { method: "PATCH", body }); }
 export async function axDeleteWatch(id) { return axFetch(`/watches/${id}`, { method: "DELETE" }); }
 export async function axMetrics(jours = 30) { return axFetch(`/metrics/tableau?jours=${jours}`); }
 // Administration des comptes (écran Pilotage, onglet Comptes).

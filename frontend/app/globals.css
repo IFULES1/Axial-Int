@@ -933,10 +933,10 @@ input, select, textarea { font-family: inherit; color: inherit; }
 .sidebar .lockup { padding: 4px 8px 18px; }
 
 /* ---- Barre latérale repliable : mode rail (icônes seules), desktop uniquement ----
-   Tout le bloc est sous (min-width: 768px) pour que ces sélecteurs ne
+   Tout le bloc est sous (min-width: 1024px) pour que ces sélecteurs ne
    s'appliquent jamais en surcouche mobile — pas de conflit de spécificité
    à gérer avec le bloc mobile ci-dessous. */
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
   html[data-sidebar="rail"] { --sidebar-w: 60px; }
   html[data-sidebar="rail"] .sidebar .lockup-text,
   html[data-sidebar="rail"] .sidebar .nav-item span.label,
@@ -1070,8 +1070,8 @@ input, select, textarea { font-family: inherit; color: inherit; }
   min-height: 0;
 }
 
-/* ---- Barre latérale : surcouche mobile (< 768px) ---- */
-@media (max-width: 767px) {
+/* ---- Barre latérale : surcouche écrans étroits (< 1024px, téléphone et tablette) ---- */
+@media (max-width: 1023px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar {
     position: fixed;
@@ -2028,6 +2028,13 @@ html[data-theme="light"] .sidebar {
   border: 1px solid var(--border);
   color: var(--fg-3);
 }
+/* Agent arrêté faute de crédits : distinct d'une pause volontaire, parce que
+   l'utilisateur n'a rien demandé et qu'il y a quelque chose à faire. */
+.agent-status.alerte {
+  background: rgba(229, 72, 77, 0.10);
+  border: 1px solid rgba(229, 72, 77, 0.35);
+  color: #E5484D;
+}
 
 .agent-finding {
   background: var(--surface-2);
@@ -2811,7 +2818,7 @@ html[data-theme="light"] .sidebar {
   text-align: left;
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .ax-modale-actions { flex-direction: column; }
   .ax-modale-actions .btn { width: 100%; justify-content: center; }
 }
@@ -2904,7 +2911,7 @@ html[data-theme="light"] .sidebar {
 .ax-composer-stop { background: var(--error, #e5484d); }
 .ax-composer-stop:hover { background: #ef5f63; }
 
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .ax-bouton-bas { bottom: 170px; }
   .ax-pastille-cout { white-space: normal; }
 }
@@ -3077,7 +3084,7 @@ html[data-theme="light"] .sidebar {
 .ax-edition:focus { outline: none; border-color: var(--v-bright); }
 .ax-edition-actions { display: flex; gap: 6px; justify-content: flex-end; }
 
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .ax-menu { min-width: 160px; }
   .ax-menu-declencheur, .ax-editer { opacity: 1; }
   .ax-edition-actions .btn { flex: 1; justify-content: center; }
@@ -3086,7 +3093,7 @@ html[data-theme="light"] .sidebar {
 /* ============================================================
    CONVERSATIONS V2 — MOBILE (§6 de la spec, priorité)
 
-   Deux choses : (1) sous 768 px le panneau des conversations devient un
+   Deux choses : (1) sous 1024 px le panneau des conversations devient un
    tiroir et le fil prend toute la largeur ; (2) une passe générale pour
    qu'aucune surface ne déborde horizontalement à 375 px.
 
@@ -3098,14 +3105,14 @@ html[data-theme="light"] .sidebar {
    passe aussi au-dessus de la barre latérale (41), mais les deux tiroirs
    sont rendus mutuellement exclusifs côté JS — chaque bouton de la topbar
    ferme l'autre tiroir — et le panneau de citation est plein écran sous
-   768 px, où il n'est jamais ouvert en même temps que la liste.
+   1024 px, où il n'est jamais ouvert en même temps que la liste.
    ============================================================ */
 
 /* Voile du tiroir : invisible par défaut, exactement comme
    `.sidebar-backdrop`. Seul le bloc mobile ci-dessous l'affiche. */
 .convlist-backdrop { display: none; }
 
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   /* ---------- Une colonne : le fil prend toute la largeur ----------
      Neutralise `.app-body { grid-template-columns: 280px 1fr }`
      (posé pour la seule sous-route Conversations). `.app-body-single`
@@ -3489,3 +3496,86 @@ html[data-theme="light"] .sidebar {
 .ax-bandeau-consentement > div:first-child { flex: 1 1 320px; }
 .ax-bandeau-consentement-details { color: var(--fg-3); font-size: 12px; margin-top: 4px; }
 .ax-bandeau-consentement-actions { display: flex; gap: 8px; }
+
+/* Croix de fermeture du bandeau profil : à droite, discrète, sans soulignement. */
+.ax-bandeau-profil > button.ax-bandeau-profil-fermer {
+  margin-left: auto; text-decoration: none; color: var(--fg-3);
+  display: inline-flex; align-items: center; padding: 2px;
+}
+.ax-bandeau-profil > button.ax-bandeau-profil-fermer:hover { color: var(--fg); }
+
+/* ============================================================
+   ÉCRANS ÉTROITS — revue téléphone / tablette du 29/09/2026
+   (lots 2 et 3). Tout est sous le même seuil que les tiroirs (1023 px),
+   plus quelques règles propres au téléphone (600 px).
+   ============================================================ */
+@media (max-width: 1023px) {
+  /* --- Conversation : rendre la place à la lecture (lot 2) --- */
+  .composer-shell { padding: 10px 12px 12px; }
+  .composer { padding: 8px 8px 8px 14px; }
+  .composer-tip { padding: 6px 8px; margin-top: 8px; gap: 8px; }
+  /* La phrase d'explication du mode est un luxe d'écran large. */
+  .composer-tip > span { display: none; }
+  /* Les pastilles d'agents tiennent sur une ligne et défilent. */
+  .composer-tip > div { max-width: 100%; overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+  .composer-tip > div::-webkit-scrollbar { display: none; }
+  .composer-tip > div > button { white-space: nowrap; }
+  .ax-bandeau-profil { padding: 6px 10px; font-size: 12px; margin-bottom: 6px; }
+
+  /* L'état vide (question du jour + suggestions) n'était pas dans une zone
+     défilante : ses chips passaient sous le composeur. */
+  .empty-state { justify-content: flex-start; overflow-y: auto; padding: 20px 16px 24px; gap: 12px; }
+  .empty-state h2 { font-size: 22px; }
+  .empty-state p { font-size: 14px; }
+  .empty-prompt-chips { max-width: 100%; }
+  .prompt-chip { font-size: 12.5px; padding: 7px 12px; }
+
+  /* Barre de titre : le titre de la conversation, pas le fil d'Ariane. */
+  .topbar-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar-title .crumb, .topbar-title .crumb-sep { display: none; }
+
+  /* --- Landing : en-tête sans débordement, grilles repliées (lot 3) --- */
+  .landing-nav { padding: 14px 16px; gap: 10px; }
+  .landing-nav-links { display: none; }
+  .landing-nav > div { gap: 6px; }
+  .hero { padding: 56px 16px 64px; }
+  .hero h1 { font-size: clamp(36px, 9vw, 64px); }
+  /* Les grilles à 3 et 4 colonnes (fonctionnalités, étapes, confiance,
+     tarifs) passent à 2 colonnes sur tablette, 1 sur téléphone. Les trois
+     grilles de la landing sont posées en style inline dans App.jsx, d'où le
+     `!important` : c'est la seule façon de les replier sans réécrire le JSX. */
+  .feature-row { grid-template-columns: repeat(2, 1fr); }
+  .landing-grid-4 { grid-template-columns: repeat(2, 1fr) !important; }
+  .value-cards { grid-template-columns: 1fr; }
+
+  /* --- Onboarding et écran carte : plus de débordement horizontal --- */
+  .onb-shell { overflow-x: hidden; }
+  .onb-progress-bar { flex-wrap: wrap; gap: 10px 14px; margin-bottom: 28px; }
+  .onb-progress-track { min-width: 80px; }
+  .onb-progress-label { font-size: 10px; letter-spacing: 0.06em; white-space: normal; }
+  .onb-stage { padding-left: 16px; padding-right: 16px; }
+  .first-action-card { max-width: 100%; box-sizing: border-box; }
+  .first-action-card .btn-lg { width: 100%; justify-content: center; }
+
+  /* --- Composeur de rapport : estimation lisible, bouton pleine largeur --- */
+  .rep-prompt-foot { flex-direction: column; align-items: stretch; gap: 10px; }
+  .rep-prompt-foot .btn { justify-content: center; }
+  .rep-estimate { white-space: normal; }
+  /* Les rangées de chips défilent : le fondu à droite dit qu'il y a une suite. */
+  .rep-templates {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+    padding-right: 40px;
+  }
+
+  /* --- Bandeau de consentement plus compact --- */
+  .ax-bandeau-consentement { bottom: 8px; padding: 10px 12px; font-size: 12px; gap: 10px; }
+}
+@media (max-width: 600px) {
+  .feature-row { grid-template-columns: 1fr; }
+  .landing-grid-4 { grid-template-columns: 1fr !important; }
+  /* Téléphone : sur la landing, « Se connecter » existe aussi dans le hero
+     (« J'ai déjà un compte ») ; l'en-tête garde la langue et « Commencer ». */
+  .landing-nav .btn-ghost { display: none; }
+  .landing-nav .btn-primary { padding-left: 12px; padding-right: 12px; }
+}

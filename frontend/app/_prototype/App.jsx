@@ -11,7 +11,7 @@ import {
   etatDepuisRapport, etatDepuisStockage, etatSupprime, versStockage,
   libelleEtape, libelleRaison,
 } from "./rapports_etat";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchFeeds, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axImporterDepuisDrive, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument, axKbLister, axKbAjouterFichier, axKbAjouterUrl, axKbSupprimer } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchFeeds, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axUpdateWatch, axDeleteWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axImporterDepuisDrive, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument, axKbLister, axKbAjouterFichier, axKbAjouterUrl, axKbSupprimer } from "./bridge";
 import { parserMarkdown } from "./markdown";
 import { creerVeilleVersion, lireVersionServie } from "./version";
 import { chargerGooglePicker, ouvrirPickerDrive } from "./drive";
@@ -121,7 +121,15 @@ window.useSidebar = function useSidebar() {
   document.documentElement.dataset.sidebar = window.AXIAL_SIDEBAR;
 })();
 
-/* ---- Tiroir du panneau des conversations (mobile, < 768 px) ----
+/* Seuil « écran étroit » : en dessous, barre latérale et liste des
+   conversations deviennent des tiroirs. 1024 et non 768 depuis la revue du
+   29/09 : à 768 px (tablette), trois colonnes laissaient 250 px pour lire une
+   réponse. Doit rester égal aux media queries `(max-width: 1023px)` de
+   globals.css. */
+const LARGEUR_ETROITE_MAX = 1024;
+const CLE_BANDEAU_PROFIL = 'axial_bandeau_profil_ferme';
+
+/* ---- Tiroir du panneau des conversations (écrans étroits, < 1024 px : téléphone et tablette) ----
    MÊME mécanisme que la surcouche mobile de la barre latérale : un attribut
    sur <html> (`data-convlist-mobile="open"`) que le CSS lit, plus un voile.
    La différence, c'est le partage : le bouton qui ouvre vit dans la topbar
@@ -130,8 +138,8 @@ window.useSidebar = function useSidebar() {
    éloignées de l'arbre. L'état est donc global + événement, comme
    `useSidebar`, plutôt que descendu en cascade de props.
    L'état n'est PAS persisté : un tiroir rouvert au rechargement masquerait
-   le fil. Rien n'est lu au-dessus de 768 px, aucune règle ne cite
-   l'attribut hors du bloc `@media (max-width: 767px)`. */
+   le fil. Rien n'est lu au-dessus de 1024 px, aucune règle ne cite
+   l'attribut hors du bloc `@media (max-width: 1023px)`. */
 window.AXIAL_CONVLIST_MOBILE = false;
 window.setAxialConvListMobile = function (ouvert) {
   const v = !!ouvert;
@@ -409,18 +417,18 @@ const STRINGS = {
     'agents.subtitle': 'Automatisez vos veilles et analyses récurrentes. Définissez une mission, Axial l\'exécute selon la fréquence choisie.',
     'agents.status.running': 'En cours',
     'agents.status.paused': 'En pause',
-    'agents.status.idle': 'Au repos',
-    'agents.last_finding': 'Dernière trouvaille',
+    'agents.status.sans_credits': 'En pause — crédits épuisés',
     'agents.next_run': 'Prochaine exécution',
-    'agents.sources': 'sources',
     'agents.create': 'Créer un agent',
-    'agents.wizard.trigger': 'Déclencheur',
     'agents.wizard.sources': 'Sources',
     'agents.wizard.output': 'Livrable',
     'agents.wizard.schedule': 'Cadence',
     'agents.session.timeline': 'Chronologie de la session',
     'agents.session.findings': 'Trouvailles',
-    'agents.confidence': 'Confiance',
+    'agents.run.sources': 'Sources de ce run',
+    'agents.run.sans_rss': 'Aucune source RSS neuve — veille basée sur le web',
+    'agents.supprimer.confirmer': 'Supprimer cet agent et tout son historique ?',
+    'agents.modifier': 'Modifier',
     'agents.flux.count': 'Sources : {n} flux',
     'agents.flux.gerer': 'Gérer mes flux',
     'agents.flux.vide': 'Aucun flux pour cette veille pour le moment.',
@@ -907,18 +915,18 @@ const STRINGS = {
     'agents.subtitle': 'Persistent workers. You set the mission, they bring back findings.',
     'agents.status.running': 'Running',
     'agents.status.paused': 'Paused',
-    'agents.status.idle': 'Idle',
-    'agents.last_finding': 'Last finding',
+    'agents.status.sans_credits': 'Paused — out of credits',
     'agents.next_run': 'Next run',
-    'agents.sources': 'sources',
     'agents.create': 'Create agent',
-    'agents.wizard.trigger': 'Trigger',
     'agents.wizard.sources': 'Sources',
     'agents.wizard.output': 'Output',
     'agents.wizard.schedule': 'Schedule',
     'agents.session.timeline': 'Session timeline',
     'agents.session.findings': 'Findings',
-    'agents.confidence': 'Confidence',
+    'agents.run.sources': 'Sources for this run',
+    'agents.run.sans_rss': 'No fresh RSS source — this run is web-only',
+    'agents.supprimer.confirmer': 'Delete this agent and its whole history?',
+    'agents.modifier': 'Edit',
     'agents.flux.count': 'Sources: {n} feeds',
     'agents.flux.gerer': 'Manage my feeds',
     'agents.flux.vide': 'No feed for this agent yet.',
@@ -1582,7 +1590,7 @@ function LandingPage({ onCTAStart, onCTASignIn }) {
             {t('landing.how.h2.line1')}<br />{t('landing.how.h2.line2')}
           </h2>
         </div>
-        <ol style={{
+        <ol className="landing-grid-4" style={{
           display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 20,
           listStyle: 'none', padding: 0, margin: 0,
         }}>
@@ -1608,7 +1616,7 @@ function LandingPage({ onCTAStart, onCTASignIn }) {
             {isFR ? 'Vos données restent les vôtres.' : 'Your data stays yours.'}
           </h2>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 18 }}>
+        <div className="landing-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 18 }}>
           {[
             { icon: 'key', t: isFR ? 'Cloisonnement par compte' : 'Scoped to your account',
               b: isFR ? 'Votre mémoire et vos documents ne sont jamais partagés ni indexés pour d’autres utilisateurs.' : 'Your memory and documents are never shared or indexed for other users.' },
@@ -1642,7 +1650,7 @@ function LandingPage({ onCTAStart, onCTASignIn }) {
               : 'Plan credits renew every month. Need a top-up? One-off packs of 50, 100 or 200 credits (€20/40/80) that never expire.'}
           </p>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 18 }}>
+        <div className="landing-grid-4" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 18 }}>
           {pricingPlans.map((p) => (
             <article key={p.name} className="card" style={{ padding: 24, position: 'relative', display: 'flex', flexDirection: 'column', ...(p.tag ? { borderColor: 'var(--v-soft)' } : {}) }}>
               {p.tag && <div className="mono" style={{ position: 'absolute', top: 16, right: 16, fontSize: 9.5, color: 'var(--v-soft)', letterSpacing: '0.12em', fontWeight: 700 }}>{p.tag}</div>}
@@ -2810,14 +2818,14 @@ function AppShell({ user, onLogout, children, topbar, subRoute, onSubRoute }) {
     document.documentElement.dataset.sidebarMobile = mobileOpen ? 'open' : '';
   }, [mobileOpen]);
   // Referme les deux surcouches mobiles si l'écran repasse au-dessus du seuil
-  // (rotation, redimensionnement) : au-dessus de 768 px la liste redevient une
+  // (rotation, redimensionnement) : au-dessus de 1024 px la liste redevient une
   // colonne du `grid`, un attribut « ouvert » resté posé n'y veut plus rien dire.
   React.useEffect(() => {
     // L'état du tiroir est global (il survit au démontage de `AppShell`) : une
     // déconnexion puis reconnexion ne doit pas retrouver un tiroir ouvert.
     window.setAxialConvListMobile(false);
     const onResize = () => {
-      if (window.innerWidth >= 768) { setMobileOpen(false); window.setAxialConvListMobile(false); }
+      if (window.innerWidth >= LARGEUR_ETROITE_MAX) { setMobileOpen(false); window.setAxialConvListMobile(false); }
     };
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
@@ -2923,7 +2931,7 @@ function AppShell({ user, onLogout, children, topbar, subRoute, onSubRoute }) {
             <Icon name="menu" size={18} />
           </button>
           {/* Tiroir des conversations : le bouton ne vit que sur sa sous-route,
-              et le CSS ne le montre que sous 768 px (classe `.topbar-hamburger`
+              et le CSS ne le montre que sous 1024 px (classe `.topbar-hamburger`
               partagée, donc une seule règle d'affichage pour les deux boutons).
               Il ferme le tiroir de la barre latérale, et réciproquement : les
               deux voiles superposés n'auraient aucun sens. */}
@@ -3360,7 +3368,7 @@ function ConvListPanel({
   const t = window.useT();
   /* Mobile (§6) : ce panneau est un tiroir. Choisir un fil — y compris depuis
      un résultat de recherche — ou en créer un doit le refermer, sinon on
-     ouvre un fil qu'on ne voit pas. Au-dessus de 768 px l'appel est inerte :
+     ouvre un fil qu'on ne voit pas. Au-dessus de 1024 px l'appel est inerte :
      aucune règle ne lit l'attribut hors du bloc mobile. */
   const choisir = (id, resultat) => { window.setAxialConvListMobile(false); onPick(id, resultat); };
   const nouveau = () => { window.setAxialConvListMobile(false); onNew(); };
@@ -4301,14 +4309,29 @@ function Composer({ value, onChange, onSend, profil, onCompleterProfil,
   // `profil === undefined` = pas encore chargé : ne pas faire clignoter le
   // bandeau au montage. Chargé et sans nom d'entreprise = contexte absent.
   const profilVide = profil !== undefined && !(profil && profil.company_name);
+  // Fermable : sur téléphone, ce bandeau prenait une part de l'écran de
+  // lecture à chaque message. Le choix est retenu sur l'appareil ; il
+  // redevient visible si l'utilisateur vide de nouveau son profil un jour,
+  // puisqu'on ne le mémorise que tant que le profil est vide.
+  const [profilFerme, setProfilFerme] = React.useState(() => {
+    try { return localStorage.getItem(CLE_BANDEAU_PROFIL) === '1'; } catch (e) { return false; }
+  });
+  const fermerBandeauProfil = () => {
+    setProfilFerme(true);
+    try { localStorage.setItem(CLE_BANDEAU_PROFIL, '1'); } catch (e) { /* sans stockage, le bandeau revient */ }
+  };
 
   return (
     <div className="composer-shell">
-      {profilVide && (
+      {profilVide && !profilFerme && (
         <div className="ax-bandeau-profil">
           <Icon name="alert" size={13} />
           <span>{t('conv.profil.vide')}</span>
           <button type="button" onClick={onCompleterProfil}>{t('conv.profil.lien')}</button>
+          <button type="button" className="ax-bandeau-profil-fermer" onClick={fermerBandeauProfil}
+            aria-label={t('common.close')} title={t('common.close')}>
+            <Icon name="x" size={12} />
+          </button>
         </div>
       )}
       <div className="composer">
@@ -6514,7 +6537,11 @@ const skillMeta = (k) => {
   if (!m) return { icon: 'search', label: k };
   return { ...m, label: (window.AXIAL_LANG === 'en' && m.en) || m.label };
 };
-const watchStatusClass = (s) => (s === 'paused' ? 'paused' : s === 'active' ? 'running' : 'idle');
+// Un agent arrêté faute de crédits n'est ni « actif » (la carte mentait
+// pendant trois semaines en production) ni « en pause » (personne ne l'a
+// demandé) : il a sa propre pastille, rouge, et son propre libellé.
+const watchStatusClass = (s) => (s === 'active' ? 'running' : s === 'sans_credits' ? 'alerte' : 'paused');
+const watchStatusCle = (s) => (s === 'active' ? 'running' : s === 'sans_credits' ? 'sans_credits' : 'paused');
 const fmtWhen = (iso, lang) => (iso
   ? new Date(iso).toLocaleDateString(lang === 'en' ? 'en-US' : 'fr-FR', { day: '2-digit', month: 'short' })
   : '—');
@@ -6808,7 +6835,7 @@ function AgentsLibrary({ onCreate, onOpenSession }) {
               </div>
               <span className={'agent-status ' + status}>
                 {status === 'running' && <span className="dot"></span>}
-                {t('agents.status.' + status)}
+                {t('agents.status.' + watchStatusCle(a.status))}
               </span>
             </div>
             <p className="desc">{a.query}</p>
@@ -6849,6 +6876,11 @@ function AgentWizard({ onClose, onCreate }) {
   }, [skill, subject, nomPersonnalise]);
   const [cadence, setCadence] = useStateA('daily');
   const [busy, setBusy] = useStateA(false);
+  // La liste des skills est celle du backend (`GET /watches/skills`), pas une
+  // copie : elle était recopiée en dur ici, et ajouter un skill côté serveur
+  // ne le faisait jamais apparaître dans l'app.
+  const [skillsDispo, setSkillsDispo] = useStateA(null);
+  useEffectA(() => { axWatchSkills().then(setSkillsDispo).catch(() => setSkillsDispo([])); }, []);
 
   // Wizard cadence → backend cadence (daily | weekly | manual).
   const cadenceMap = { hourly: 'daily', daily: 'daily', weekly: 'weekly', realtime: 'daily', manual: 'manual' };
@@ -6902,17 +6934,16 @@ function AgentWizard({ onClose, onCreate }) {
                 {lang === 'fr' ? 'Quel type de veille (skill) ?' : 'Which veille skill?'}
               </p>
               <div className="choice-grid">
-                {[
-                  { id: 'concurrentielle', t: lang === 'fr' ? 'Concurrentielle' : 'Competitive', d: lang === 'fr' ? 'Levées, lancements, pricing, recrutements.' : 'Funding, launches, pricing, hiring.' },
-                  { id: 'reglementaire', t: lang === 'fr' ? 'Réglementaire' : 'Regulatory', d: lang === 'fr' ? 'Lois, normes, conformité du secteur.' : 'Laws, standards, compliance.' },
-                  { id: 'financement', t: lang === 'fr' ? 'Financement' : 'Funding', d: lang === 'fr' ? 'Levées, valorisations, investisseurs.' : 'Rounds, valuations, investors.' },
-                  { id: 'produit_tech', t: lang === 'fr' ? 'Produit & tech' : 'Product & tech', d: lang === 'fr' ? 'Innovations, tendances, signaux d\'usage.' : 'Innovations, trends, usage signals.' },
-                  { id: 'marche', t: lang === 'fr' ? 'Marché' : 'Market', d: lang === 'fr' ? 'Taille, dynamique, macro, demande.' : 'Size, dynamics, macro, demand.' },
-                ].map((c) => (
-                  <button key={c.id} className={'choice-tile' + (skill === c.id ? ' selected' : '')} onClick={() => setSkill(c.id)}>
-                    <h4>{c.t}</h4><p>{c.d}</p>
-                  </button>
-                ))}
+                {skillsDispo === null && <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>…</p>}
+                {(skillsDispo || []).map((c) => {
+                  const meta = skillMeta(c.key);
+                  return (
+                    <button key={c.key} className={'choice-tile' + (skill === c.key ? ' selected' : '')}
+                      onClick={() => setSkill(c.key)}>
+                      <h4>{meta.label || c.name}</h4><p>{c.focus}</p>
+                    </button>
+                  );
+                })}
               </div>
             </>
           )}
@@ -7014,7 +7045,7 @@ function AgentWizard({ onClose, onCreate }) {
   );
 }
 
-function AgentSession({ agent, onBack }) {
+function AgentSession({ agent, onBack, onSupprime }) {
   const t = window.useT();
   const lang = window.AXIAL_LANG || 'fr';
   const meta = skillMeta(agent.skill);
@@ -7022,6 +7053,25 @@ function AgentSession({ agent, onBack }) {
   const [runs, setRuns] = React.useState(null); // null = loading
   const [busy, setBusy] = React.useState(false);
   const [openRunId, setOpenRunId] = React.useState(null);
+  const [nom, setNom] = React.useState(agent.name);
+  const [edition, setEdition] = React.useState(false);
+  const [brouillon, setBrouillon] = React.useState({ name: agent.name, cadence: agent.cadence });
+  const [cadence, setCadence] = React.useState(agent.cadence);
+  const [aSupprimer, setASupprimer] = React.useState(false);
+
+  const enregistrer = async () => {
+    try {
+      const w = await axUpdateWatch(agent.id, brouillon);
+      setNom(w.name);
+      setCadence(w.cadence);
+      setEdition(false);
+    } catch (e) { /* noop */ }
+  };
+  const supprimer = async () => {
+    try { await axDeleteWatch(agent.id); } catch (e) { /* noop */ }
+    setASupprimer(false);
+    onSupprime ? onSupprime() : onBack();
+  };
 
   const loadRuns = React.useCallback(() => {
     axWatchRuns(agent.id).then(setRuns).catch(() => setRuns([]));
@@ -7052,14 +7102,28 @@ function AgentSession({ agent, onBack }) {
           <button className="btn btn-ghost btn-sm" onClick={onBack} aria-label={t('common.back')} title={t('common.back')}><Icon name="arrow-left" size={14} /></button>
           <div className="agent-card-mark"><Icon name={meta.icon} size={20} /></div>
           <div>
-            <h1 style={{ fontSize: 22, marginBottom: 4 }}>{agent.name}</h1>
+            {edition ? (
+              <input value={brouillon.name} aria-label={t('agents.modifier')}
+                onChange={(e) => setBrouillon({ ...brouillon, name: e.target.value })}
+                style={{ fontSize: 20, fontWeight: 700, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--fg)', padding: '4px 10px', marginBottom: 4, outline: 'none' }} />
+            ) : (
+              <h1 style={{ fontSize: 22, marginBottom: 4 }}>{nom}</h1>
+            )}
             <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
               <span className={'agent-status ' + statusCls}>
                 {statusCls === 'running' && <span className="dot"></span>}
-                {t('agents.status.' + statusCls)}
+                {t('agents.status.' + watchStatusCle(status))}
               </span>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.04em' }}>
-                {meta.label} · {agent.cadence} · {t('agents.next_run')}: {fmtWhen(agent.next_run_at, lang)}
+                {meta.label} · {edition ? (
+                  <select value={brouillon.cadence} aria-label={t('agents.wizard.schedule')}
+                    onChange={(e) => setBrouillon({ ...brouillon, cadence: e.target.value })}
+                    style={{ background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--fg)', fontSize: 11, padding: '2px 4px' }}>
+                    <option value="daily">{lang === 'fr' ? 'quotidien' : 'daily'}</option>
+                    <option value="weekly">{lang === 'fr' ? 'hebdomadaire' : 'weekly'}</option>
+                    <option value="manual">{lang === 'fr' ? 'manuel' : 'manual'}</option>
+                  </select>
+                ) : cadence} · {t('agents.next_run')}: {fmtWhen(agent.next_run_at, lang)}
               </span>
             </div>
           </div>
@@ -7072,6 +7136,22 @@ function AgentSession({ agent, onBack }) {
           <button className="btn btn-secondary btn-sm" onClick={toggle}>
             <Icon name={status === 'active' ? 'pause' : 'play'} size={13} />
             {status === 'active' ? 'Pause' : (lang === 'fr' ? 'Reprendre' : 'Resume')}
+          </button>
+          {edition ? (
+            <>
+              <button className="btn btn-primary btn-sm" onClick={enregistrer}>{t('common.save')}</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setBrouillon({ name: nom, cadence }); setEdition(false); }}>
+                {t('common.cancel')}
+              </button>
+            </>
+          ) : (
+            <button className="btn btn-secondary btn-sm" onClick={() => setEdition(true)}>
+              <Icon name="edit" size={13} />{t('agents.modifier')}
+            </button>
+          )}
+          <button className="icon-btn" onClick={() => setASupprimer(true)}
+            title={t('common.delete')} aria-label={t('common.delete')}>
+            <Icon name="trash" size={14} />
           </button>
           <TopControls />
         </div>
@@ -7119,6 +7199,30 @@ function AgentSession({ agent, onBack }) {
                 <div className="finding-card-head"><h4>{lang === 'fr' ? '📊 Rapport complet' : '📊 Full report'}</h4></div>
                 <div style={{ fontSize: 13.5 }}>{shown.full_content ? <MarkdownView text={shown.full_content} /> : '—'}</div>
               </div>
+              {/* Les sources étaient renvoyées par l'API et n'apparaissaient
+                  nulle part : seules les références [n] du texte subsistaient. */}
+              <div className="finding-card">
+                <div className="finding-card-head">
+                  <h4>{t('agents.run.sources')}</h4>
+                  {shown.rss_utilise === false && (
+                    <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>{t('agents.run.sans_rss')}</span>
+                  )}
+                </div>
+                <ol style={{ fontSize: 12.5, margin: 0, paddingLeft: '1.4em', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                  {(shown.sources || []).map((src, i) => (
+                    <li key={(src.url || '') + i}>
+                      <a href={src.url} target="_blank" rel="noopener noreferrer"
+                        style={{ color: 'var(--fg)' }}>{src.title || src.url}</a>
+                      <span style={{ color: 'var(--fg-3)', marginLeft: 6 }}>
+                        {src.source === 'rss' ? 'RSS' : (src.domain || '')}
+                      </span>
+                    </li>
+                  ))}
+                  {!(shown.sources || []).length && (
+                    <li style={{ color: 'var(--fg-3)', listStyle: 'none', marginLeft: '-1.4em' }}>—</li>
+                  )}
+                </ol>
+              </div>
             </>
           ) : (
             <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>
@@ -7127,6 +7231,15 @@ function AgentSession({ agent, onBack }) {
           )}
         </div>
       </div>
+
+      {aSupprimer && (
+        <ModaleConfirmation
+          titre={t('common.delete')}
+          detail={t('agents.supprimer.confirmer')}
+          onConfirmer={supprimer}
+          onAnnuler={() => setASupprimer(false)}
+        />
+      )}
     </div>
   );
 }
@@ -10365,7 +10478,11 @@ function App() {
       </div>
     </div>
   ) : null;
-  const avecBandeau = (ecran) => ((bandeauVersion || bandeauConsentement) ? <>{bandeauVersion}{bandeauConsentement}{ecran}</> : ecran);
+  // Toujours le même fragment à trois enfants : si la forme de l'arbre
+  // changeait quand un bandeau apparaît ou disparaît, React remonterait
+  // l'écran, et un formulaire en cours de saisie se viderait (constaté le
+  // 29/09 : répondre au bandeau de consentement effaçait email et mot de passe).
+  const avecBandeau = (ecran) => <>{bandeauVersion}{bandeauConsentement}{ecran}</>;
 
   if (route === 'landing') {
     return avecBandeau(<LandingPage
@@ -10461,7 +10578,7 @@ function App() {
   if (subRoute === 'conversations') {
     topbarTitle = (
       <>
-        <span className="crumb">{t('nav.conversations')}</span> / <span>{active ? active.title : t('nav.new_analysis')}</span>
+        <span className="crumb">{t('nav.conversations')}</span><span className="crumb-sep"> / </span><span>{active ? active.title : t('nav.new_analysis')}</span>
       </>
     );
   } else {
@@ -10624,7 +10741,8 @@ function App() {
           />
         )}
         {subRoute === 'agents' && agentsState === 'session' && activeAgent && (
-          <AgentSession agent={activeAgent} onBack={() => setAgentsState('library')} />
+          <AgentSession agent={activeAgent} onBack={() => setAgentsState('library')}
+                        onSupprime={() => setAgentsState('library')} />
         )}
 
         {subRoute === 'memory' && <MemorySurface />}

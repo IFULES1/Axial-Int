@@ -34,6 +34,15 @@ class WatchIn(BaseModel):
     email_recipients: list[str] | None = None
 
 
+class WatchPatch(BaseModel):
+    """Modification partielle : seuls les champs fournis sont écrits."""
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    query: str | None = Field(default=None, min_length=1)
+    skill: str | None = None
+    cadence: str | None = None
+    email_recipients: list[str] | None = None
+
+
 class WatchOut(BaseModel):
     id: str
     name: str
@@ -54,6 +63,9 @@ class WatchRunOut(BaseModel):
     delta_content: str
     full_content: str
     sources: list | None
+    # 37 % des runs n'ont consommé aucun article RSS et rien ne le disait :
+    # c'est pourtant la différence entre une veille et une recherche web.
+    rss_utilise: bool
 
 
 class SkillOut(BaseModel):
@@ -242,7 +254,8 @@ def runs(watch_id: str, user: AuthUser = Depends(get_current_user),
          db: Session = Depends(get_db)) -> list[WatchRunOut]:
     return [
         WatchRunOut(id=str(r.id), created_at=r.created_at, had_changes=r.had_changes,
-                    delta_content=r.delta_content, full_content=r.full_content, sources=r.sources)
+                    delta_content=r.delta_content, full_content=r.full_content, sources=r.sources,
+                    rss_utilise=bool(r.new_article_urls))
         for r in service.list_runs(db, user.id, watch_id)
     ]
 
@@ -254,6 +267,18 @@ def watch_feeds(watch_id: str, user: AuthUser = Depends(get_current_user),
     + catalogue, filtrés par les catégories du skill de l'agent."""
     watch = service._own_watch(db, user.id, watch_id)
     return [WatchFeedOut(**item) for item in service.feeds_pour_watch(db, user.id, watch)]
+
+
+@router.patch("/{watch_id}", response_model=WatchOut)
+def modifier(watch_id: str, payload: WatchPatch,
+             user: AuthUser = Depends(get_current_user),
+             db: Session = Depends(get_db)) -> WatchOut:
+    champs = payload.model_dump(exclude_unset=True)
+    if champs.get("cadence") and champs["cadence"] not in _CADENCES:
+        champs.pop("cadence")
+    if champs.get("skill") and champs["skill"] not in _SKILLS:
+        champs.pop("skill")
+    return _out(service.modifier_watch(db, user.id, watch_id, champs))
 
 
 @router.post("/{watch_id}/pause", response_model=WatchOut)
