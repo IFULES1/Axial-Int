@@ -28,6 +28,14 @@ test('Clarity : landing, auth et onboarding seulement', () => {
   assert.equal(clarityAutoriseSur('app'), false);
 });
 
+test('identifiants : lecture littérale de process.env (sinon Next ne substitue rien)', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'app/_prototype/mesure.js'), 'utf8');
+  assert.match(src, /process\.env\.NEXT_PUBLIC_GA_ID/);
+  assert.match(src, /process\.env\.NEXT_PUBLIC_CLARITY_ID/);
+  assert.doesNotMatch(src, /identifiants\(env = process\.env\)/);
+  assert.deepEqual(identifiants({ NEXT_PUBLIC_GA_ID: ' G-1 ', NEXT_PUBLIC_CLARITY_ID: '' }), { ga: 'G-1', clarity: null });
+});
+
 test('identifiants vides = rien ne se charge', () => {
   _reinitialiserPourTests();
   assert.deepEqual(identifiants({}), { ga: null, clarity: null });
@@ -44,6 +52,11 @@ test('GA4 chargé une seule fois, IP anonymisée, événements transmis', () => 
   assert.equal(chargerGA('G-TEST1234', d), false, 'pas deux fois');
   assert.equal(d.head.enfants.length, 1);
   assert.match(d.head.enfants[0].src, /gtag\/js\?id=G-TEST1234/);
+  const consent = d.w.dataLayer.find((a) => a[0] === 'consent');
+  assert.equal(consent[1], 'default');
+  assert.equal(consent[2].analytics_storage, 'granted');
+  assert.equal(consent[2].ad_storage, 'denied');
+  assert.ok(d.w.dataLayer.indexOf(consent) < d.w.dataLayer.findIndex((a) => a[0] === 'config'), 'consent avant config');
   const config = d.w.dataLayer.find((a) => a[0] === 'config');
   assert.equal(config[2].anonymize_ip, true);
   assert.equal(evenement('inscription', { source: 'test' }, d.w), true);

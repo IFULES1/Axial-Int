@@ -33,11 +33,18 @@ export function clarityAutoriseSur(route) {
   return ROUTES_CLARITY.includes(route);
 }
 
-/** Identifiants fournis par l'environnement à la compilation. */
-export function identifiants(env = process.env) {
+/** Identifiants fournis par l'environnement à la compilation.
+ *
+ * Next.js ne substitue `process.env.NEXT_PUBLIC_*` dans le bundle navigateur
+ * que lorsque l'expression est écrite LITTÉRALEMENT : `env.NEXT_PUBLIC_GA_ID`
+ * à travers une variable reste `undefined` côté client (constaté le 29/09,
+ * bandeau jamais affiché). Le paramètre `env` ne sert qu'aux tests. */
+export function identifiants(env) {
+  const ga = env ? env.NEXT_PUBLIC_GA_ID : process.env.NEXT_PUBLIC_GA_ID;
+  const clarity = env ? env.NEXT_PUBLIC_CLARITY_ID : process.env.NEXT_PUBLIC_CLARITY_ID;
   return {
-    ga: (env.NEXT_PUBLIC_GA_ID || '').trim() || null,
-    clarity: (env.NEXT_PUBLIC_CLARITY_ID || '').trim() || null,
+    ga: (ga || '').trim() || null,
+    clarity: (clarity || '').trim() || null,
   };
 }
 
@@ -54,6 +61,13 @@ export function chargerGA(id, doc = globalThis.document) {
   const w = doc.defaultView || globalThis;
   w.dataLayer = w.dataLayer || [];
   w.gtag = function () { w.dataLayer.push(arguments); };
+  // Mode consentement Google (v2) : le script n'est injecté qu'après accord,
+  // mais GA4 doit aussi l'entendre explicitement — mesure d'audience
+  // accordée, tout ce qui touche à la publicité refusé.
+  w.gtag('consent', 'default', {
+    analytics_storage: 'granted', ad_storage: 'denied',
+    ad_user_data: 'denied', ad_personalization: 'denied',
+  });
   w.gtag('js', new Date());
   // Pas d'identifiant publicitaire, IP anonymisée : le strict nécessaire.
   w.gtag('config', id, { anonymize_ip: true, allow_google_signals: false, allow_ad_personalization_signals: false });
