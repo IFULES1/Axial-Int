@@ -7,8 +7,9 @@
 - GA4 avec bandeau de consentement FR/EN, mode consentement Google, lecture littérale des NEXT_PUBLIC (8ed43a0). Identifiant G-GZEKR57LPF dans /opt/axial-intelligence/frontend/.env.local.
 - CREDITS_ESSAI = 50 (Doppler prd), effectif depuis le redémarrage backend.
 
-## En attente de déploiement
-- Clarity (projet ypsvvgbaan) : code prêt (suspendu dans l'app, repris sur landing/auth/onboarding), NEXT_PUBLIC_CLARITY_ID à poser dans .env.local du serveur puis rebuild.
+## Clarity déployé (build 1790671747)
+- Projet ypsvvgbaan, actif sur landing/auth/onboarding seulement, suspendu dans l'app (clarity stop/start). GA4 partout, sans contenu.
+- Décision Miradie : on garde ainsi. Sujet ouvert pour plus tard : Clarity dans l'app en masquage strict, ou événements GA4 supplémentaires (menus, export, agents), après deux semaines de sessions landing/onboarding.
 
 ## Décisions
 - Pas de rattrapage pour iasi / STARTZUP (bénin).
