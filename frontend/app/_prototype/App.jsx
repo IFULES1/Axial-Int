@@ -15,7 +15,7 @@ import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, 
 import { parserMarkdown } from "./markdown";
 import { creerVeilleVersion, lireVersionServie } from "./version";
 import { chargerGooglePicker, ouvrirPickerDrive } from "./drive";
-import { lireConsentement, enregistrerConsentement, clarityAutoriseSur, identifiants, chargerGA, chargerClarity, evenement } from "./mesure";
+import { lireConsentement, enregistrerConsentement, clarityAutoriseSur, identifiants, chargerGA, chargerClarity, suspendreClarity, reprendreClarity, evenement } from "./mesure";
 import { validerIdentifiants, emailNormalise } from "./auth_validation";
 
 
@@ -8777,7 +8777,11 @@ function App() {
   useEffect(() => {
     if (consentement !== 'accepte') return;
     if (ids.ga) chargerGA(ids.ga);
-    if (ids.clarity && clarityAutoriseSur(route)) chargerClarity(ids.clarity);
+    if (!ids.clarity) return;
+    // Clarity n'enregistre que la landing, la connexion et l'onboarding :
+    // chargé là, suspendu dès que l'on entre dans l'app, repris si l'on en sort.
+    if (clarityAutoriseSur(route)) { chargerClarity(ids.clarity); reprendreClarity(); }
+    else suspendreClarity();
   }, [consentement, route]);
   useEffect(() => {
     if (consentement === 'accepte' && ids.ga) evenement('page_vue', { route });

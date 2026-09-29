@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
   lireConsentement, enregistrerConsentement, clarityAutoriseSur, identifiants,
-  chargerGA, chargerClarity, evenement, _reinitialiserPourTests, CONSENTEMENT_VERSION,
+  chargerGA, chargerClarity, suspendreClarity, reprendreClarity, clarityActif, evenement, _reinitialiserPourTests, CONSENTEMENT_VERSION,
 } from '../app/_prototype/mesure.js';
 
 const memoire = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v) }; };
@@ -79,4 +79,23 @@ test('App.jsx : bandeau de consentement sur toutes les sorties, événements pos
   for (const e of ["evenement\\('inscription'", "evenement\\('rapport_lance'", "evenement\\('conversation_envoyee'"]) assert.match(app, new RegExp(e), e);
   assert.match(app, /clarityAutoriseSur\(route\)/);
   for (const cle of ["'mesure.titre'", "'mesure.accepter'", "'mesure.refuser'"]) assert.equal((app.match(new RegExp(cle + ': ', 'g')) || []).length, 2, cle + ' FR+EN');
+});
+
+test('Clarity suspendu dans l’app, repris en sortant, jamais avant chargement', () => {
+  _reinitialiserPourTests();
+  const w = { appels: [] }; w.clarity = (...a) => w.appels.push(a[0]);
+  assert.equal(suspendreClarity(w), false, 'rien à suspendre avant chargement');
+  const d = { head: { appendChild() {} }, createElement: () => ({}), defaultView: w };
+  chargerClarity('ypsvvgbaan', d);
+  assert.equal(clarityActif(), true);
+  assert.equal(suspendreClarity(w), true);
+  assert.equal(suspendreClarity(w), false, 'idempotent');
+  assert.equal(clarityActif(), false);
+  assert.equal(reprendreClarity(w), true);
+  assert.deepEqual(w.appels, ['stop', 'start']);
+});
+
+test('App.jsx : Clarity suspendu hors des routes autorisées', () => {
+  const app = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'app/_prototype/App.jsx'), 'utf8');
+  assert.match(app, /if \(clarityAutoriseSur\(route\)\) \{ chargerClarity\(ids\.clarity\); reprendreClarity\(\); \}\s*else suspendreClarity\(\);/);
 });

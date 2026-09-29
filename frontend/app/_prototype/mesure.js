@@ -87,6 +87,25 @@ export function chargerClarity(id, doc = globalThis.document) {
   return true;
 }
 
+/* Une fois injecté sur la landing, le script Clarity survit à la navigation
+ * interne vers l'app (même page, même session) : sans ces deux appels, il
+ * continuerait d'enregistrer les conversations et les rapports. `stop` et
+ * `start` sont l'API officielle de Clarity. */
+let _clarityActif = true;
+export function suspendreClarity(w = globalThis) {
+  if (!_charges.clarity || typeof w.clarity !== 'function' || !_clarityActif) return false;
+  w.clarity('stop');
+  _clarityActif = false;
+  return true;
+}
+export function reprendreClarity(w = globalThis) {
+  if (!_charges.clarity || typeof w.clarity !== 'function' || _clarityActif) return false;
+  w.clarity('start');
+  _clarityActif = true;
+  return true;
+}
+export function clarityActif() { return _charges.clarity && _clarityActif; }
+
 /** Envoie un événement produit à GA4 s'il est chargé ; sinon ne fait rien. */
 export function evenement(nom, proprietes = {}, w = globalThis) {
   if (!w || typeof w.gtag !== 'function') return false;
@@ -94,4 +113,4 @@ export function evenement(nom, proprietes = {}, w = globalThis) {
   return true;
 }
 
-export function _reinitialiserPourTests() { _charges.ga = false; _charges.clarity = false; }
+export function _reinitialiserPourTests() { _charges.ga = false; _charges.clarity = false; _clarityActif = true; }
