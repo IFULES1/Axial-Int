@@ -7824,7 +7824,11 @@ function BillingSettings({ lang, t }) {
     // Sans cette entrée, le bonus de retour s'affichait tel quel dans
     // l'historique : le code technique « retour_migration », lisible par personne.
     retour_migration: lang === 'fr' ? 'Bonus de retour' : 'Welcome-back bonus',
+    premier_rapport_offert: lang === 'fr' ? 'Rapport offert' : 'Complimentary report',
   };
+  // Événements techniques à delta nul (verrou libéré après un échec de
+  // génération) : ils n'ont rien à dire à l'utilisateur.
+  const EVENEMENTS_MASQUES = new Set(['premier_rapport_echec']);
   return (
     <>
       <h2>{t('settings.billing')}</h2>
@@ -7869,7 +7873,7 @@ function BillingSettings({ lang, t }) {
         <h3 style={{ marginBottom: 8 }}>{lang === 'fr' ? 'Consommation de crédits' : 'Credit usage'}</h3>
         {events === null && <p>…</p>}
         {events && events.length === 0 && <p>{lang === 'fr' ? 'Aucun mouvement pour le moment.' : 'No movement yet.'}</p>}
-        {events && events.slice(0, 30).map((e, i) => (
+        {events && events.filter((e) => !EVENEMENTS_MASQUES.has(e.action)).slice(0, 30).map((e, i) => (
           <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
             <span style={{ color: 'var(--fg-2)' }}>{ACTION_LABELS[e.action] || e.action}</span>
             <span style={{ display: 'inline-flex', gap: 14 }}>

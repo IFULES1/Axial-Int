@@ -228,9 +228,17 @@ def test_offrir_perd_la_course_sans_generer_de_second_rapport(monkeypatch):
     monkeypatch.setattr(onboarding, "profil_utilisable",
                         lambda db, u: {"company_name": "Axial", "sector": "SaaS"})
 
+    class _Termine:
+        statut = "termine"
+        id = uuidlib.uuid4()
+
     def _jamais_appele(db, user_id, **kw):
         generations.append(kw.get("query", ""))
-        raise AssertionError("La génération ne doit pas être lancée deux fois")
+        if len(generations) > 1:
+            raise AssertionError("La génération ne doit pas être lancée deux fois")
+        # Le premier appel aboutit : un échec libérerait le verrou (voir
+        # test_echec_libere_le_marqueur), ce qui n'est pas le scénario ici.
+        return _Termine()
 
     with Session(engine) as db1, Session(engine) as db2:
         # Premier appel : marque l'offre, puis on coupe avant la génération.
@@ -241,8 +249,7 @@ def test_offrir_perd_la_course_sans_generer_de_second_rapport(monkeypatch):
         monkeypatch.setattr(service, "lancer_rapport", _jamais_appele)
         monkeypatch.setattr(memory, "build_context", lambda db, u: "")
         monkeypatch.setattr(service, "_profile_dict", lambda db, u: {})
-        with pytest.raises(AssertionError):
-            onboarding.offrir(db1, uid)
+        assert onboarding.offrir(db1, uid) is not None
         assert len(generations) == 1  # le premier a bien atteint la génération
 
         # Second appel concurrent : l'index tranche, retour None sans génération.
@@ -3277,3 +3284,70 @@ def test_une_course_sur_la_cle_ne_lance_pas_deux_moteurs(http, monkeypatch):
             analysis_type="synthese_executive", cle_idempotence="cle-course")
         assert str(perdante.id) == str(gagnante.id)
         assert len(lances) == 1, "un seul moteur pour une seule ligne"
+
+
+# --- Échec de génération : le verrou est libéré, borné à MAX_ECHECS ----------
+
+def _preparer_offre(monkeypatch, generateur):
+    from app.modules.analysis import onboarding
+    import app.modules.analysis.service as service
+    from app.modules.memory import service as memory
+    monkeypatch.setattr(onboarding, "profil_utilisable",
+                        lambda db, u: {"company_name": "Axial", "sector": "SaaS"})
+    monkeypatch.setattr(service, "lancer_rapport", generateur)
+    monkeypatch.setattr(memory, "build_context", lambda db, u: "")
+    monkeypatch.setattr(service, "_profile_dict", lambda db, u: {})
+    return onboarding
+
+
+def test_echec_libere_le_marqueur_et_permet_le_rattrapage(monkeypatch):
+    """Le 21/09, une exception dans le worker a laissé le marqueur posé : plus
+    jamais de rattrapage. Désormais l'échec est tracé et le verrou libéré."""
+    engine = _base()
+    uid = str(uuidlib.uuid4())
+    appels: list[int] = []
+
+    class _Termine:
+        statut = "termine"
+        id = uuidlib.uuid4()
+
+    def _generateur(db, user_id, **kw):
+        appels.append(1)
+        if len(appels) == 1:
+            raise RuntimeError("could not find table 'projects'")
+        return _Termine()
+
+    onboarding = _preparer_offre(monkeypatch, _generateur)
+    with Session(engine) as db:
+        with pytest.raises(RuntimeError):
+            onboarding.offrir(db, uid)
+        assert onboarding.deja_offert(db, uid) is False, "le verrou est libéré"
+        assert onboarding.echecs(db, uid) == 1
+        # L'heure suivante : le rattrapage réussit.
+        assert onboarding.offrir(db, uid) is not None
+        assert onboarding.deja_offert(db, uid) is True
+        assert len(appels) == 2
+
+
+def test_offre_abandonnee_apres_max_echecs(monkeypatch):
+    from app.modules.analysis.onboarding import MAX_ECHECS
+    engine = _base()
+    uid = str(uuidlib.uuid4())
+    appels: list[int] = []
+
+    class _Rate:
+        statut = "sources_insuffisantes"
+
+    def _generateur(db, user_id, **kw):
+        appels.append(1)
+        return _Rate()
+
+    onboarding = _preparer_offre(monkeypatch, _generateur)
+    with Session(engine) as db:
+        for _ in range(MAX_ECHECS):
+            assert onboarding.offrir(db, uid) is None
+        assert len(appels) == MAX_ECHECS
+        assert onboarding.echecs(db, uid) == MAX_ECHECS
+        # Au-delà : plus aucune génération, l'offre est abandonnée.
+        assert onboarding.offrir(db, uid) is None
+        assert len(appels) == MAX_ECHECS

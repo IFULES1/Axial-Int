@@ -27,6 +27,13 @@ logger = logging.getLogger("axial.analysis.onboarding")
 
 ACTION = "premier_rapport_offert"
 TYPE_RAPPORT = "etude_marche"
+# Un échec de génération libère le marqueur (voir `_liberer`) pour que le
+# worker réessaie à l'heure suivante ; chaque échec est tracé par cet
+# événement à delta 0, et l'offre s'arrête après MAX_ECHECS tentatives — une
+# question qui ne trouve pas de sources ne doit pas coûter une recherche par
+# heure indéfiniment.
+ACTION_ECHEC = "premier_rapport_echec"
+MAX_ECHECS = 3
 
 
 def question_pour(profil: dict) -> str:
@@ -57,9 +64,49 @@ def question_pour(profil: dict) -> str:
 
 
 def deja_offert(db, user_id: str) -> bool:
-    return bool(db.execute(
-        text("SELECT 1 FROM credit_events WHERE user_id = :u AND action = :a LIMIT 1"),
-        {"u": user_id, "a": ACTION}).first())
+    import uuid as uuidlib
+    from sqlalchemy import select
+    from app.modules.billing.models import CreditEvent
+
+    return db.execute(select(CreditEvent.id).where(
+        CreditEvent.user_id == uuidlib.UUID(str(user_id)),
+        CreditEvent.action == ACTION).limit(1)).first() is not None
+
+
+def echecs(db, user_id: str) -> int:
+    # ORM et non SQL brut : sous SQLite (tests) l'UUID est stocké sans tirets,
+    # une comparaison textuelle ne trouverait jamais la ligne.
+    import uuid as uuidlib
+    from sqlalchemy import func, select
+    from app.modules.billing.models import CreditEvent
+
+    return int(db.execute(select(func.count()).where(
+        CreditEvent.user_id == uuidlib.UUID(str(user_id)),
+        CreditEvent.action == ACTION_ECHEC)).scalar() or 0)
+
+
+def _liberer(db, user_id: str, motif: str) -> None:
+    """Retire le marqueur « offert » après un échec et trace l'échec.
+
+    Le marqueur est un verrou posé avant la génération (voir `offrir`), pas
+    une ligne de consommation : le retirer quand la génération a échoué rend
+    l'utilisateur de nouveau éligible au rattrapage. Sans cela, iasi (21/09)
+    est restée définitivement sans rapport après une erreur de mapping dans
+    le worker, alors que l'heure suivante aurait suffi.
+    """
+    import uuid as uuidlib
+    from sqlalchemy import delete
+    from app.modules.billing import service as billing
+    from app.modules.billing.models import CreditEvent
+
+    db.rollback()
+    db.execute(delete(CreditEvent).where(
+        CreditEvent.user_id == uuidlib.UUID(str(user_id)),
+        CreditEvent.action == ACTION))
+    billing._log_event(db, user_id, 0, ACTION_ECHEC)
+    db.commit()
+    logger.warning("Premier rapport non abouti pour %s (%s) : marqueur libéré, "
+                   "échec %d/%d", user_id, motif, echecs(db, user_id), MAX_ECHECS)
 
 
 def profil_utilisable(db, user_id: str) -> dict | None:
@@ -87,6 +134,9 @@ def offrir(db, user_id: str) -> str | None:
     from app.modules.reports import models as rm
 
     if deja_offert(db, user_id):
+        return None
+    if echecs(db, user_id) >= MAX_ECHECS:
+        logger.info("Premier rapport abandonné pour %s après %d échecs", user_id, MAX_ECHECS)
         return None
     profil = profil_utilisable(db, user_id)
     if not profil:
@@ -125,13 +175,16 @@ def offrir(db, user_id: str) -> str | None:
     # `attendre=True` : `offrir` est déjà appelé depuis un thread (route
     # `/analysis/premier-rapport`) ou depuis le worker de rattrapage — en
     # relancer un second ne ferait qu'ajouter une session sans rien gagner.
-    rapport = service.lancer_rapport(
-        db, user_id, query=question, analysis_type=TYPE_RAPPORT, title=None,
-        is_admin=True, attendre=True,
-    )
+    try:
+        rapport = service.lancer_rapport(
+            db, user_id, query=question, analysis_type=TYPE_RAPPORT, title=None,
+            is_admin=True, attendre=True,
+        )
+    except Exception as e:  # noqa: BLE001 — libérer le verrou avant de remonter
+        _liberer(db, user_id, f"{type(e).__name__}: {str(e)[:80]}")
+        raise
     if rapport is None or rapport.statut != rm.TERMINE:
-        logger.warning("Premier rapport non abouti pour %s (%s)", user_id,
-                       getattr(rapport, "statut", "introuvable"))
+        _liberer(db, user_id, getattr(rapport, "statut", "introuvable"))
         return None
 
     # Pas de `notification.prevenir` ici : le moteur l'a déjà fait (une seule
@@ -154,6 +207,8 @@ def rattraper(db, limite: int = 5) -> int:
           AND (cp.company_name IS NOT NULL OR cp.sector IS NOT NULL)
           AND NOT EXISTS (SELECT 1 FROM credit_events e
                           WHERE e.user_id = u.id AND e.action = :a)
+          AND (SELECT count(*) FROM credit_events e
+               WHERE e.user_id = u.id AND e.action = :echec) < :max_echecs
           -- Les rapports RESTAURÉS de l'ancienne plateforme ne comptent pas :
           -- ils ont été copiés à l'inscription, leur propriétaire n'a jamais vu
           -- Axial produire quoi que ce soit. Les compter excluait de l'offre
@@ -166,7 +221,8 @@ def rattraper(db, limite: int = 5) -> int:
                                   WHERE l.imported_for = u.id
                                     AND l.title = left(r.title, 500)))
         LIMIT :n
-    """), {"a": ACTION, "n": limite}).scalars().all()
+    """), {"a": ACTION, "echec": ACTION_ECHEC, "max_echecs": MAX_ECHECS,
+           "n": limite}).scalars().all()
     faits = 0
     for uid in lignes:
         try:
