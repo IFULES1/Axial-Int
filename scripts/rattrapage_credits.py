@@ -39,7 +39,7 @@ Tu as maintenant {solde} crédits, de quoi lancer une étude de marché complèt
 
 C'est ici : app.axial-ia.fr
 
-Miradie"""
+Miradie B"""
 
 
 def concernes(db) -> list[dict]:

@@ -109,7 +109,7 @@ def corps_essai(langue, ctx):
             "Et si tu n'as pas encore eu le temps de creuser une vraie question, "
             "dis-le-moi : je préfère décaler ton essai plutôt que te facturer "
             "quelque chose que tu n'as pas pu tester.\n\n"
-            "Miradie"
+            "Miradie B"
         )
     return (
         "Hello,\n\n"
@@ -122,7 +122,7 @@ def corps_essai(langue, ctx):
         "And if you have not had time to dig into a real question yet, just "
         "tell me: I would rather extend your trial than bill you for something "
         "you could not test.\n\n"
-        "Miradie"
+        "Miradie B"
     )
 
 
@@ -157,7 +157,7 @@ def corps_bienvenue(langue, ctx):
             f"C'est ici : {APP}\n\n"
             "Si quelque chose coince, réponds à ce message, il arrive "
             "directement chez moi.\n\n"
-            "Miradie"
+            "Miradie B"
         )
     return (
         "Hello,\n\n"
@@ -173,7 +173,7 @@ def corps_bienvenue(langue, ctx):
         f"It starts here: {APP}\n\n"
         "If anything gets in the way, just reply to this message, it comes "
         "straight to me.\n\n"
-        "Miradie"
+        "Miradie B"
     )
 
 
@@ -208,7 +208,7 @@ def corps_profil(langue, ctx):
             "confus, une question sans réponse, dis-le-moi franchement en "
             "répondant à ce message. C'est exactement ce que j'ai besoin de "
             "savoir en ce moment.\n\n"
-            "Miradie"
+            "Miradie B"
         )
     return (
         "Hello,\n\n"
@@ -221,7 +221,7 @@ def corps_profil(langue, ctx):
         "And if you opened the app and something stopped you, a confusing "
         "screen, a question left unanswered, tell me plainly by replying to "
         "this message. That is exactly what I need to know right now.\n\n"
-        "Miradie"
+        "Miradie B"
     )
 
 
@@ -266,7 +266,7 @@ def corps_question(langue, ctx):
             f"Copie-colle celle qui te parle : {APP}\n\n"
             "Et si aucune ne correspond, réponds-moi avec ta vraie question, "
             "je te dis honnêtement si Axial est le bon outil pour elle.\n\n"
-            "Miradie"
+            "Miradie B"
         )
     return (
         "Hello,\n\n"
@@ -282,7 +282,7 @@ def corps_question(langue, ctx):
         f"Copy whichever speaks to you: {APP}\n\n"
         "And if none of them fits, reply with your real question, I will tell "
         "you honestly whether Axial is the right tool for it.\n\n"
-        "Miradie"
+        "Miradie B"
     )
 
 
@@ -316,7 +316,7 @@ def corps_credits(langue, ctx):
             f"Tout est dans l'onglet Crédits : {APP}\n\n"
             "Si tu hésites sur le format qui correspond à ton usage, réponds à "
             "ce message, je te réponds moi-même.\n\n"
-            "Miradie"
+            "Miradie B"
         )
     return (
         "Hello,\n\n"
@@ -327,7 +327,7 @@ def corps_credits(langue, ctx):
         f"It is all in the Credits tab: {APP}\n\n"
         "If you are unsure which format fits your usage, reply to this message "
         "and I will answer you myself.\n\n"
-        "Miradie"
+        "Miradie B"
     )
 
 
@@ -404,7 +404,7 @@ def corps_inactif_j7(langue, ctx):
             "question de ton choix, avec les sources citées et un export PDF.\n\n"
             f"Il te reste {solde} crédits pour les essayer : {APP}\n\n"
             "Si tu as une question, je suis disponible pour qu'on fasse un point.\n\n"
-            "Miradie"
+            "Miradie B"
         )
     return (
         "Hello,\n\n"
@@ -414,7 +414,7 @@ def corps_inactif_j7(langue, ctx):
         "your choice, with cited sources and a PDF export.\n\n"
         f"You have {solde} credits left to try them: {APP}\n\n"
         "If you have any question, I am happy to set up a quick call.\n\n"
-        "Miradie"
+        "Miradie B"
     )
 
 
@@ -435,7 +435,7 @@ def corps_reactivation(langue, ctx):
             "directement les prochaines améliorations.\n\n"
             "Et si la semaine a simplement été chargée, tes crédits "
             f"t'attendent : {APP}\n\n"
-            "Miradie"
+            "Miradie B"
         )
     return (
         "Hello,\n\n"
@@ -445,7 +445,7 @@ def corps_reactivation(langue, ctx):
         "Reports taking too long? One line in reply helps a lot: Axial is "
         "young, and this feedback directly shapes the next improvements.\n\n"
         f"And if the week was simply busy, your credits are waiting: {APP}\n\n"
-        "Miradie"
+        "Miradie B"
     )
 
 
@@ -466,7 +466,7 @@ def corps_inactif_j30(langue, ctx):
             "vendredi matin : réponds-moi avec le jour et l'heure qui te "
             "conviennent, je t'envoie l'invitation.\n\n"
             f"Tes {solde} crédits restent disponibles sur {APP}\n\n"
-            "Miradie"
+            "Miradie B"
         )
     return (
         "Hello,\n\n"
@@ -477,7 +477,7 @@ def corps_inactif_j30(langue, ctx):
         "mornings: reply with the day and time that suit you and I will send "
         "an invite.\n\n"
         f"Your {solde} credits are still available on {APP}\n\n"
-        "Miradie"
+        "Miradie B"
     )
 
 
@@ -514,7 +514,7 @@ def corps_reactivation_v1(langue, ctx):
             "exactement là-dessus que je le corrige.\n\n"
             "Et si c'est juste que la semaine a été chargée, tes crédits "
             f"t'attendent : {APP}\n\n"
-            "Miradie"
+            "Miradie B"
         )
     return (
         "Hello,\n\n"
@@ -524,7 +524,7 @@ def corps_reactivation_v1(langue, ctx):
         "Reports taking too long? One line in reply helps me more than you "
         "would think, Axial is young, and this is exactly what I fix it on.\n\n"
         f"And if the week was simply busy, your credits are waiting: {APP}\n\n"
-        "Miradie"
+        "Miradie B"
     )
 
 

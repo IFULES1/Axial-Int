@@ -27,7 +27,7 @@ An apology first: Axial was unreachable from Thursday 3rd to Monday 7th because 
 
 I saw you came back on Tuesday. I'd like your take on the reports you produced — and on what stopped you at the card screen. Would Monday 14th or Tuesday 15th work, morning or afternoon? Fifteen minutes. Tell me the slot and I'll send an invite.
 
-Miradie""",
+Miradie B""",
     },
     {
         "email": "soumeya@optimpharma.fr",
@@ -39,7 +39,7 @@ Ton essai Axial est prolongé jusqu'au 17 septembre. Tes 22 études de l'ancienn
 
 Tu n'as pas encore ouvert l'application, et je préfère comprendre pourquoi plutôt que te relancer par email. Lundi 14 ou mardi 15, matin ou après-midi, ça t'irait ? Quinze minutes pour faire le point. Dis-moi le créneau et je t'envoie l'invitation.
 
-Miradie""",
+Miradie B""",
     },
 ]
 

@@ -30,7 +30,7 @@ Tu le retrouves dans l'onglet Rapports : app.axial-ia.fr
 
 Si quelque chose cloche, un chiffre qui te paraît faux, une source qui manque, dis-le-moi en répondant à ce message. C'est comme ça que l'app s'améliore.
 
-Miradie""",
+Miradie B""",
     "en": """Hello,
 
 Your report "{titre}" is ready.
@@ -41,7 +41,7 @@ You will find it in the Reports tab: app.axial-ia.fr
 
 If something looks off, a figure that seems wrong, a missing source, tell me by replying to this message. That is how the app gets better.
 
-Miradie""",
+Miradie B""",
 }
 
 

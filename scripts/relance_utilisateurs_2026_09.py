@@ -62,7 +62,7 @@ Pour reprendre : {app}
 
 Si tu as une question, je suis disponible pour qu'on fasse un point.
 
-Miradie""",
+Miradie B""",
     ),
     "sans_rapport": (
         "relance_sans_rapport_2026_09",
@@ -85,7 +85,7 @@ Onglet Rapports : {app}
 
 Si tu as une question ou si tu hésites sur le format, je suis disponible pour qu'on fasse un point.
 
-Miradie""",
+Miradie B""",
     ),
     "dormant": (
         "relance_dormant_2026_09",
@@ -112,7 +112,7 @@ Vendredi 9 octobre à 10h
 
 Réponds-moi avec celui qui te convient, je t'envoie l'invitation.
 
-Miradie""",
+Miradie B""",
     ),
 }
 
@@ -144,7 +144,7 @@ Friday 9 October at 10 am
 
 Just reply with the one that suits you and I will send an invite.
 
-Miradie""",
+Miradie B""",
     ),
 }
 
@@ -166,7 +166,7 @@ Pour reprendre : {app}
 
 Si tu as une question, je suis disponible pour qu'on fasse un point.
 
-Miradie"""),
+Miradie B"""),
     "lenamendy06@gmail.com": (
         "Ta levée de 500 k€ : des investisseurs mieux ciblés pour STARTZUP",
         """Hello,
@@ -179,7 +179,7 @@ Avec tes 92 crédits, tu peux lancer cette cartographie (40 crédits) directemen
 
 Si tu as une question, je suis disponible pour qu'on fasse un point.
 
-Miradie"""),
+Miradie B"""),
     "s.gorjux@skyted.io": (
         "Skyted : de quoi préparer ta levée sur Axial",
         """Hello,
@@ -202,7 +202,7 @@ Vendredi 9 octobre à 10h
 
 Réponds-moi avec celui qui te convient, je t'envoie l'invitation.
 
-Miradie"""),
+Miradie B"""),
     "christian@eqonx.com": (
         "EQON Nexus: what has changed since your FenneQ study",
         """Hi Christian,
@@ -225,7 +225,7 @@ Friday 9 October at 10 am
 
 Just reply with the one that suits you and I will send an invite.
 
-Miradie"""),
+Miradie B"""),
 }
 
 

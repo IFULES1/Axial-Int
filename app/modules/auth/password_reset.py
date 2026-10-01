@@ -132,7 +132,7 @@ def _envoyer_invitation(db: Session, email: str) -> None:
         f"{rappel}\n\n"
         "Créer ton compte : https://app.axial-ia.fr\n\n"
         "Si tu n'es pas à l'origine de cette demande, ignore ce message.\n\n"
-        "Miradie\nAxial Intelligence"
+        "Miradie B\nAxial Intelligence"
     )
     _poster(email, "Ton compte Axial n'est pas encore créé", texte)
 

@@ -47,7 +47,7 @@ C'est ici : app.axial-ia.fr
 
 Si Axial ne correspond pas à ton besoin, dis-le-moi en une ligne, c'est utile aussi, et je ne te relancerai plus.
 
-Miradie"""
+Miradie B"""
 
 
 def prenoms() -> dict[str, str]:

@@ -54,7 +54,7 @@ C'est ici : app.axial-ia.fr
 
 Si ce n'est pas pour toi, un mot suffit et je ne reviens plus. Si tu préfères qu'on en parle 15 minutes, dis-moi un créneau.
 
-Miradie"""
+Miradie B"""
 
 
 def destinataires(db) -> list[str]:

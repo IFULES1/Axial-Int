@@ -62,7 +62,7 @@ L'inscription prend deux minutes : tu décris ton entreprise, puis tu actives to
 
 Si quelque chose coince ou ne te convient pas, réponds simplement à cet email : je lis tout.
 
-Miradie
+Miradie B
 Axial Intelligence
 
 —

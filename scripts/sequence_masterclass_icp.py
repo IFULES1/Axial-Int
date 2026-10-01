@@ -63,7 +63,7 @@ Pour créer ton compte : {app}
 
 Si tu as une question sur ton ICP ou sur l'outil, je suis disponible pour qu'on fasse un point.
 
-Miradie"""),
+Miradie B"""),
     ("masterclass_icp_j3", dt.timedelta(days=3),
      "Ton ICP, vérifié en 10 minutes",
      """Hello{prenom},
@@ -76,7 +76,7 @@ En retour : des chiffres sourcés, les concurrents qui visent déjà ce segment,
 
 Création du compte en deux minutes, premier rapport offert : {app}
 
-Miradie"""),
+Miradie B"""),
     ("masterclass_icp_j7", dt.timedelta(days=4),
      "Dernier message de ma part",
      """Hello{prenom},
@@ -87,7 +87,7 @@ Si tu travailles sur un projet en ce moment, Axial peut te faire gagner plusieur
 
 Si le moment ne s'y prête pas, aucun souci, un mot en réponse me suffit. Et si tu as une question, je suis disponible pour qu'on fasse un point.
 
-Miradie"""),
+Miradie B"""),
 ]
 
 
