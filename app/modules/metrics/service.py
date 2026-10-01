@@ -257,12 +257,22 @@ _CLAUSE_INTERNES = (
     "AND u.email NOT LIKE '%francedigitale.org'"
 )
 
+# `last_sign_in_at` ne bouge qu'à une saisie de mot de passe : un utilisateur
+# qui revient avec une session encore valide garde la date de sa première
+# connexion (Clover affichait le 16/09 alors qu'elle était revenue le 29/09).
+# `auth.sessions.updated_at` avance à chaque rafraîchissement de jeton, donc à
+# chaque visite réelle.
+_DERNIERE_CONNEXION = (
+    "GREATEST(u.last_sign_in_at, "
+    "(SELECT max(s.updated_at) FROM auth.sessions s WHERE s.user_id = u.id))"
+)
+
 _REQUETES = {
     "utilisateurs": f"""
         SELECT u.id::text AS user_id,
                u.email,
                u.created_at::date::text AS inscrit_le,
-               u.last_sign_in_at::date::text AS derniere_connexion,
+               {_DERNIERE_CONNEXION}::date::text AS derniere_connexion,
                CASE WHEN {_CLAUSE_INTERNES} THEN 'client' ELSE 'interne' END AS categorie,
                cp.company_name, cp.sector, cp.funding_stage, cp.target_market, cp.language,
                (SELECT count(*) FROM auth.sessions s WHERE s.user_id = u.id) AS sessions,
@@ -286,6 +296,55 @@ _REQUETES = {
         LEFT JOIN credit_balances b ON b.user_id = u.id
         LEFT JOIN user_subscriptions s ON s.user_id = u.id
         ORDER BY u.created_at
+    """,
+    # Suivi de l'activité : où en est chaque compte, et quel est le dernier
+    # message qu'on lui a envoyé — ce qu'il faut sous les yeux avant de
+    # relancer quelqu'un à la main.
+    "suivi": f"""
+        SELECT u.id::text AS user_id,
+               u.email,
+               CASE WHEN {_CLAUSE_INTERNES} THEN 'client' ELSE 'interne' END AS categorie,
+               cp.company_name,
+               u.created_at::date::text AS inscrit_le,
+               {_DERNIERE_CONNEXION}::date::text AS derniere_connexion,
+               act.le::date::text AS derniere_action,
+               act.type AS type_derniere_action,
+               (now()::date - COALESCE(act.le, u.created_at)::date) AS jours_sans_action,
+               em.campaign AS dernier_email,
+               em.sent_at::date::text AS dernier_email_le,
+               (em.opened_at IS NOT NULL) AS dernier_email_ouvert,
+               EXISTS (SELECT 1 FROM email_suppressions x
+                       WHERE x.email = lower(u.email)) AS desinscrit,
+               COALESCE(b.trial_credits + b.free_credits + b.purchased_credits, 0) AS solde_credits
+        FROM auth.users u
+        LEFT JOIN company_profiles cp ON cp.user_id = u.id
+        LEFT JOIN credit_balances b ON b.user_id = u.id
+        LEFT JOIN LATERAL (
+            SELECT le, type FROM (
+                SELECT max(m.created_at) AS le, 'question' AS type
+                  FROM conversations c
+                  JOIN messages m ON m.conversation_id = c.id AND m.role = 'user'
+                 WHERE c.user_id = u.id
+                UNION ALL
+                SELECT max(r.created_at), 'rapport' FROM reports r
+                 WHERE r.user_id = u.id
+                   AND NOT EXISTS (SELECT 1 FROM legacy_reports l
+                                   WHERE l.imported_for = u.id
+                                     AND l.title = left(r.title, 500))
+                UNION ALL
+                SELECT max(d.created_at), 'document' FROM documents d WHERE d.user_id = u.id
+                UNION ALL
+                SELECT max(w.created_at), 'veille' FROM watches w WHERE w.user_id = u.id
+            ) t
+            WHERE le IS NOT NULL
+            ORDER BY le DESC LIMIT 1
+        ) act ON true
+        LEFT JOIN LATERAL (
+            SELECT e.campaign, e.sent_at, e.opened_at FROM email_sends e
+             WHERE e.email = lower(u.email)
+             ORDER BY e.sent_at DESC LIMIT 1
+        ) em ON true
+        ORDER BY COALESCE(act.le, u.created_at) DESC
     """,
     "rapports": """
         SELECT u.email, r.created_at::text AS produit_le, r.analysis_type AS type,
@@ -351,4 +410,12 @@ def comptes(db) -> list[dict]:
     return [
         {k: (float(v) if hasattr(v, "quantize") else v) for k, v in r.items()}
         for r in db.execute(text(_REQUETES["utilisateurs"])).mappings().all()
+    ]
+
+
+def suivi(db) -> list[dict]:
+    """Une ligne par compte : dernière connexion, dernière action, dernier email."""
+    return [
+        {k: (float(v) if hasattr(v, "quantize") else v) for k, v in r.items()}
+        for r in db.execute(text(_REQUETES["suivi"])).mappings().all()
     ]

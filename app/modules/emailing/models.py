@@ -23,12 +23,16 @@ class EmailSend(Base):
     token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(320), index=True)
     campaign: Mapped[str] = mapped_column(String(64), index=True)
-    provider_id: Mapped[str | None] = mapped_column(String(64))
+    provider_id: Mapped[str | None] = mapped_column(String(64), index=True)
     sent_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc)
     )
     opened_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     open_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Écrits par le webhook Resend (`POST /track/resend`) : les liens sont
+    # réécrits par Resend, qui nous signale chaque clic.
+    clicked_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    click_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class EmailSuppression(Base):

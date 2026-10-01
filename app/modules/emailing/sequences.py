@@ -331,9 +331,161 @@ def corps_credits(langue, ctx):
     )
 
 
-# ------------------------------------------------------------ 6. réactivation
+# ------------------------------------------------ 6. relances d'inactivité
+#
+# Trois relances à 7 jours, 14 jours et 1 mois sans activité (décision Miradie,
+# 30/09). « Activité » = dernier message, dernier rapport, ou à défaut la
+# création du compte : un compte ouvert puis laissé en l'état est inactif lui
+# aussi. Fenêtres d'un jour, bornées des deux côtés comme partout ailleurs.
+#
+# Deux sorties de l'échelle, en plus de la désinscription (vérifiée par le
+# moteur avant chaque envoi) : revenir dans l'app, qui repousse la date de
+# dernière activité hors des fenêtres ; ou avoir reçu une relance manuelle
+# (campagne `relance_*`) dans les 7 derniers jours, pour ne pas doubler un
+# message écrit à la main.
 
-SQL_REACTIVATION = """
+_SQL_INACTIF = """
+WITH activite AS (
+    SELECT u.id, u.email,
+           GREATEST(u.created_at,
+                    (SELECT max(c.last_message_at) FROM conversations c WHERE c.user_id = u.id),
+                    (SELECT max(r.created_at) FROM reports r WHERE r.user_id = u.id)) AS derniere
+    FROM auth.users u
+)
+SELECT a.email, cp.language, cp.company_name,
+       COALESCE(b.trial_credits + b.free_credits + b.purchased_credits, 0) AS solde
+FROM activite a
+LEFT JOIN company_profiles cp ON cp.user_id = a.id
+LEFT JOIN credit_balances b ON b.user_id = a.id
+WHERE a.derniere BETWEEN now() - interval '{fin} days' AND now() - interval '{debut} days'
+  AND NOT EXISTS (SELECT 1 FROM email_sends e
+                  WHERE e.email = lower(a.email)
+                    AND e.campaign LIKE 'relance\\_%'
+                    AND e.sent_at > now() - interval '7 days')
+"""
+
+SQL_INACTIF_J7 = _SQL_INACTIF.format(debut=7, fin=8)
+SQL_REACTIVATION = _SQL_INACTIF.format(debut=14, fin=15)
+SQL_INACTIF_J30 = _SQL_INACTIF.format(debut=30, fin=31)
+
+# Ce qui a changé récemment dans l'app, repris tel quel dans la relance à 7
+# jours. À tenir à jour à chaque livraison visible par les utilisateurs : un
+# email automatique qui annonce des « nouveautés » vieilles de deux mois se
+# voit tout de suite.
+NOUVEAUTES_FR = [
+    "La cartographie des investisseurs se règle maintenant sur ta levée : "
+    "nombre d'investisseurs souhaité, montant recherché et stade, pour une "
+    "liste mieux ciblée.",
+    "Les agents de veille affichent leurs sources, des flux RSS vérifiés, et "
+    "surveillent ton marché et tes concurrents en continu.",
+]
+NOUVEAUTES_EN = [
+    "Investor mapping now adapts to your round: number of investors wanted, "
+    "amount raised and stage, for a better-targeted list.",
+    "Monitoring agents now show their sources, verified RSS feeds, and keep "
+    "an eye on your market and competitors continuously.",
+]
+
+
+def sujet_inactif_j7(langue, ctx):
+    return ("Du nouveau sur Axial depuis ta dernière visite" if _fr(langue)
+            else "What's new on Axial since your last visit")
+
+
+def corps_inactif_j7(langue, ctx):
+    solde = ctx.get("solde", 0)
+    if _fr(langue):
+        return (
+            "Hello,\n\n"
+            "Depuis ton dernier passage sur Axial, plusieurs nouveautés sont "
+            "arrivées :\n\n"
+            + "\n\n".join(NOUVEAUTES_FR) + "\n\n"
+            "Et toujours : une étude de marché ou une étude personnalisée sur la "
+            "question de ton choix, avec les sources citées et un export PDF.\n\n"
+            f"Il te reste {solde} crédits pour les essayer : {APP}\n\n"
+            "Si tu as une question, je suis disponible pour qu'on fasse un point.\n\n"
+            "Miradie"
+        )
+    return (
+        "Hello,\n\n"
+        "Since your last visit to Axial, a few things have landed:\n\n"
+        + "\n\n".join(NOUVEAUTES_EN) + "\n\n"
+        "And as always: a market study or a custom study on the question of "
+        "your choice, with cited sources and a PDF export.\n\n"
+        f"You have {solde} credits left to try them: {APP}\n\n"
+        "If you have any question, I am happy to set up a quick call.\n\n"
+        "Miradie"
+    )
+
+
+def sujet_reactivation(langue, ctx):
+    return ("Deux semaines sans Axial : tout va bien ?" if _fr(langue)
+            else "Two weeks without Axial: everything all right?")
+
+
+def corps_reactivation(langue, ctx):
+    if _fr(langue):
+        return (
+            "Hello,\n\n"
+            "Ça fait deux semaines que tu n'es pas passé sur Axial, et "
+            "j'aimerais comprendre pourquoi.\n\n"
+            "Une réponse qui t'a déçu ? Un besoin qui n'était pas là ? Trop de "
+            "temps pour obtenir le rapport ? Un mot en réponse à ce message "
+            "m'aide beaucoup : Axial est jeune, et ces retours orientent "
+            "directement les prochaines améliorations.\n\n"
+            "Et si la semaine a simplement été chargée, tes crédits "
+            f"t'attendent : {APP}\n\n"
+            "Miradie"
+        )
+    return (
+        "Hello,\n\n"
+        "It has been two weeks since you last used Axial, and I would like to "
+        "understand why.\n\n"
+        "An answer that disappointed you? A need that was not really there? "
+        "Reports taking too long? One line in reply helps a lot: Axial is "
+        "young, and this feedback directly shapes the next improvements.\n\n"
+        f"And if the week was simply busy, your credits are waiting: {APP}\n\n"
+        "Miradie"
+    )
+
+
+def sujet_inactif_j30(langue, ctx):
+    return ("Un mois sans Axial : on en parle ?" if _fr(langue)
+            else "A month without Axial: shall we talk?")
+
+
+def corps_inactif_j30(langue, ctx):
+    solde = ctx.get("solde", 0)
+    if _fr(langue):
+        return (
+            "Hello,\n\n"
+            "Ça fait un mois que tu n'es pas repassé sur Axial. Plutôt qu'un "
+            "email de plus, je te propose un échange de 20 minutes pour avoir "
+            "ton retour et voir si Axial peut t'aider sur ton projet actuel.\n\n"
+            "Je suis disponible le lundi après-midi, le mardi matin ou le "
+            "vendredi matin : réponds-moi avec le jour et l'heure qui te "
+            "conviennent, je t'envoie l'invitation.\n\n"
+            f"Tes {solde} crédits restent disponibles sur {APP}\n\n"
+            "Miradie"
+        )
+    return (
+        "Hello,\n\n"
+        "It has been a month since you last used Axial. Rather than one more "
+        "email, I would like to offer you a 20-minute call to hear your "
+        "feedback and see whether Axial can help with your current project.\n\n"
+        "I am available on Monday afternoons, Tuesday mornings and Friday "
+        "mornings: reply with the day and time that suit you and I will send "
+        "an invite.\n\n"
+        f"Your {solde} credits are still available on {APP}\n\n"
+        "Miradie"
+    )
+
+
+# Version en production jusqu'à la validation des relances 7 / 14 / 30 j :
+# servie tant que RELANCES_INACTIVITE_V2 est à false dans Doppler. À
+# supprimer une fois la v2 allumée et validée.
+
+SQL_REACTIVATION_V1 = """
 SELECT u.email, cp.language, cp.company_name
 FROM auth.users u
 LEFT JOIN company_profiles cp ON cp.user_id = u.id
@@ -344,12 +496,12 @@ WHERE EXISTS (SELECT 1 FROM reports r WHERE r.user_id = u.id)
 """
 
 
-def sujet_reactivation(langue, ctx):
+def sujet_reactivation_v1(langue, ctx):
     return ("Deux semaines sans Axial : tout va bien ?" if _fr(langue)
             else "Two weeks without Axial: everything all right?")
 
 
-def corps_reactivation(langue, ctx):
+def corps_reactivation_v1(langue, ctx):
     if _fr(langue):
         return (
             "Hello,\n\n"
@@ -376,20 +528,40 @@ def corps_reactivation(langue, ctx):
     )
 
 
-SEQUENCES: list[Sequence] = [
-    Sequence("cycle_bienvenue", "À l'ouverture du compte (dans l'heure)",
-             SQL_BIENVENUE, sujet_bienvenue, corps_bienvenue),
-    Sequence("cycle_profil_incomplet", "J+2 sans mémoire d'entreprise remplie",
-             SQL_PROFIL_INCOMPLET, sujet_profil, corps_profil),
-    Sequence("cycle_aucune_question", "J+3 : profil rempli, aucune question posée",
-             SQL_AUCUNE_QUESTION, sujet_question, corps_question),
-    Sequence("cycle_essai_j3", "J-3 avant la fin de l'essai payant",
-             SQL_ESSAI_J3, sujet_essai, corps_essai),
-    Sequence("cycle_credits_bas", "Solde entre 1 et 15 crédits après un rapport",
-             SQL_CREDITS_BAS, sujet_credits, corps_credits),
-    Sequence("cycle_reactivation", "14 jours sans activité après un premier rapport",
-             SQL_REACTIVATION, sujet_reactivation, corps_reactivation),
-]
+def _sequences() -> list[Sequence]:
+    from app.config import get_settings
+
+    socle = [
+        Sequence("cycle_bienvenue", "À l'ouverture du compte (dans l'heure)",
+                 SQL_BIENVENUE, sujet_bienvenue, corps_bienvenue),
+        Sequence("cycle_profil_incomplet", "J+2 sans mémoire d'entreprise remplie",
+                 SQL_PROFIL_INCOMPLET, sujet_profil, corps_profil),
+        Sequence("cycle_aucune_question", "J+3 : profil rempli, aucune question posée",
+                 SQL_AUCUNE_QUESTION, sujet_question, corps_question),
+        Sequence("cycle_essai_j3", "J-3 avant la fin de l'essai payant",
+                 SQL_ESSAI_J3, sujet_essai, corps_essai),
+        Sequence("cycle_credits_bas", "Solde entre 1 et 15 crédits après un rapport",
+                 SQL_CREDITS_BAS, sujet_credits, corps_credits),
+    ]
+    if not get_settings().relances_inactivite_v2:
+        return socle + [
+            Sequence("cycle_reactivation", "14 jours sans activité après un premier rapport",
+                     SQL_REACTIVATION_V1, sujet_reactivation_v1, corps_reactivation_v1),
+        ]
+    return socle + [
+        Sequence("cycle_inactif_j7", "7 jours sans activité",
+                 SQL_INACTIF_J7, sujet_inactif_j7, corps_inactif_j7),
+        # Clé historique conservée : elle porte les envois déjà faits à 14 jours.
+        Sequence("cycle_reactivation", "14 jours sans activité",
+                 SQL_REACTIVATION, sujet_reactivation, corps_reactivation),
+        Sequence("cycle_inactif_j30", "1 mois sans activité",
+                 SQL_INACTIF_J30, sujet_inactif_j30, corps_inactif_j30),
+    ]
+
+
+# Lu au démarrage du processus : basculer RELANCES_INACTIVITE_V2 dans Doppler
+# demande un redémarrage du worker.
+SEQUENCES: list[Sequence] = _sequences()
 
 
 def eligibles(db: Session, seq: Sequence) -> list[Destinataire]:

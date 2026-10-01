@@ -27,3 +27,28 @@ def test_le_domaine_doit_etre_le_domaine_pas_un_suffixe():
 
 def test_les_motifs_sql_derivent_de_la_meme_liste():
     assert INTERNES == tuple(f"%@{d}" for d in DOMAINES_INTERNES)
+
+
+def test_le_suivi_des_utilisateurs_est_reserve_a_l_administration():
+    """L'onglet Suivi expose l'email et l'activité de chaque compte : un
+    utilisateur ordinaire qui appelle la route directement doit être refusé
+    avant toute requête en base."""
+    from fastapi.testclient import TestClient
+
+    from app.db import get_db
+    from app.main import app
+    from app.modules.auth.schemas import AuthUser
+    from app.modules.auth.security import get_current_user
+
+    class BaseInterdite:
+        def execute(self, *a, **k):
+            raise AssertionError("la base ne doit pas être interrogée")
+
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(
+        id="00000000-0000-0000-0000-000000000001", email="client@exemple.fr", is_admin=False)
+    app.dependency_overrides[get_db] = BaseInterdite
+    try:
+        r = TestClient(app).get("/metrics/suivi")
+    finally:
+        app.dependency_overrides.clear()
+    assert r.status_code == 403

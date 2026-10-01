@@ -47,6 +47,13 @@ def comptes(user: AuthUser = Depends(get_current_user), db: Session = Depends(ge
     return service.comptes(db)
 
 
+@router.get("/suivi")
+def suivi(user: AuthUser = Depends(get_current_user), db: Session = Depends(get_db)) -> list[dict]:
+    """Suivi d'activité : dernière connexion, dernière action, dernier email reçu."""
+    _admin_requis(user)
+    return service.suivi(db)
+
+
 @router.post("/comptes/{user_id}/crediter")
 def crediter(user_id: str, payload: CrediterIn, user: AuthUser = Depends(get_current_user),
              db: Session = Depends(get_db)) -> dict:

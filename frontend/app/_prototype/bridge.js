@@ -519,6 +519,8 @@ export async function axDeleteWatch(id) { return axFetch(`/watches/${id}`, { met
 export async function axMetrics(jours = 30) { return axFetch(`/metrics/tableau?jours=${jours}`); }
 // Administration des comptes (écran Pilotage, onglet Comptes).
 export async function axComptes() { return axFetch("/metrics/comptes"); }
+// Suivi d'activité (écran Pilotage, onglet Suivi) : connexion, action, dernier email.
+export async function axSuivi() { return axFetch("/metrics/suivi"); }
 export async function axCrediterCompte(userId, credits, motif) {
   return axFetch(`/metrics/comptes/${userId}/crediter`, { method: "POST", body: { credits, motif } });
 }

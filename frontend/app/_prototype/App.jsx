@@ -11,7 +11,7 @@ import {
   etatDepuisRapport, etatDepuisStockage, etatSupprime, versStockage,
   libelleEtape, libelleRaison,
 } from "./rapports_etat";
-import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchFeeds, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axUpdateWatch, axDeleteWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axImporterDepuisDrive, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument, axKbLister, axKbAjouterFichier, axKbAjouterUrl, axKbSupprimer } from "./bridge";
+import { axRegister, axLogin, axForgotPassword, axResetPassword, axSetLanguage, axMe, axSaveProfile, axGetProfile, axBalance, axPlans, axCheckout, axSubscribe, axPrefill, axSubscription, axCreditHistory, axInvoices, axPortal, axGetNotifPrefs, axSetNotifPrefs, axStreamChatIn, axCreateConversation, axListConversations, axMessagesPage, axCoutConversation, axProjets, axProjetParDefaut, axCreerProjet, axRenommerProjet, axArchiverProjet, axSupprimerProjet, axRenommerConversation, axSupprimerConversation, axEpinglerConversation, axArchiverConversation, axDeplacerConversation, axRechercherConversations, axRegenerer, axEditerMessage, axClearToken, nouvelleCleIdempotence, axWatchSkills, axListWatches, axCreateWatch, axWatchRuns, axWatchFeeds, axWatchActivity, axRunWatch, axPauseWatch, axResumeWatch, axUpdateWatch, axDeleteWatch, axListFeeds, axFeedsCatalogue, axPremierRapport, axExporterConversation, axMetrics, axComptes, axSuivi, axCrediterCompte, axProlongerEssai, axRenduViz, axAddFeed, axDeleteFeed, axIntegrations, axConnectIntegration, axDisconnectIntegration, axDeliverReport, axImporterDepuisDrive, axLancerRapport, axRapports, axRapport, axAnnulerRapport, axRelancerRapport, axSignalerRapport, axVizSvg, axExporterRapport, axRenommerRapport, axEpinglerRapport, axArchiverRapport, axDeplacerRapport, axSupprimerRapport, axRechercherRapports, axPartagerRapport, axRevoquerPartage, axListDocuments, axUploadDocument, axDeleteDocument, axReindexerDocument, axKbLister, axKbAjouterFichier, axKbAjouterUrl, axKbSupprimer } from "./bridge";
 import { parserMarkdown } from "./markdown";
 import { creerVeilleVersion, lireVersionServie } from "./version";
 import { chargerGooglePicker, ouvrirPickerDrive } from "./drive";
@@ -4509,10 +4509,81 @@ function ComptesAdmin() {
   );
 }
 
+/* Onglet Suivi du Pilotage : où en est chaque compte avant de le relancer à la
+   main — dernière connexion, dernière action réelle, dernier email reçu. Trié
+   du plus récemment actif au plus ancien ; les comptes internes sont masqués
+   par défaut pour que la liste corresponde aux vrais utilisateurs. */
+function SuiviAdmin() {
+  const [lignes, setLignes] = React.useState(null);
+  const [err, setErr] = React.useState('');
+  const [internes, setInternes] = React.useState(false);
+  React.useEffect(() => {
+    axSuivi().then(setLignes).catch((e) => setErr((e && e.message) || 'Erreur'));
+  }, []);
+
+  const typesAction = { question: 'Question', rapport: 'Rapport', document: 'Document', veille: 'Veille' };
+  // Les notifications « rapport prêt » portent un suffixe technique par
+  // rapport : on n'en garde que le nom lisible.
+  const nomEmail = (c) => (!c ? '' : c.startsWith('rapport_pret') ? 'rapport_pret' : c);
+  // Même échelle que les relances automatiques d'inactivité : 7, 14, 30 jours.
+  const couleurInactivite = (j) => (j == null ? undefined
+    : j < 7 ? 'var(--success, #30a46c)' : j < 14 ? 'var(--warning, #f5a524)' : 'var(--error, #e5484d)');
+
+  const visibles = (lignes || []).filter((l) => internes || l.categorie === 'client');
+  const th = { textAlign: 'left', padding: '8px 10px', fontSize: 11, textTransform: 'uppercase',
+               letterSpacing: '.05em', color: 'var(--fg-3)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' };
+  const td = { padding: '8px 10px', fontSize: 12.5, borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' };
+
+  return (
+    <section>
+      {err && <p style={{ color: 'var(--error, #e5484d)', fontSize: 13 }}>{err}</p>}
+      {!lignes && !err && <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>…</p>}
+      {lignes && (
+        <>
+          <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5, color: 'var(--fg-3)', marginBottom: 10 }}>
+            <input type="checkbox" checked={internes} onChange={(e) => setInternes(e.target.checked)} />
+            {libelle('Afficher les comptes internes et de test')}
+          </label>
+          <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+            <table style={{ borderCollapse: 'collapse', width: '100%', background: 'var(--surface-2)' }}>
+              <thead><tr>
+                {['Email', 'Entreprise', 'Inscrit', 'Dern. connexion', 'Dern. action', 'Sans action',
+                  'Dernier email', 'Envoyé le', 'Ouvert', 'Crédits'].map((h) => <th key={h} style={th}>{libelle(h)}</th>)}
+              </tr></thead>
+              <tbody>
+                {visibles.map((l) => (
+                  <tr key={l.user_id} style={{ opacity: l.categorie === 'interne' ? .6 : 1 }}>
+                    <td style={td}>{l.email}{l.desinscrit && <span style={{ color: 'var(--fg-3)', marginLeft: 6 }}>({libelle('désinscrit')})</span>}</td>
+                    <td style={td}>{l.company_name || ''}</td>
+                    <td style={td}>{l.inscrit_le || ''}</td>
+                    <td style={td}>{l.derniere_connexion || ''}</td>
+                    <td style={td}>{l.derniere_action
+                      ? `${l.derniere_action} · ${libelle(typesAction[l.type_derniere_action] || l.type_derniere_action)}`
+                      : libelle('aucune')}</td>
+                    <td style={{ ...td, fontFamily: 'var(--font-mono)', color: couleurInactivite(l.jours_sans_action) }}>
+                      {l.jours_sans_action == null ? '' : `${l.jours_sans_action} j`}</td>
+                    <td style={{ ...td, fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{nomEmail(l.dernier_email)}</td>
+                    <td style={td}>{l.dernier_email_le || ''}</td>
+                    <td style={td}>{l.dernier_email ? (l.dernier_email_ouvert ? '✓' : '—') : ''}</td>
+                    <td style={{ ...td, fontFamily: 'var(--font-mono)' }}>{l.solde_credits}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      <p style={{ fontSize: 12, color: 'var(--fg-3)', marginTop: 10, lineHeight: 1.5 }}>
+        {libelle("Dernière action : question, rapport, document ou veille créée (les rapports restaurés de l'ancienne plateforme ne comptent pas). Dernière connexion : dernière visite avec une session active, pas seulement la dernière saisie du mot de passe.")}
+      </p>
+    </section>
+  );
+}
+
 function PilotageSurface() {
   const t = window.useT();
   const [jours, setJours] = React.useState(30);
-  const [vue, setVue] = React.useState('chiffres'); // chiffres | comptes
+  const [vue, setVue] = React.useState('chiffres'); // chiffres | comptes | suivi
   const [d, setD] = React.useState(null);
   const [err, setErr] = React.useState('');
   React.useEffect(() => {
@@ -4607,7 +4678,9 @@ function PilotageSurface() {
           <button className={'btn btn-sm ' + (vue === 'chiffres' ? 'btn-primary' : 'btn-secondary')}
             onClick={() => setVue('chiffres')}>{libelle('Chiffres')}</button>
           <button className={'btn btn-sm ' + (vue === 'comptes' ? 'btn-primary' : 'btn-secondary')}
-            onClick={() => setVue('comptes')} style={{ marginRight: 12 }}>{libelle('Comptes')}</button>
+            onClick={() => setVue('comptes')}>{libelle('Comptes')}</button>
+          <button className={'btn btn-sm ' + (vue === 'suivi' ? 'btn-primary' : 'btn-secondary')}
+            onClick={() => setVue('suivi')} style={{ marginRight: 12 }}>{libelle('Suivi')}</button>
           {vue === 'chiffres' && [7, 30, 90].map((n) => (
             <button key={n} className={'btn btn-sm ' + (jours === n ? 'btn-primary' : 'btn-secondary')}
               onClick={() => setJours(n)}>{n} j</button>
@@ -4616,6 +4689,7 @@ function PilotageSurface() {
       </div>
 
       {vue === 'comptes' && <ComptesAdmin />}
+      {vue === 'suivi' && <SuiviAdmin />}
       {err && <p style={{ color: 'var(--error, #e5484d)', fontSize: 13 }}>{err}</p>}
       {vue === 'chiffres' && !d && !err && <p style={{ color: 'var(--fg-3)', fontSize: 13 }}>…</p>}
 

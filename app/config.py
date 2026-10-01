@@ -215,6 +215,14 @@ class Settings(BaseSettings):
     # --- Email (worker) ---------------------------------------------------
     # Resend HTTP API (preferred) — one key, no SMTP config needed.
     resend_api_key: str = ""
+    # Secret de signature du webhook Resend (« whsec_… », affiché à la création
+    # du webhook). Vide = le webhook refuse tout : un événement non signé ne
+    # doit jamais écrire en base.
+    resend_webhook_secret: str = ""
+    # Relances d'inactivité 7 / 14 / 30 jours (décision du 30/09). À false, le
+    # worker garde l'ancienne relance unique à 14 jours : on n'allume la v2
+    # qu'après validation des textes par Miradie.
+    relances_inactivite_v2: bool = False
     mail_from: str = "onboarding@resend.dev"  # Resend test sender; switch to a verified domain in prod
     # SMTP fallback (used only if RESEND_API_KEY is empty).
     smtp_host: str = ""
