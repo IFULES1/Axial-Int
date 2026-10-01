@@ -107,6 +107,21 @@ def test_rebond_temporaire_ignore_rebond_definitif_supprime(env):
         assert db.get(EmailSuppression, "a@exemple.fr").reason == "rebond définitif"
 
 
+def test_secret_sans_prefixe_ni_remplissage_accepte(env, monkeypatch):
+    """Le secret saisi dans Doppler le 01/10 n'avait ni « whsec_ » ni le « = »
+    final : la signature doit quand même être vérifiée, pas refusée."""
+    from app.config import get_settings
+
+    brut = base64.b64encode(b"x" * 32).decode()          # 44 caractères, finit par « = »
+    monkeypatch.setattr(get_settings(), "resend_webhook_secret", brut.rstrip("="))
+    client, engine = env
+    corps = json.dumps({"type": "email.clicked", "data": {"email_id": "re_1"}}).encode()
+    r = client.post("/track/resend", content=corps, headers=_signer(corps, secret="whsec_" + brut))
+    assert r.status_code == 200
+    with Session(engine) as db:
+        assert db.query(EmailSend).one().click_count == 1
+
+
 def test_evenement_inconnu_acquitte(env):
     client, _ = env
     r = _poster(client, {"type": "email.delivery_delayed", "data": {"email_id": "re_inconnu"}})

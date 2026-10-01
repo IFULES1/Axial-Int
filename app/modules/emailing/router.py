@@ -64,7 +64,11 @@ def _signature_valide(secret: str, msg_id: str, horodatage: str, corps: bytes,
     try:
         if abs(time.time() - int(horodatage)) > 300:
             return False
-        cle = base64.b64decode(secret.split("_", 1)[1] if secret.startswith("whsec_") else secret)
+        # Le secret se copie souvent sans le préfixe « whsec_ » ni le « = »
+        # final du base64 : on accepte les deux formes plutôt que de refuser
+        # en silence tous les événements (cas réel du 01/10).
+        brut = secret.strip().removeprefix("whsec_")
+        cle = base64.b64decode(brut + "=" * (-len(brut) % 4))
     except (ValueError, IndexError):
         return False
     attendu = base64.b64encode(hmac.new(

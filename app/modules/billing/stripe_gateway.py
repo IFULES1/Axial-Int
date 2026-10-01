@@ -153,6 +153,33 @@ def parse_webhook(payload: bytes, signature: str) -> dict | None:
                 "kind": "subscription", "subscription_id": sub_id,
                 "customer_id": obj.get("customer")}
 
+    # Changements d'état : résiliation, fin d'essai, impayé. Sans eux, une
+    # résiliation depuis le portail ne remontait jamais (Clover, 29/09) et
+    # l'app gardait l'abonnement « en essai ». On ne lit pas l'état dans
+    # l'événement : l'appelant le relit chez Stripe, ce qui rend l'ordre
+    # d'arrivée des événements indifférent.
+    if etype in ("customer.subscription.updated", "customer.subscription.deleted"):
+        meta = obj.get("metadata") or {}
+        if not meta.get("user_id") or not obj.get("id"):
+            return None
+        return {"kind": "subscription_state", "user_id": meta["user_id"],
+                "subscription_id": obj["id"]}
+
+    if etype == "invoice.payment_failed":
+        sub_id = obj.get("subscription")
+        if not sub_id:
+            return None
+        try:
+            meta = (stripe.Subscription.retrieve(sub_id).get("metadata") or {})
+        except Exception:
+            logger.warning("invoice.payment_failed: subscription %s introuvable", sub_id,
+                           exc_info=True)
+            return None
+        if not meta.get("user_id"):
+            return None
+        return {"kind": "subscription_state", "user_id": meta["user_id"],
+                "subscription_id": sub_id}
+
     return None
 
 

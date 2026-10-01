@@ -100,6 +100,14 @@ async def webhook(request: Request, db: Session = Depends(get_db)) -> dict:
         return {"ignored": True}
 
     kind = grant.get("kind", "pack")
+    if kind == "subscription_state":
+        # Résiliation, fin d'essai, impayé : on recopie l'état réel de Stripe.
+        state = stripe_gateway.fetch_subscription_state(grant["subscription_id"])
+        if state:
+            service.upsert_subscription(db, grant["user_id"], **state)
+        return {"subscription": state["status"] if state else "inconnu",
+                "user_id": grant["user_id"]}
+
     if kind == "subscription_started":
         # Carte posée (essai démarré) : on mémorise les ids + l'état Stripe.
         state = (stripe_gateway.fetch_subscription_state(grant["subscription_id"])
